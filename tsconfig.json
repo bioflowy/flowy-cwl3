@@ -5,7 +5,9 @@
     "module": "Node16",
     "moduleResolution": "node16",
     "noEmit": true,
+    "exactOptionalPropertyTypes": false,
     /* Lint Options */
+    "strict": false,
     "noUnusedLocals": false, // Delegate to @typescript-eslint/no-unused-vars in eslint
     "noUnusedParameters": false // Delegate to @typescript-eslint/no-unused-vars in eslint
   }
