@@ -238,7 +238,7 @@ export abstract class JobBase {
   async _execute(
     runtime: string[],
     env: { [id: string]: string },
-    runtimeContext: any,
+    runtimeContext: RuntimeContext,
     monitor_function: ((popen: any) => void) | null = null,
   ) {
     const scr = getRequirement(this.tool, ShellCommandRequirement)[0];
@@ -248,14 +248,14 @@ export abstract class JobBase {
     // if (scr !== null) {
     //     shouldquote = neverquote;
     // }
-
-    if (this.mpi_procs) {
-      const menv = runtimeContext.mpi_config;
-      const mpi_runtime = [menv.runner, menv.nproc_flag, this.mpi_procs.toString(), ...menv.extra_flags];
-      runtime = [...mpi_runtime, ...runtime];
-      menv.pass_through_env_vars(env);
-      menv.set_env_vars(env);
-    }
+    // TODO mpi not supported
+    // if (this.mpi_procs) {
+    //   const menv = runtimeContext.mpi_config;
+    //   const mpi_runtime = [menv.runner, menv.nproc_flag, this.mpi_procs.toString(), ...menv.extra_flags];
+    //   runtime = [...mpi_runtime, ...runtime];
+    //   menv.pass_through_env_vars(env);
+    //   menv.set_env_vars(env);
+    // }
 
     _logger.info(
       '[job %s] %s$ %s%s%s%s',
@@ -276,7 +276,8 @@ export abstract class JobBase {
         runtimeContext.prov_obj !== undefined &&
         (job_order instanceof Array || job_order instanceof Object)
       ) {
-        runtimeContext.prov_obj.used_artefacts(job_order, runtimeContext.process_run_id, this.name.toString());
+        // TODO
+        // runtimeContext.prov_obj.used_artefacts(job_order, runtimeContext.process_run_id, this.name.toString());
       } else {
         _logger.warn(
           `research_obj set but one of process_run_id ` +
@@ -332,7 +333,7 @@ export abstract class JobBase {
         stderr_path,
         env,
         this.outdir,
-        () => runtimeContext.create_outdir(),
+        () => runtimeContext.createOutdir(),
         job_script_contents,
         this.timelimit,
         this.name,
@@ -390,7 +391,7 @@ export abstract class JobBase {
     //     _logger.exception("Exception while running job");
     //     processStatus = "permanentFail";
     // }
-    if (runtimeContext.research_obj !== null && this.prov_obj !== null && runtimeContext.process_run_id !== null) {
+    if (runtimeContext.research_obj !== undefined && this.prov_obj !== undefined && runtimeContext.process_run_id !== undefined) {
       // creating entities for the outputs produced by each step (in the provenance document)
       this.prov_obj.record_process_end(String(this.name), runtimeContext.process_run_id, outputs, new Date());
     }
@@ -557,7 +558,7 @@ const CONTROL_CODE_RE = '\\x1b\\[[0-9;]*[a-zA-Z]';
 export abstract class ContainerCommandLineJob extends JobBase {
   static readonly CONTAINER_TMPDIR: string = '/tmp';
 
-  abstract get_from_requirements(r: any, pull_image: boolean, force_pull: boolean, tmp_outdir_prefix: string): any;
+  abstract get_from_requirements(r: any, pull_image: boolean, force_pull: boolean, tmp_outdir_prefix: string): Promise<string | undefined>;
 
   abstract create_runtime(env: { [key: string]: string }, runtime_context: any): [string[], any];
 
@@ -649,7 +650,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
       }
     }
   }
-  run(runtimeContext: any, tmpdir_lock?: any): void {
+  async run(runtimeContext: any, tmpdir_lock?: any): Promise<void> {
     const debug = runtimeContext.debug;
     if (tmpdir_lock) {
       tmpdir_lock(() => {
@@ -665,7 +666,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
 
     const [docker_req, docker_is_req] = getRequirement(this.tool, DockerRequirement);
     this.prov_obj = runtimeContext.prov_obj;
-    let img_id: any = null;
+    let img_id: any = undefined;
     const user_space_docker_cmd = runtimeContext.user_space_docker_cmd;
     if (docker_req !== undefined && user_space_docker_cmd) {
       if (docker_req.dockerImageId) {
@@ -689,17 +690,16 @@ export abstract class ContainerCommandLineJob extends JobBase {
       }
     } else {
       try {
-        if (docker_req !== null && runtimeContext.use_container) {
-          img_id = String(
+        if (docker_req !== undefined && runtimeContext.use_container) {
+          img_id = await
             this.get_from_requirements(
               docker_req,
               runtimeContext.pull_image,
               runtimeContext.force_docker_pull,
               runtimeContext.tmp_outdir_prefix,
-            ),
-          );
+            )
         }
-        if (img_id === null) {
+        if (img_id === undefined) {
           if (this.builder.find_default_container) {
             const default_container = this.builder.find_default_container();
             if (default_container) {
@@ -707,10 +707,10 @@ export abstract class ContainerCommandLineJob extends JobBase {
             }
           }
         }
-        if (docker_req !== null && img_id === null && runtimeContext.use_container) {
+        if (docker_req !== undefined && img_id === undefined && runtimeContext.use_container) {
           throw new Error('Docker image not available');
         }
-        if (this.prov_obj !== null && img_id !== null && runtimeContext.process_run_id !== null) {
+        if (this.prov_obj !== undefined && img_id !== undefined && runtimeContext.process_run_id !== undefined) {
           const container_agent = this.prov_obj.document.agent(uuidv4, {
             'prov:type': 'SoftwareAgent',
             'cwlprov:image': img_id,
@@ -719,6 +719,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
           this.prov_obj.document.wasAssociatedWith(runtimeContext.process_run_id, container_agent);
         }
       } catch (err: any) {
+        console.log(err.stack)
         const container = runtimeContext.singularity ? 'Singularity' : 'Docker';
         _logger.debug(`${container} error`, err);
         if (docker_is_req) {
@@ -750,7 +751,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
     } else if (runtimeContext.user_space_docker_cmd) {
       monitor_function = this.process_monitor;
     }
-    this._execute(runtime, env as { [key: string]: string }, runtimeContext, monitor_function as any);
+    await this._execute(runtime, env as { [key: string]: string }, runtimeContext, monitor_function as any);
   }
   docker_monitor(
     cidfile: string,

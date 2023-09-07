@@ -27,6 +27,7 @@ import {
   visit_class,
   getRequirement,
 } from './utils.js';
+import type { Tool } from './types.js';
 class PathCheckingMode {
   static STRICT = new RegExp('^[w.+,-:@]^\u2600-\u26FFU0001f600-U0001f64f]+$');
   static RELAXED = new RegExp('.*');
@@ -270,7 +271,13 @@ export class CommandLineTool extends Process {
     this.path_check_mode = loadingContext.relax_path_checks ? PathCheckingMode.RELAXED : PathCheckingMode.STRICT;
   }
 
-  make_job_runner(runtimeContext: any): any {
+  make_job_runner(runtimeContext: RuntimeContext): (
+    builder: Builder,
+    joborder: CWLObjectType,
+    make_path_mapper: (param1: CWLObjectType[], param2: string, param3: RuntimeContext, param4: boolean) => PathMapper,
+    tool: Tool,
+    name: string,
+  ) => JobBase {
     // placeholder types
     let [dockerReq, dockerRequired] = getRequirement(this.tool, cwlTsAuto.DockerRequirement);
     if (!dockerReq && runtimeContext.use_container) {
@@ -285,12 +292,34 @@ export class CommandLineTool extends Process {
         }
       }
     }
-
+    if(dockerReq && runtimeContext.use_container){
+      // if(runtimeContext.singularity){
+      //     return SingularityCommandLineJob
+      // }else if(runtimeContext.user_space_docker_cmd){
+      //     return UDockerCommandLineJob
+      // }
+      if(runtimeContext.podman){
+          return (builder,
+            joborder,
+            make_path_mapper,
+            tool,
+            name) => new PodmanCommandLineJob(builder,joborder,make_path_mapper,tool,name);
+      }
+      return (builder,
+        joborder,
+        make_path_mapper,
+        tool,
+        name) => new DockerCommandLineJob(builder,joborder,make_path_mapper,tool,name);
+    }
     if (dockerRequired)
       throw new UnsupportedRequirement(
         '--no-container, but this CommandLineTool has ' + "DockerRequirement under 'requirements'.",
       );
-    return CommandLineJob;
+    return (builder,
+      joborder,
+      make_path_mapper,
+      tool,
+      name) => new CommandLineJob(builder,joborder,make_path_mapper,tool,name);
   }
 
   updatePathmap(outdir: string, pathmap: PathMapper, fn: CWLObjectType): void {
@@ -953,13 +982,12 @@ export class CommandLineTool extends Process {
     const builder = this._init_job(job_order, runtimeContext);
 
     const reffiles = JSON.parse(JSON.stringify(builder.files));
-
-    const j = new (this.make_job_runner(runtimeContext))(
+    const mjr = this.make_job_runner(runtimeContext)
+    const j = mjr(
       builder,
       builder.job,
       make_path_mapper,
-      this.requirements,
-      this.hints,
+      this,
       jobname,
     );
 

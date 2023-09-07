@@ -1,7 +1,8 @@
+import path from 'node:path';
 import { PathMapper } from './pathmapper.js';
 import { Process } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import { DEFAULT_TMP_PREFIX, type CWLObjectType, mkdtemp, type CommentedMap } from './utils.js';
+import { DEFAULT_TMP_PREFIX, type CWLObjectType, mkdtemp, type CommentedMap, splitPath } from './utils.js';
 
 class ContextBase {
   constructor(kwargs: { [key: string]: any } | null = null) {
@@ -135,11 +136,11 @@ export class RuntimeContext extends ContextBase {
   cidfile_prefix?: string = undefined;
 
   workflow_eval_lock?: any = undefined;
-  research_obj?: any = undefined;
+  research_obj: Object | undefined = undefined;
   orcid = '';
   cwl_full_name = '';
   process_run_id?: string = undefined;
-  prov_obj?: any = undefined;
+  prov_obj: Object | undefined= undefined;
   default_stdout?: any = undefined;
   default_stderr?: any = undefined;
 
@@ -168,17 +169,17 @@ export class RuntimeContext extends ContextBase {
     if (this.stagedir) {
       return this.stagedir;
     }
-    const [tmpDir, tmpPrefix] = this.tmpdir_prefix.split('/');
+    const [tmpDir, tmpPrefix] = splitPath(this.tmpdir_prefix)
     return mkdtemp(tmpPrefix, tmpDir);
   }
 
   createTmpdir(): string {
-    const [tmpDir, tmpPrefix] = this.tmpdir_prefix.split('/');
+    const [tmpDir, tmpPrefix] = splitPath(this.tmpdir_prefix)
     return mkdtemp(tmpPrefix, tmpDir);
   }
 
   createOutdir(): string {
-    const [outDir, outPrefix] = this.tmp_outdir_prefix.split('/');
+    const [outDir, outPrefix] = splitPath(this.tmp_outdir_prefix)
     return mkdtemp(outPrefix, outDir);
   }
 

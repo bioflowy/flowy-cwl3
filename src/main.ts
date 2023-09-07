@@ -156,7 +156,7 @@ export async function main(): Promise<number> {
   runtimeContext.basedir = input_basedir;
   const process_executor = new SingleJobExecutor();
   const [out, status] = await process_executor.execute(tool, initialized_job_order, runtimeContext);
-  console.log(out);
+  console.log(JSON.stringify(out));
   console.log(status);
   return 0;
 }

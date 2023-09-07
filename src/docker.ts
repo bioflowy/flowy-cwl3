@@ -15,7 +15,9 @@ import {
   createTmpDir,
   ensureWritable,
   which,
+  getRequirement,
 } from './utils.js';
+import { DockerRequirement, ResourceRequirement } from 'cwl-ts-auto';
 
 const _IMAGES: Set<string> = new Set();
 
@@ -34,24 +36,24 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
   }
 
   async get_image(
-    docker_requirement: { [key: string]: string },
+    docker_requirement: DockerRequirement,
     pull_image: boolean,
     force_pull: boolean,
     tmp_outdir_prefix: string,
   ): Promise<boolean> {
     let found = false;
 
-    if (!('dockerImageId' in docker_requirement) && 'dockerPull' in docker_requirement)
-      docker_requirement['dockerImageId'] = docker_requirement['dockerPull'];
+    if (!docker_requirement.dockerImageId && docker_requirement.dockerPull)
+    docker_requirement.dockerImageId = docker_requirement.dockerPull;
 
     // synchronized (_IMAGES_LOCK, () => {
-    if (docker_requirement['dockerImageId'] in _IMAGES) return true;
+    if (docker_requirement.dockerImageId in _IMAGES) return true;
     // });
     const images = await checkOutput([this.docker_exec, 'images', '--no-trunc', '--all']);
     for (const line of images.split('\n')) {
       try {
         const match = line.match('^([^ ]+)\\s+([^ ]+)\\s+([^ ]+)');
-        const split = docker_requirement['dockerImageId'].split(':');
+        const split = docker_requirement.dockerImageId.split(':');
         if (split.length == 1) split.push('latest');
         else if (split.length == 2) {
           if (!split[1].match('[\\w][\\w.-]{0,127}')) split[0] = `${split[0]}:${split[1]}`;
@@ -66,7 +68,7 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
 
         if (
           match &&
-          ((split[0] == match[1] && split[1] == match[2]) || docker_requirement['dockerImageId'] == match[3])
+          ((split[0] == match[1] && split[1] == match[2]) || docker_requirement.dockerImageId == match[3])
         ) {
           found = true;
           break;
@@ -98,18 +100,18 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
     return found;
   }
   async get_from_requirements(
-    r: CWLObjectType,
+    r: DockerRequirement,
     pull_image: boolean,
     force_pull: boolean,
     tmp_outdir_prefix: string,
-  ): Promise<string | null> {
+  ): Promise<string | undefined> {
     const rslt = await which(this.docker_exec);
-    if (rslt) {
+    if (!rslt) {
       throw new WorkflowException(`${this.docker_exec} executable is not available`);
     }
-    const r2 = await this.get_image(r as { [key: string]: string }, pull_image, force_pull, tmp_outdir_prefix);
+    const r2 = await this.get_image(r, pull_image, force_pull, tmp_outdir_prefix);
     if (r) {
-      return r['dockerImageId'] as string | null;
+      return r['dockerImageId'] as string;
     }
     throw new WorkflowException(`Docker image ${r['dockerImageId']} not found`);
   }
@@ -197,7 +199,8 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
     };
   }
   create_runtime(env: MutableMapping<string>, runtimeContext: RuntimeContext): [string[], string | null] {
-    const any_path_okay = this.builder.get_requirement('DockerRequirement')[1] || false;
+    const [dockerReq] = getRequirement(this.tool, DockerRequirement);
+    const any_path_okay = dockerReq !== undefined
     const user_space_docker_cmd = runtimeContext.user_space_docker_cmd;
     let runtime: string[] = [];
 
@@ -315,13 +318,13 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
       runtime.push(`--env=${key}=${value}`);
     }
 
-    const [res_req, _] = this.builder.get_requirement('ResourceRequirement');
+    const [res_req, _] = getRequirement(this.tool,ResourceRequirement);
 
     if (runtimeContext.strict_memory_limit && !user_space_docker_cmd) {
       const ram = this.builder.resources['ram'];
       runtime.push(`--memory=${ram}m`);
-    } else if (!user_space_docker_cmd && res_req && ('ramMin' in res_req || 'ramMax' in res_req)) {
-      _logger.warning(
+    } else if (!user_space_docker_cmd && res_req && (res_req.ramMin || res_req.ramMax)) {
+      _logger.warn(
         `[job ${this.name}] Skipping Docker software container '--memory' limit despite presence of ResourceRequirement with ramMin and/or ramMax setting. Consider running with --strict-memory-limit for increased portability assurance.`,
       );
     }
@@ -329,8 +332,8 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
     if (runtimeContext.strict_cpu_limit && !user_space_docker_cmd) {
       const cpus = Math.ceil(this.builder.resources['cores']);
       runtime.push(`--cpus=${cpus}`);
-    } else if (!user_space_docker_cmd && res_req && ('coresMin' in res_req || 'coresMax' in res_req)) {
-      _logger.warning(
+    } else if (!user_space_docker_cmd && res_req && (res_req.coresMin || res_req.coresMax)) {
+      _logger.warn(
         `[job ${this.name}] Skipping Docker software container '--cpus' limit despite presence of ResourceRequirement with coresMin and/or coresMax setting. Consider running with --strict-cpu-limit for increased portability assurance.`,
       );
     }

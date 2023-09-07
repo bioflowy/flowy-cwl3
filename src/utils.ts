@@ -154,7 +154,17 @@ function fileURLToPath(inputUrl: string): string {
   }
   return decodeURIComponent(u.pathname);
 }
-export function mkdtemp(prefix = '', dir: string = os.tmpdir()): string {
+export function splitPath(filePath:string):[string,string]{
+    const idx = filePath.lastIndexOf('/')
+    if(idx===-1){
+      return ['',filePath];
+    }
+    return [filePath.substring(0,idx),filePath.substring(idx+1)]
+}
+export function mkdtemp(prefix = '', dir?: string): string {
+  if(!dir){
+    dir = DEFAULT_TMP_PREFIX
+  }
   const uniqueName = prefix + uuidv4();
   const tempDirPath = path.join(dir, uniqueName);
 
@@ -584,9 +594,10 @@ export function getRequirement<T>(tool: Tool, cls: new (any) => T): [T | undefin
     }
   }
   if (tool.hints) {
-    const req = tool.hints.find((item) => item instanceof cls);
+    const req = tool.hints.find((item) => item['class'] === cls.name);
+    
     if (req) {
-      return [req as T, false];
+      return [new cls(req) , false];
     }
   }
   return [undefined, false];
