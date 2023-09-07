@@ -6,7 +6,7 @@ export function abspath(src: string, basedir: string): string {
   let abpath: string;
   if (src.startsWith('file://')) {
     abpath = url.fileURLToPath(src);
-  } else if (new URL(src).protocol.slice(0, -1) in ['http', 'https']) {
+  } else if (src.startsWith("http://") || src.startsWith("https://")) {
     return src;
   } else {
     if (basedir.startsWith('file://')) {
@@ -25,7 +25,8 @@ export class StdFsAccess {
   }
 
   private _abs(p: string): string {
-    return abspath(this.basedir, p);
+    const p2 =abspath(p,this.basedir)
+    return p2;
   }
 
   glob(pattern: string): string[] {
@@ -34,10 +35,12 @@ export class StdFsAccess {
     return matches.map((match: any) => `file://${match}`); // Placeholder implementation
   }
 
-  async open(fn: string, mode: string) {
+  async open(fn: string, mode: string) :Promise<fs.promises.FileHandle>{
     return fs.promises.open(this._abs(fn), mode);
   }
-
+  async read(fn: string):Promise<string> {
+    return fs.promises.readFile(this._abs(fn),{encoding:"utf-8"})
+  }
   exists(fn: string): boolean {
     return fs.existsSync(this._abs(fn));
   }

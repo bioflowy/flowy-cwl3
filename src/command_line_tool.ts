@@ -1037,21 +1037,22 @@ export class CommandLineTool extends Process {
     this.setup_command_line(builder, j, debug);
 
     j.pathmapper = builder.pathmapper;
-    j.collect_outputs = (val) =>
+    j.collect_outputs = async (outdir,rcode) =>
       this.collect_output_ports(
         this.tool['outputs'],
         builder,
+        outdir,
+        rcode,
         getDefault(runtimeContext.compute_checksum, true),
         jobname,
         readers,
-        val,
       );
     j.output_callback = output_callbacks;
 
     this.handle_mpi_require(runtimeContext, builder, j, debug);
     yield j;
   }
-  collect_output_ports(
+  async collect_output_ports(
     ports: {} | Set<CWLObjectType>,
     builder: Builder,
     outdir: string,
@@ -1059,15 +1060,15 @@ export class CommandLineTool extends Process {
     compute_checksum = true,
     jobname = '',
     readers: MutableMapping<CWLObjectType> | null = null,
-  ): OutputPortsType {
+  ): Promise<OutputPortsType> {
     let ret: OutputPortsType = {};
     const debug = _logger.isDebugEnabled();
     const cwl_version = 'v1.2';
     try {
-      const fs_access = builder.make_fs_access(outdir);
+      const fs_access = new (builder.make_fs_access)(outdir);
       const custom_output = fs_access.join(outdir, 'cwl.output.json');
       if (fs_access.exists(custom_output)) {
-        const f = fs_access.open(custom_output, 'r');
+        const f = await fs_access.read(custom_output);
         ret = JSON.parse(f);
         if (debug) {
           _logger.debug(`Raw output from ${custom_output}: ${JSON.stringify(ret, null, 4)}`);

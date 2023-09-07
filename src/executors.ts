@@ -146,8 +146,8 @@ class JobExecutor {
           new Date(),
         );
         process.parent_wf.finalize_prov_profile(null);
-        return [this.final_output[0], this.final_status[0]];
       }
+      return [this.final_output[0], this.final_status[0]];
     }
     return [null, 'permanentFail'];
   }

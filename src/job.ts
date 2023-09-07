@@ -114,7 +114,7 @@ export async function _job_popen(
   });
 }
 
-type CollectOutputsType = ((str: string, int: number) => CWLObjectType) | any; // Assuming functools.partial as any
+type CollectOutputsType = (str: string, int: number) => Promise<CWLObjectType>; // Assuming functools.partial as any
 export abstract class JobBase {
   builder: Builder;
   base_path_logs: string;
@@ -284,7 +284,7 @@ export abstract class JobBase {
         );
       }
     }
-    const outputs: any = {};
+    let outputs: any = {};
     let processStatus = '';
     try {
       let stdin_path: string | undefined;
@@ -368,7 +368,7 @@ export abstract class JobBase {
         }
       }
       runtimeContext.log_dir_handler(this.outdir, this.base_path_logs, stdout_path, stderr_path);
-      const outputs = this.collect_outputs(this.outdir, rcode);
+      outputs = await this.collect_outputs(this.outdir, rcode);
       // outputs = bytes2str_in_dicts(outputs);
       // } catch (e) {
       //     if (e.errno == 2) {
