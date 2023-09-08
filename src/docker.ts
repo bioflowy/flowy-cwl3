@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { DockerRequirement, ResourceRequirement } from 'cwl-ts-auto';
 import { Builder } from './builder.js';
 import { RuntimeContext } from './context.js';
 import { WorkflowException } from './errors.js';
@@ -17,7 +18,6 @@ import {
   which,
   getRequirement,
 } from './utils.js';
-import { DockerRequirement, ResourceRequirement } from 'cwl-ts-auto';
 
 const _IMAGES: Set<string> = new Set();
 
@@ -44,7 +44,7 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
     let found = false;
 
     if (!docker_requirement.dockerImageId && docker_requirement.dockerPull)
-    docker_requirement.dockerImageId = docker_requirement.dockerPull;
+      docker_requirement.dockerImageId = docker_requirement.dockerPull;
 
     // synchronized (_IMAGES_LOCK, () => {
     if (docker_requirement.dockerImageId in _IMAGES) return true;
@@ -66,10 +66,7 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
           }
         }
 
-        if (
-          match &&
-          ((split[0] == match[1] && split[1] == match[2]) || docker_requirement.dockerImageId == match[3])
-        ) {
+        if (match && ((split[0] == match[1] && split[1] == match[2]) || docker_requirement.dockerImageId == match[3])) {
           found = true;
           break;
         }
@@ -111,7 +108,7 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
     }
     const r2 = await this.get_image(r, pull_image, force_pull, tmp_outdir_prefix);
     if (r) {
-      return r['dockerImageId'] as string;
+      return r['dockerImageId'];
     }
     throw new WorkflowException(`Docker image ${r['dockerImageId']} not found`);
   }
@@ -200,7 +197,7 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
   }
   create_runtime(env: MutableMapping<string>, runtimeContext: RuntimeContext): [string[], string | null] {
     const [dockerReq] = getRequirement(this.tool, DockerRequirement);
-    const any_path_okay = dockerReq !== undefined
+    const any_path_okay = dockerReq !== undefined;
     const user_space_docker_cmd = runtimeContext.user_space_docker_cmd;
     let runtime: string[] = [];
 
@@ -318,7 +315,7 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
       runtime.push(`--env=${key}=${value}`);
     }
 
-    const [res_req, _] = getRequirement(this.tool,ResourceRequirement);
+    const [res_req, _] = getRequirement(this.tool, ResourceRequirement);
 
     if (runtimeContext.strict_memory_limit && !user_space_docker_cmd) {
       const ram = this.builder.resources['ram'];

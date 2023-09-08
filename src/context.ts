@@ -106,6 +106,11 @@ export class RuntimeContext extends ContextBase {
   set_log_dir = set_log_dir;
   log_dir_handler = log_handler;
   streaming_allowed = false;
+  select_resources?: (
+    resources: { [key: string]: number },
+    // eslint-disable-next-line no-use-before-define
+    runtimeContext: RuntimeContext,
+  ) => { [key: string]: number } | undefined;
 
   singularity = false;
   podman = false;
@@ -126,7 +131,6 @@ export class RuntimeContext extends ContextBase {
   docker_stagedir = '';
   js_console = false;
   job_script_provider?: any = undefined;
-  select_resources?: any = undefined;
   eval_timeout = 60;
   postScatterEval?: any = undefined;
   on_error: 'stop' | 'continue' = 'stop';
@@ -140,7 +144,7 @@ export class RuntimeContext extends ContextBase {
   orcid = '';
   cwl_full_name = '';
   process_run_id?: string = undefined;
-  prov_obj: Object | undefined= undefined;
+  prov_obj: Object | undefined = undefined;
   default_stdout?: any = undefined;
   default_stderr?: any = undefined;
 
@@ -151,6 +155,7 @@ export class RuntimeContext extends ContextBase {
     }
     this.make_fs_access = new StdFsAccess(this.basedir);
   }
+
   getOutdir(): string {
     if (this.outdir) {
       return this.outdir;
@@ -169,17 +174,17 @@ export class RuntimeContext extends ContextBase {
     if (this.stagedir) {
       return this.stagedir;
     }
-    const [tmpDir, tmpPrefix] = splitPath(this.tmpdir_prefix)
+    const [tmpDir, tmpPrefix] = splitPath(this.tmpdir_prefix);
     return mkdtemp(tmpPrefix, tmpDir);
   }
 
   createTmpdir(): string {
-    const [tmpDir, tmpPrefix] = splitPath(this.tmpdir_prefix)
+    const [tmpDir, tmpPrefix] = splitPath(this.tmpdir_prefix);
     return mkdtemp(tmpPrefix, tmpDir);
   }
 
   createOutdir(): string {
-    const [outDir, outPrefix] = splitPath(this.tmp_outdir_prefix)
+    const [outDir, outPrefix] = splitPath(this.tmp_outdir_prefix);
     return mkdtemp(outPrefix, outDir);
   }
 

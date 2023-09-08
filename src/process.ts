@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { inspect } from 'node:util';
-import cwlTsAuto, { CommandInputParameter, SchemaDefRequirement } from 'cwl-ts-auto';
+import cwlTsAuto, { CommandInputParameter, ResourceRequirement, SchemaDefRequirement } from 'cwl-ts-auto';
 import fsExtra from 'fs-extra';
 import { v4 } from 'uuid';
 import { Builder } from './builder.js';
@@ -32,7 +32,6 @@ import {
   type CWLObjectType,
   type CWLOutputAtomType,
   type CWLOutputType,
-  HasReqsHints,
   type JobsGeneratorType,
   type LoadListingType,
   type MutableSequence,
@@ -135,7 +134,7 @@ let SCHEMA_ANY;
 
 export function shortname(inputid: string): string {
   const parsedUrl = new URL(inputid);
-
+  cwlTsAuto.CommandLineTool;
   if (parsedUrl.hash) {
     const sn = parsedUrl.hash.split('/').pop();
     if (sn.startsWith('#')) {
@@ -355,9 +354,9 @@ function var_spool_cwl_detector(obj: unknown, item: any = null, obj_key: any = n
   return r;
 }
 
-function eval_resource(builder: Builder, resource_req: string | number): string | number | null {
+async function eval_resource(builder: Builder, resource_req: string | number): Promise<string | number | null> {
   if (typeof resource_req === 'string' && needs_parsing(resource_req)) {
-    const result = builder.do_eval(resource_req);
+    const result = await builder.do_eval(resource_req);
     if (typeof result === 'number') {
       throw new WorkflowException(
         `Floats are not valid in resource requirement expressions prior 
@@ -570,7 +569,7 @@ export abstract class Process {
   }
 
   // Remaining code skipped as it involves missing functions or types. The conversion follows the same pattern.
-  _init_job(joborder: CWLObjectType, runtime_context: RuntimeContext): Builder {
+  async _init_job(joborder: CWLObjectType, runtime_context: RuntimeContext): Promise<Builder> {
     const job = { ...joborder };
 
     const fs_access = new StdFsAccess(runtime_context.basedir);
@@ -705,8 +704,8 @@ hints:
       'unknown',
       this.container_engine,
     );
-
-    bindings.push(...builder.bind_input(this.inputs_record_schema, job, runtime_context.toplevel ?? false));
+    const bs = await builder.bind_input(this.inputs_record_schema, job, runtime_context.toplevel ?? false);
+    bindings.push(...bs);
 
     if (this.tool.baseCommand) {
       aslist(this.tool.baseCommand).forEach((command: any, index: number) => {
@@ -715,13 +714,14 @@ hints:
     }
 
     if (this.tool.arguments_) {
-      this.tool.arguments_.forEach((arg, i: number) => {
+      for (let i = 0; i < this.tool.arguments_.length; i++) {
+        const arg = this.tool.arguments_[i];
         if (arg instanceof cwlTsAuto.CommandLineBinding) {
           const arg2 = convertToCommandLineBinding(arg);
           if (arg.position) {
             let position = arg.position;
             if (typeof position === 'string') {
-              position = builder.do_eval(position) as number;
+              position = (await builder.do_eval(position)) as number;
               if (!position) {
                 position = 0;
               }
@@ -744,16 +744,73 @@ hints:
           };
           bindings.push(cm);
         }
-      });
+      }
     }
 
     bindings.sort(compareInputBinding);
 
     if (this.tool['class'] !== 'Workflow') {
-      // builder.resources = eval_resources(builder, runtime_context);
+      builder.resources = await this.evalResources(builder, runtime_context);
     }
     return builder;
   }
+  async evalResources(builder: Builder, runtimeContext: RuntimeContext): Promise<{ [key: string]: number }> {
+    let [resourceReq, _] = getRequirement(this.tool, ResourceRequirement);
+
+    if (resourceReq === undefined) {
+      resourceReq = new ResourceRequirement({});
+    }
+
+    const ram = 256;
+
+    const request: { [key: string]: number } = {
+      coresMin: 1,
+      coresMax: 1,
+      ramMin: ram,
+      ramMax: ram,
+      tmpdirMin: 1024,
+      tmpdirMax: 1024,
+      outdirMin: 1024,
+      outdirMax: 1024,
+    };
+
+    const rsca: string[] = ['cores', 'ram', 'tmpdir', 'outdir'];
+    for (const rsc of rsca) {
+      let mn: any = null;
+      let mx: any = null;
+      if (resourceReq[`${rsc}Min`]) {
+        mn = await eval_resource(builder, resourceReq[`${rsc}Min`]);
+      }
+      if (resourceReq[`${rsc}Max`]) {
+        mx = await eval_resource(builder, resourceReq[`${rsc}Max`]);
+      }
+      if (mn === null) {
+        mn = mx;
+      } else if (mx === null) {
+        mx = mn;
+      }
+
+      if (mn !== null) {
+        request[`${rsc}Min`] = mn;
+        request[`${rsc}Max`] = mx;
+      }
+    }
+
+    const request_evaluated = request;
+    if (runtimeContext.select_resources !== undefined) {
+      return runtimeContext.select_resources(request_evaluated, runtimeContext);
+    }
+
+    const defaultReq: { [key: string]: number } = {
+      cores: request_evaluated['coresMin'],
+      ram: Math.ceil(request_evaluated['ramMin']),
+      tmpdirSize: Math.ceil(request_evaluated['tmpdirMin']),
+      outdirSize: Math.ceil(request_evaluated['outdirMin']),
+    };
+
+    return defaultReq;
+  }
+
   checkRequirements(
     rec: MutableSequence<CWLObjectType> | CWLObjectType | CWLOutputType | null,
     supported_process_requirements: Iterable<string>,

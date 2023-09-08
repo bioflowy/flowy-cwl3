@@ -10,7 +10,7 @@ import { ValidationException, WorkflowException } from './errors.js';
 import { CommandLineJob, JobBase } from './job.js';
 import { MapperEnt, PathMapper } from './pathmapper.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import type { Tool } from './types.js';
+import type { Tool, ToolRequirement } from './types.js';
 
 let __random_outdir: string | null = null;
 
@@ -41,8 +41,8 @@ export type CWLOutputType =
 
 export type CWLObjectType = MutableMapping<CWLOutputType | undefined>;
 
-export type JobsType = CommandLineJob | JobBase | ExpressionJob | CallbackJob; // | WorkflowJob  ;
-export type JobsGeneratorType = Generator<JobsType | undefined>;
+export type JobsType = CommandLineJob | JobBase | ExpressionJob | CallbackJob | undefined; // | WorkflowJob  ;
+export type JobsGeneratorType = AsyncGenerator<JobsType, void>;
 export type OutputCallbackType = (arg1: CWLObjectType, arg2: string) => void;
 // type ResolverType = (Loader, string)=>string?;
 // type DestinationsType = MutableMapping<string, CWLOutputType?>;
@@ -154,16 +154,16 @@ function fileURLToPath(inputUrl: string): string {
   }
   return decodeURIComponent(u.pathname);
 }
-export function splitPath(filePath:string):[string,string]{
-    const idx = filePath.lastIndexOf('/')
-    if(idx===-1){
-      return ['',filePath];
-    }
-    return [filePath.substring(0,idx),filePath.substring(idx+1)]
+export function splitPath(filePath: string): [string, string] {
+  const idx = filePath.lastIndexOf('/');
+  if (idx === -1) {
+    return ['', filePath];
+  }
+  return [filePath.substring(0, idx), filePath.substring(idx + 1)];
 }
 export function mkdtemp(prefix = '', dir?: string): string {
-  if(!dir){
-    dir = DEFAULT_TMP_PREFIX
+  if (!dir) {
+    dir = DEFAULT_TMP_PREFIX;
   }
   const uniqueName = prefix + uuidv4();
   const tempDirPath = path.join(dir, uniqueName);
@@ -585,19 +585,24 @@ export function normalizeFilesDirs(
 function reversed<T>(arrays: T[]): T[] {
   return [...arrays].reverse();
 }
+export interface RequirementParam {
+  requirements?: undefined | ToolRequirement;
+  hints?: undefined | any[];
+}
 
-export function getRequirement<T>(tool: Tool, cls: new (any) => T): [T | undefined, boolean] {
-  if (tool.requirements) {
-    const req = tool.requirements.find((item) => item instanceof cls);
+export function getRequirement<T>(reqs: RequirementParam, cls: new (any) => T): [T | undefined, boolean] {
+  if (reqs.requirements) {
+    const req = reqs.requirements.find((item) => item instanceof cls);
     if (req) {
       return [req as T, true];
     }
   }
-  if (tool.hints) {
-    const req = tool.hints.find((item) => item['class'] === cls.name);
-    
+  if (reqs.hints) {
+    const req = reqs.hints.find((item) => item['class'] === cls.name);
+
     if (req) {
-      return [new cls(req) , false];
+      // eslint-disable-next-line new-cap
+      return [new cls(req), false];
     }
   }
   return [undefined, false];

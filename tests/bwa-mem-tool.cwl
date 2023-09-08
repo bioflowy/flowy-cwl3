@@ -4,6 +4,9 @@ cwlVersion: v1.2
 
 class: CommandLineTool
 
+requirements:
+  - class: InlineJavascriptRequirement
+  
 hints:
   - class: ResourceRequirement
     coresMin: 2
@@ -54,7 +57,7 @@ baseCommand: python3
 arguments:
   - bwa
   - mem
-  - valueFrom: $(runtime.cores)
+  - valueFrom: ${runtime.cores}
     position: 1
     prefix: -t
 

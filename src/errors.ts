@@ -1,20 +1,6 @@
-export class ValidationException extends Error {
-    constructor(message:string){
-        super(message)
-    }
-}
-export class WorkflowException extends Error {
-    constructor(message:string){
-        super(message)
-    }
-}
-export class UnsupportedRequirement extends Error {
-    constructor(message:string){
-        super(message)
-    }
-}
-export class ValueError extends Error {
-    constructor(message:string){
-        super(message)
-    }
-}
+export class ValidationException extends Error {}
+export class WorkflowException extends Error {}
+export class UnsupportedRequirement extends Error {}
+export class ValueError extends Error {}
+export class SubstitutionError extends Error {}
+export class JavascriptException extends Error {}

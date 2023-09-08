@@ -1,10 +1,11 @@
 import * as fs from 'node:fs';
+import { InlineJavascriptRequirement } from 'cwl-ts-auto';
 import { ValidationException, WorkflowException } from './errors.js';
 import * as expression from './expression.js';
 import { _logger } from './loghandler.js';
 import { PathMapper } from './pathmapper.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import type { CommandLineBinding } from './types.js';
+import type { CommandLineBinding, Tool, ToolRequirement } from './types.js';
 import {
   CONTENT_LIMIT,
   type CWLObjectType,
@@ -18,6 +19,7 @@ import {
   normalizeFilesDirs,
   visit_class,
   isString,
+  getRequirement,
 } from './utils.js';
 
 const INPUT_OBJ_VOCAB: { [key: string]: string } = {
@@ -52,12 +54,14 @@ function isEmptyObject(obj: object): boolean {
   return Object.keys(obj).length === 0;
 }
 
-export class Builder extends HasReqsHints {
+export class Builder {
   job: any;
   files: any[];
   bindings: any[];
   schemaDefs: { [key: string]: any };
   names: any;
+  requirements?: undefined | ToolRequirement;
+  hints?: undefined | any[];
   resources: { [key: string]: number };
   mutation_manager: any | null;
   formatgraph: any | null;
@@ -85,8 +89,8 @@ export class Builder extends HasReqsHints {
     bindings: any[],
     schemaDefs: { [key: string]: any },
     names: any,
-    requirements: any[],
-    hints: any[],
+    requirements: undefined | ToolRequirement,
+    hints: undefined | any[],
     resources: { [key: string]: number },
     mutation_manager: any | null,
     formatgraph: any | null,
@@ -104,7 +108,6 @@ export class Builder extends HasReqsHints {
     cwlVersion: string,
     container_engine: string,
   ) {
-    super();
     this.job = job;
     this.files = files;
     this.bindings = bindings;
@@ -149,7 +152,7 @@ export class Builder extends HasReqsHints {
     }
     return false;
   }
-  handle_union(
+  async handle_union(
     schema: CWLObjectType,
     datum: CWLObjectType | CWLObjectType[],
     discover_secondaryFiles: boolean,
@@ -157,7 +160,7 @@ export class Builder extends HasReqsHints {
     lead_pos: number | number[] | undefined = undefined,
     // eslint-disable-next-line
     tail_pos: string | number[] | undefined = undefined,
-  ): CommandLineBinding[] | undefined {
+  ): Promise<CommandLineBinding[] | undefined> {
     let bound_input = false;
     for (const t of schema['type'] as any[]) {
       if (this.validate(t, datum)) {
@@ -166,7 +169,7 @@ export class Builder extends HasReqsHints {
         if (!value_from_expression) {
           return this.bind_input(schema, datum, discover_secondaryFiles, lead_pos, tail_pos);
         } else {
-          this.bind_input(schema, datum, discover_secondaryFiles, lead_pos, tail_pos);
+          await this.bind_input(schema, datum, discover_secondaryFiles, lead_pos, tail_pos);
           bound_input = true;
         }
       }
@@ -177,13 +180,13 @@ export class Builder extends HasReqsHints {
     }
     return undefined;
   }
-  bind_input(
+  async bind_input(
     schema: CWLObjectType,
     datum: CWLObjectType | CWLObjectType[],
     discover_secondaryFiles: boolean,
     lead_pos?: number | number[],
     tail_pos?: string | number[],
-  ): CommandLineBinding[] {
+  ): Promise<CommandLineBinding[]> {
     const debug = _logger.isDebugEnabled();
 
     if (tail_pos === undefined) {
@@ -214,10 +217,10 @@ export class Builder extends HasReqsHints {
         );
         return ret;
       } else {
-        this.handle_union(schema, datum, discover_secondaryFiles, value_from_expression, lead_pos, tail_pos);
+        await this.handle_union(schema, datum, discover_secondaryFiles, value_from_expression, lead_pos, tail_pos);
       }
     } else if (typeof schema['type'] === 'object') {
-      this.handle_map(
+      await this.handle_map(
         schema,
         datum,
         discover_secondaryFiles,
@@ -238,11 +241,11 @@ export class Builder extends HasReqsHints {
       }
 
       if (schema['type'] == 'record') {
-        datum = this.handle_record(schema, datum, discover_secondaryFiles, lead_pos, tail_pos, bindings);
+        datum = await this.handle_record(schema, datum, discover_secondaryFiles, lead_pos, tail_pos, bindings);
       }
 
       if (schema['type'] == 'array') {
-        binding = this.handle_array(
+        await this.handle_array(
           schema,
           datum as CWLObjectType[],
           discover_secondaryFiles,
@@ -259,7 +262,7 @@ export class Builder extends HasReqsHints {
       };
 
       if (schema['type'] == 'org.w3id.cwl.cwl.File') {
-        this.handleFile(schema, datum, discover_secondaryFiles, debug, binding);
+        await this.handleFile(schema, datum, discover_secondaryFiles, debug, binding);
       }
 
       if (schema['type'] == 'org.w3id.cwl.cwl.Directory') {
@@ -305,13 +308,13 @@ export class Builder extends HasReqsHints {
     this.files.push(datum);
     return datum;
   }
-  handleFile(
+  async handleFile(
     schema: CWLObjectType,
     datum: CWLObjectType | CWLObjectType[],
     discoverSecondaryFiles: boolean,
     debug: boolean,
     binding: { [key: string]: string | number[] } | CommentedMap,
-  ): void {
+  ): Promise<void> {
     const _captureFiles = (f: CWLObjectType): CWLObjectType => {
       this.files.push(f);
       return f;
@@ -386,7 +389,12 @@ export class Builder extends HasReqsHints {
     //         "Expected value of " + schema['name'] + " to have format " + schema['format'] + " but\n " + ve);
     // }
   }
-  handleSecondaryFile(schema: CWLObjectType, datum: CWLObjectType, discover_secondaryFiles: boolean, debug: boolean) {
+  async handleSecondaryFile(
+    schema: CWLObjectType,
+    datum: CWLObjectType,
+    discover_secondaryFiles: boolean,
+    debug: boolean,
+  ): Promise<void> {
     let sf_schema: CWLObjectType[] = [];
     if (!('secondaryFiles' in datum)) {
       datum['secondaryFiles'] = [];
@@ -400,7 +408,7 @@ export class Builder extends HasReqsHints {
     let sf_required = true;
     for (const [num, sf_entry] of sf_schema.entries()) {
       if ('required' in sf_entry && sf_entry['required'] !== null) {
-        const required_result = this.do_eval(sf_entry['required'], { context: datum });
+        const required_result = await this.do_eval(sf_entry['required'], { context: datum });
         if (!(typeof required_result === 'boolean' || required_result === null)) {
           let sf_item: any;
           if (sf_schema === schema['secondaryFiles']) {
@@ -507,7 +515,7 @@ export class Builder extends HasReqsHints {
       }
     }
   }
-  handle_array(
+  async handle_array(
     schema: CWLObjectType,
     datum: CWLObjectType[],
     discover_secondaryFiles: boolean,
@@ -515,7 +523,7 @@ export class Builder extends HasReqsHints {
     tail_pos: string | number[] | undefined,
     bindings: CommandLineBinding[],
     binding: CommandLineBinding | CommentedMap,
-  ): any {
+  ): Promise<void> {
     for (const [n, item] of datum.entries()) {
       let b2: CWLObjectType = undefined;
       if (binding) {
@@ -531,29 +539,30 @@ export class Builder extends HasReqsHints {
           itemschema[k] = schema[k];
         }
       }
-      bindings.push(...this.bind_input(itemschema, item, discover_secondaryFiles, n, tail_pos));
+      const bs = await this.bind_input(itemschema, item, discover_secondaryFiles, n, tail_pos);
+      bindings.push(...bs);
     }
-    return undefined;
   }
-  handle_record(
+  async handle_record(
     schema: any,
     datum: any,
     discover_secondaryFiles: any,
     lead_pos: any,
     tail_pos: any,
     bindings: CommandLineBinding[],
-  ): any {
+  ): Promise<any> {
     for (const f of schema['fields']) {
       const name = String(f['name']);
       if (name in datum && datum[name] !== null) {
-        bindings.push(...this.bind_input(f, datum[name], discover_secondaryFiles, lead_pos, name));
+        const bs = await this.bind_input(f, datum[name], discover_secondaryFiles, lead_pos, name);
+        bindings.push(...bs);
       } else {
         datum[name] = f['default'];
       }
     }
     return datum;
   }
-  handle_map(
+  async handle_map(
     schema: any,
     datum: any,
     discover_secondaryFiles: any,
@@ -579,9 +588,10 @@ export class Builder extends HasReqsHints {
       }
     }
     if (value_from_expression) {
-      this.bind_input(st, datum, discover_secondaryFiles, lead_pos, tail_pos);
+      await this.bind_input(st, datum, discover_secondaryFiles, lead_pos, tail_pos);
     } else {
-      bindings.push(...this.bind_input(st, datum, discover_secondaryFiles, lead_pos, tail_pos));
+      const bs = await this.bind_input(st, datum, discover_secondaryFiles, lead_pos, tail_pos);
+      bindings.push(...bs);
     }
   }
   handle_binding(schema: any, datum: any, lead_pos: any, tail_pos: any, debug: any): [CommandLineBinding, boolean] {
@@ -632,13 +642,13 @@ export class Builder extends HasReqsHints {
       return value.toString();
     }
   }
-  generate_arg(binding: CWLObjectType): string[] {
+  async generate_arg(binding: CWLObjectType): Promise<string[]> {
     let value = binding['datum'];
     const debug = _logger.isDebugEnabled();
 
     if ('valueFrom' in binding && binding['valueFrom']) {
       try {
-        value = this.do_eval(String(binding['valueFrom']), value);
+        value = await this.do_eval(String(binding['valueFrom']), value);
       } catch (e) {
         throw e;
       }
@@ -686,12 +696,12 @@ export class Builder extends HasReqsHints {
 
     return args.filter((item): item is string => typeof item === 'string');
   }
-  do_eval(
+  async do_eval(
     ex: CWLOutputType | undefined,
     context: any = undefined,
     recursive = false,
     strip_whitespace = true,
-  ): CWLOutputType | undefined {
+  ): Promise<CWLOutputType | undefined> {
     if (recursive) {
       if (ex instanceof Map) {
         const mutatedMap: { [key: string]: any } = {};
@@ -701,7 +711,12 @@ export class Builder extends HasReqsHints {
         return mutatedMap;
       }
       if (Array.isArray(ex)) {
-        return ex.map((value) => this.do_eval(value, context, recursive));
+        const rets: CWLOutputType[] = [];
+        for (let index = 0; index < ex.length; index++) {
+          const ret = await this.do_eval(ex[index], context, recursive);
+          rets.push(ret);
+        }
+        return rets;
       }
     }
 
@@ -711,24 +726,18 @@ export class Builder extends HasReqsHints {
       resources = { ...resources };
       resources['cores'] = Math.ceil(cores);
     }
-
-    return expression.do_eval(
+    const [javascriptRequirement] = getRequirement(this, InlineJavascriptRequirement);
+    const ret = await expression.do_eval(
       ex as CWLObjectType,
       this.job,
-      this.requirements,
+      javascriptRequirement,
       this.outdir,
       this.tmpdir,
       resources,
       context,
-      this.timeout,
       strip_whitespace,
       this.cwlVersion,
-      {
-        debug: this.debug,
-        js_console: this.js_console,
-        force_docker_pull: this.force_docker_pull,
-        container_engine: this.container_engine,
-      },
     );
+    return ret;
   }
 }

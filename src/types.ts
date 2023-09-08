@@ -127,7 +127,7 @@ export interface Tool {
   inputs: cwlTsAuto.CommandInputParameter[];
   outputs: cwlTsAuto.CommandOutputParameter[];
   requirements?: undefined | ToolRequirement;
-  hints?: undefined | ToolRequirement;
+  hints?: undefined | any[];
   baseCommand?: undefined | string | string[];
   /**
    * Command line bindings which are not directly associated with input

@@ -9,6 +9,7 @@ import { _logger } from './loghandler.js';
 import { PathMapper } from './pathmapper.js';
 import { Process, compute_checksums, shortname, uniquename } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
+import type { Tool } from './types.js';
 import {
   type CWLObjectType,
   type CWLOutputType,
@@ -26,8 +27,8 @@ import {
   uriFilePath,
   visit_class,
   getRequirement,
+  type JobsType,
 } from './utils.js';
-import type { Tool } from './types.js';
 class PathCheckingMode {
   static STRICT = new RegExp('^[w.+,-:@]^\u2600-\u26FFU0001f600-U0001f64f]+$');
   static RELAXED = new RegExp('.*');
@@ -61,10 +62,10 @@ export class ExpressionJob {
     this.prov_obj = null;
   }
 
-  run(runtimeContext: RuntimeContext, tmpdir_lock: any | null = null) {
+  async run(runtimeContext: RuntimeContext, tmpdir_lock: any | null = null) {
     try {
       normalizeFilesDirs(this.builder.job);
-      const ev = this.builder.do_eval(this.script);
+      const ev = await this.builder.do_eval(this.script);
       normalizeFilesDirs(ev as any);
 
       if (this.output_callback) {
@@ -85,25 +86,15 @@ export class ExpressionTool extends Process {
     super(tool, loadingContext);
     this.tool = tool;
   }
-  *job(
+  async *job(
     job_order: CWLObjectType,
     output_callbacks: OutputCallbackType | null,
     runtimeContext: RuntimeContext,
   ): JobsGeneratorType {
-    const builder = this._init_job(job_order, runtimeContext);
+    const builder = await this._init_job(job_order, runtimeContext);
     const job = new ExpressionJob(builder, this.tool['expression'], output_callbacks, this.requirements, this.hints);
     job.prov_obj = runtimeContext.prov_obj;
     yield job;
-  }
-}
-
-class AbstractOperation extends Process {
-  *job(
-    job_order: CWLObjectType,
-    output_callbacks: OutputCallbackType | null,
-    runtimeContext: RuntimeContext,
-  ): JobsGeneratorType {
-    throw new Error('Abstract operation cannot be executed.');
   }
 }
 
@@ -271,7 +262,9 @@ export class CommandLineTool extends Process {
     this.path_check_mode = loadingContext.relax_path_checks ? PathCheckingMode.RELAXED : PathCheckingMode.STRICT;
   }
 
-  make_job_runner(runtimeContext: RuntimeContext): (
+  make_job_runner(
+    runtimeContext: RuntimeContext,
+  ): (
     builder: Builder,
     joborder: CWLObjectType,
     make_path_mapper: (param1: CWLObjectType[], param2: string, param3: RuntimeContext, param4: boolean) => PathMapper,
@@ -292,34 +285,25 @@ export class CommandLineTool extends Process {
         }
       }
     }
-    if(dockerReq && runtimeContext.use_container){
+    if (dockerReq && runtimeContext.use_container) {
       // if(runtimeContext.singularity){
       //     return SingularityCommandLineJob
       // }else if(runtimeContext.user_space_docker_cmd){
       //     return UDockerCommandLineJob
       // }
-      if(runtimeContext.podman){
-          return (builder,
-            joborder,
-            make_path_mapper,
-            tool,
-            name) => new PodmanCommandLineJob(builder,joborder,make_path_mapper,tool,name);
+      if (runtimeContext.podman) {
+        return (builder, joborder, make_path_mapper, tool, name) =>
+          new PodmanCommandLineJob(builder, joborder, make_path_mapper, tool, name);
       }
-      return (builder,
-        joborder,
-        make_path_mapper,
-        tool,
-        name) => new DockerCommandLineJob(builder,joborder,make_path_mapper,tool,name);
+      return (builder, joborder, make_path_mapper, tool, name) =>
+        new DockerCommandLineJob(builder, joborder, make_path_mapper, tool, name);
     }
     if (dockerRequired)
       throw new UnsupportedRequirement(
         '--no-container, but this CommandLineTool has ' + "DockerRequirement under 'requirements'.",
       );
-    return (builder,
-      joborder,
-      make_path_mapper,
-      tool,
-      name) => new CommandLineJob(builder,joborder,make_path_mapper,tool,name);
+    return (builder, joborder, make_path_mapper, tool, name) =>
+      new CommandLineJob(builder, joborder, make_path_mapper, tool, name);
   }
 
   updatePathmap(outdir: string, pathmap: PathMapper, fn: CWLObjectType): void {
@@ -346,14 +330,14 @@ export class CommandLineTool extends Process {
       this.updatePathmap(path.join(outdir, fn['basename'] as string), pathmap, ls);
     }
   }
-  evaluate_listing_string(
+  async evaluate_listing_string(
     initialWorkdir: any,
     builder: Builder,
     classic_dirent: any,
     classic_listing: any,
     debug: any,
-  ): CWLObjectType[] {
-    const ls_evaluated = builder.do_eval(initialWorkdir['listing']);
+  ): Promise<CWLObjectType[]> {
+    const ls_evaluated = await builder.do_eval(initialWorkdir['listing']);
     let fail: any = false;
     let fail_suffix = '';
     if (!(ls_evaluated instanceof Array)) {
@@ -403,19 +387,19 @@ export class CommandLineTool extends Process {
     }
     return ls_evaluated as CWLObjectType[];
   }
-  evaluate_listing_expr_or_dirent(
+  async evaluate_listing_expr_or_dirent(
     initialWorkdir: any,
     builder: Builder,
     classic_dirent: any,
     classic_listing: any,
     debug: any,
-  ): CWLObjectType[] {
+  ): Promise<CWLObjectType[]> {
     const ls: CWLObjectType[] = [];
 
     for (const t of initialWorkdir['listing'] as (string | CWLObjectType)[]) {
       if (t instanceof Object && 'entry' in t) {
         const entry_field: string = t['entry'] as string;
-        const entry = builder.do_eval(entry_field, false);
+        const entry = await builder.do_eval(entry_field, false);
         if (entry === null) {
           continue;
         }
@@ -467,7 +451,7 @@ export class CommandLineTool extends Process {
         if (t.hasOwnProperty('entryname')) {
           const entryname_field = t['entryname'] as string;
           if (entryname_field.includes('${') || entryname_field.includes('$(')) {
-            const en = builder.do_eval(t['entryname'] as string);
+            const en = await builder.do_eval(t['entryname'] as string);
             if (typeof en !== 'string') {
               throw new WorkflowException(
                 `'entryname' expression must result a string. Got ${en} from ${entryname_field}`,
@@ -483,7 +467,7 @@ export class CommandLineTool extends Process {
         et['writable'] = t['writable'] || false;
         ls.push(et);
       } else {
-        const initwd_item = builder.do_eval(t);
+        const initwd_item = await builder.do_eval(t);
         if (!initwd_item) {
           continue;
         }
@@ -604,7 +588,7 @@ export class CommandLineTool extends Process {
     }
   }
 
-  _initialworkdir(j: JobBase, builder: Builder): void {
+  async _initialworkdir(j: JobBase, builder: Builder): Promise<void> {
     const [initialWorkdir, _] = getRequirement(this.tool, cwlTsAuto.InitialWorkDirRequirement);
     if (initialWorkdir == undefined) {
       return;
@@ -615,9 +599,9 @@ export class CommandLineTool extends Process {
 
     let ls: CWLObjectType[] = [];
     if (typeof initialWorkdir.listing === 'string') {
-      ls = this.evaluate_listing_string(initialWorkdir, builder, classic_dirent, classic_listing, debug);
+      ls = await this.evaluate_listing_string(initialWorkdir, builder, classic_dirent, classic_listing, debug);
     } else {
-      ls = this.evaluate_listing_expr_or_dirent(initialWorkdir, builder, classic_dirent, classic_listing, debug);
+      ls = await this.evaluate_listing_expr_or_dirent(initialWorkdir, builder, classic_dirent, classic_listing, debug);
     }
 
     this.check_output_items(initialWorkdir, ls);
@@ -627,7 +611,10 @@ export class CommandLineTool extends Process {
     j.generatefiles['listing'] = ls;
     this.setup_output_items(initialWorkdir, builder, ls);
   }
-  cache_context(runtimeContext: RuntimeContext) {
+  cache_context(runtimeContext: RuntimeContext): (arg1: CWLObjectType, arg2: string) => void {
+    return (arg1: CWLObjectType, arg2: string) => {
+      console.log(arg2);
+    };
     // TODO cache not implemented
     // let cachecontext = runtimeContext.copy();
     // cachecontext.outdir = "/out";
@@ -846,12 +833,12 @@ export class CommandLineTool extends Process {
     }
     return required_env;
   }
-  setup_command_line(builder: Builder, j: JobBase, debug: boolean) {
+  async setup_command_line(builder: Builder, j: JobBase, debug: boolean) {
     const [shellcmd, _] = getRequirement(this.tool, cwlTsAuto.ShellCommandRequirement);
     if (shellcmd !== undefined) {
       let cmd: string[] = []; // type: List[str]
       for (const b of builder.bindings) {
-        let arg = builder.generate_arg(b);
+        let arg = await builder.generate_arg(b);
         if (b.get('shellQuote', true)) {
           arg = aslist(arg).map((a) => quote(a));
         }
@@ -859,7 +846,12 @@ export class CommandLineTool extends Process {
       }
       j.command_line = ['/bin/sh', '-c', cmd.join(' ')];
     } else {
-      const cmd = builder.bindings.map((binding) => builder.generate_arg(binding)).flat();
+      const cmd: string[] = [];
+      for (let index = 0; index < builder.bindings.length; index++) {
+        const element = builder.bindings[index];
+        const a = await builder.generate_arg(element);
+        cmd.push(...a.flat());
+      }
       j.command_line = cmd;
     }
   }
@@ -884,7 +876,7 @@ export class CommandLineTool extends Process {
     // }
     // j.mpi_procs = np;
   }
-  setup_std_io(builder: any, j: any, reffiles: any[], debug: boolean): void {
+  async setup_std_io(builder: any, j: any, reffiles: any[], debug: boolean): Promise<void> {
     if (this.tool.stdin) {
       const stdin_eval = builder.do_eval(this.tool['stdin']);
       if (!(typeof stdin_eval === 'string' || stdin_eval === null)) {
@@ -912,7 +904,7 @@ export class CommandLineTool extends Process {
     }
 
     if (this.tool.stdout) {
-      const stdout_eval = builder.do_eval(this.tool.stdout);
+      const stdout_eval = await builder.do_eval(this.tool.stdout);
       if (typeof stdout_eval !== 'string') {
         throw new Error(`'stdout' expression must return a string. Got ${stdout_eval} for ${this.tool['stdout']}.`);
       }
@@ -963,33 +955,26 @@ export class CommandLineTool extends Process {
 
     return readers;
   }
-  *job(
-    this: any,
+  async *job(
     job_order: CWLObjectType,
-    output_callbacks: OutputCallbackType | null,
+    output_callbacks: any | OutputCallbackType | null,
     runtimeContext: RuntimeContext,
-  ): Generator<JobBase | CallbackJob, void, unknown> {
+  ): AsyncGenerator<JobBase> {
     const [workReuse] = getRequirement(this.tool, WorkReuse);
     const enableReuse = workReuse ? workReuse.enableReuse : true;
 
     const jobname = uniquename(runtimeContext.name || shortname(this.tool.id || 'job'));
     if (runtimeContext.cachedir && enableReuse) {
-      output_callbacks = this.cache_context();
+      output_callbacks = this.cache_context(runtimeContext);
       if (output_callbacks) {
         return;
       }
     }
-    const builder = this._init_job(job_order, runtimeContext);
+    const builder = await this._init_job(job_order, runtimeContext);
 
     const reffiles = JSON.parse(JSON.stringify(builder.files));
-    const mjr = this.make_job_runner(runtimeContext)
-    const j = mjr(
-      builder,
-      builder.job,
-      make_path_mapper,
-      this,
-      jobname,
-    );
+    const mjr = this.make_job_runner(runtimeContext);
+    const j = mjr(builder, builder.job, make_path_mapper, this.tool, jobname);
 
     j.prov_obj = this.prov_obj;
 
@@ -1007,9 +992,7 @@ export class CommandLineTool extends Process {
       );
       _logger.debug(`[job ${j.name}] ${JSON.stringify(builder.job, null, 4)}`);
     }
-
     builder.pathmapper = make_path_mapper(reffiles, builder.stagedir, runtimeContext, true);
-    builder.requirements = j.requirements;
 
     const _check_adjust = (val) => checkAdjust(this.path_check_mode.value, builder, val);
 
@@ -1030,7 +1013,7 @@ export class CommandLineTool extends Process {
       );
     }
 
-    this.setup_std_io(builder, j, reffiles, debug);
+    await this.setup_std_io(builder, j, reffiles, debug);
 
     if (debug) {
       _logger.debug(`[job ${j.name}] command line bindings is ${JSON.stringify(builder.bindings, null, 4)}`);
@@ -1065,7 +1048,7 @@ export class CommandLineTool extends Process {
     this.setup_command_line(builder, j, debug);
 
     j.pathmapper = builder.pathmapper;
-    j.collect_outputs = async (outdir,rcode) =>
+    j.collect_outputs = async (outdir, rcode) =>
       this.collect_output_ports(
         this.tool['outputs'],
         builder,
@@ -1093,7 +1076,7 @@ export class CommandLineTool extends Process {
     const debug = _logger.isDebugEnabled();
     const cwl_version = 'v1.2';
     try {
-      const fs_access = new (builder.make_fs_access)(outdir);
+      const fs_access = new builder.make_fs_access(outdir);
       const custom_output = fs_access.join(outdir, 'cwl.output.json');
       if (fs_access.exists(custom_output)) {
         const f = await fs_access.read(custom_output);
@@ -1258,14 +1241,14 @@ export class CommandLineTool extends Process {
       throw e;
     }
   }
-  collect_secondary_files(
+  async collect_secondary_files(
     schema: CWLObjectType,
     builder: Builder,
     result: CWLOutputType | null,
     debug: boolean,
     fs_access: StdFsAccess,
     revmap: any,
-  ): void {
+  ): Promise<void> {
     for (const primary of aslist(result)) {
       if (primary instanceof Object) {
         if (!primary['secondaryFiles']) {
@@ -1275,7 +1258,7 @@ export class CommandLineTool extends Process {
         for (const sf of aslist(schema['secondaryFiles'])) {
           let sf_required: boolean;
           if ('required' in sf) {
-            const sf_required_eval = builder.do_eval(sf['required'], primary);
+            const sf_required_eval = await builder.do_eval(sf['required'], primary);
             if (!(typeof sf_required_eval === 'boolean' || sf_required_eval === null)) {
               throw new WorkflowException(
                 `Expressions in the field 'required' must evaluate to a Boolean (true or false) or None. Got ${sf_required_eval} for ${sf['required']}.`,
@@ -1319,7 +1302,7 @@ export class CommandLineTool extends Process {
       }
     }
   }
-  handle_output_format(schema: CWLObjectType, builder: Builder, result: CWLObjectType, debug: boolean): void {
+  handle_output_format(schema: CWLObjectType, builder: Builder, result: CWLOutputType, debug: boolean): void {
     if ('format' in schema) {
       const format_field: string = schema['format'] as string;
       if (format_field.includes('$(') || format_field.includes('${')) {
@@ -1375,10 +1358,10 @@ export class CommandLineTool extends Process {
       } else if (schema['type'] === 'File' || schema['type'] === 'Directory') {
         single = true;
       }
-      let result;
+      let result: CWLOutputType;
       if (binding.hasOwnProperty('outputEval')) {
         try {
-          result = builder.do_eval(binding['outputEval'] as CWLOutputType, { context: r });
+          result = await builder.do_eval(binding['outputEval'] as CWLOutputType, { context: r });
         } catch (error) {
           // Log the error here
         }
@@ -1403,11 +1386,11 @@ export class CommandLineTool extends Process {
         }
       }
       if (schema.hasOwnProperty('secondaryFiles')) {
-        this.collect_secondary_files(schema, builder, result, debug, fs_access, revmap);
+        await this.collect_secondary_files(schema, builder, result, debug, fs_access, revmap);
       }
       this.handle_output_format(schema, builder, result, debug);
       adjustFileObjs(result, revmap);
-      if (!result && optional && ![0, ''].includes(result)) {
+      if (!result && optional && ![0, ''].includes(result as string | number)) {
         return undefined;
       }
     }

@@ -4,7 +4,7 @@ import { Builder } from './builder.js';
 import { StdFsAccess } from './stdfsaccess.js';
 import { CommandInputParameter, CommandLineBinding } from './types.js';
 describe('Vitest', () => {
-  test('マッチャー', () => {
+  test('マッチャー', async () => {
     const files = [];
     const bindings: CommandLineBinding[] = [];
     const schema = new CommandInputParameter();
@@ -60,7 +60,7 @@ describe('Vitest', () => {
       'v1.2',
       'docker',
     );
-    const bindings2 = builder.bind_input(schema_r as any, datum, true);
+    const bindings2 = await builder.bind_input(schema_r as any, datum, true);
     // bind_input();
     expect(bindings2.length).toBe(3);
   });

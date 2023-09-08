@@ -181,7 +181,7 @@ export class SingleJobExecutor extends JobExecutor {
     );
 
     try {
-      for (const job of jobiter) {
+      for await (const job of jobiter) {
         if (job !== null) {
           if (runtime_context.builder !== undefined && job.hasOwnProperty('builder')) {
             (job as any).builder = runtime_context.builder;
