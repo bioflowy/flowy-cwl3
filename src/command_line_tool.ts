@@ -850,7 +850,8 @@ export class CommandLineTool extends Process {
       for (let index = 0; index < builder.bindings.length; index++) {
         const element = builder.bindings[index];
         const a = await builder.generate_arg(element);
-        cmd.push(...a.flat());
+        const b = a.flat();
+        cmd.push(...b);
       }
       j.command_line = cmd;
     }
@@ -1045,7 +1046,7 @@ export class CommandLineTool extends Process {
     const required_env = this.handle_env_var(builder, debug);
     j.prepare_environment(runtimeContext, required_env);
 
-    this.setup_command_line(builder, j, debug);
+    await this.setup_command_line(builder, j, debug);
 
     j.pathmapper = builder.pathmapper;
     j.collect_outputs = async (outdir, rcode) =>

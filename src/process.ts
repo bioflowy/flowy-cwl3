@@ -5,10 +5,17 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { inspect } from 'node:util';
-import cwlTsAuto, { CommandInputParameter, ResourceRequirement, SchemaDefRequirement } from 'cwl-ts-auto';
+import cwlTsAuto, {
+  CommandInputArraySchema,
+  CommandInputEnumSchema,
+  CommandInputParameter,
+  CommandInputRecordSchema,
+  ResourceRequirement,
+  SchemaDefRequirement,
+} from 'cwl-ts-auto';
 import fsExtra from 'fs-extra';
 import { v4 } from 'uuid';
-import { Builder } from './builder.js';
+import { Builder, INPUT_OBJ_VOCAB } from './builder.js';
 import { LoadingContext, RuntimeContext, getDefault } from './context.js';
 import * as copy from './copy.js';
 
@@ -17,6 +24,7 @@ import { ValidationException, WorkflowException } from './errors.js';
 import { needs_parsing } from './expression.js';
 import { _logger } from './loghandler.js';
 
+import { make_valid_avro } from './schema.js';
 import { StdFsAccess } from './stdfsaccess.js';
 
 import {
@@ -387,7 +395,7 @@ export abstract class Process {
   doc_loader: any;
   doc_schema: any;
   formatgraph: any | null;
-  schemaDefs: { [key: string]: CWLObjectType };
+  schemaDefs: { [key: string]: CommandInputArraySchema | CommandInputEnumSchema | CommandInputRecordSchema };
   inputs_record_schema: CWLObjectType;
   outputs_record_schema: CWLObjectType;
   container_engine: 'docker' | 'podman' | 'singularity';
@@ -450,24 +458,16 @@ export abstract class Process {
 
     this.schemaDefs = {};
 
-    const sd = getRequirement(this.tool, SchemaDefRequirement)[0];
+    const [sd, _] = getRequirement(this.tool, SchemaDefRequirement);
 
-    if (sd !== undefined) {
-      const sdtypes = copy.deepcopy(sd.types);
-      console.log(sdtypes);
-      // TODO
-      // avroizeType(sdtypes);
-      // let av = make_valid_avro(
-      //     sdtypes,
-      //     {t["name"]: t for t in sdtypes},
-      //     new Set(),
-      //     INPUT_OBJ_VOCAB,
-      // );
-      // for (let i of av) {
-      //     this.schemaDefs[i["name"]] = i;
-      // }
-
-      // make_avsc_object(convert_to_dict(av), this.names);
+    if (sd) {
+      const sdtypes = sd.types;
+      avroizeType(sdtypes);
+      const alltypes = {};
+      make_valid_avro(sdtypes, alltypes, new Set(), false, false, INPUT_OBJ_VOCAB);
+      for (const t of sdtypes) {
+        this.schemaDefs[t.name] = t;
+      }
     }
     // Build record schema from inputs
     this.inputs_record_schema = {
@@ -497,7 +497,7 @@ export abstract class Process {
       }
 
       c.type = avroizeType(c.type, c.name);
-
+      make_valid_avro(c.type, {}, new Set(), false, false, {});
       (this.inputs_record_schema['fields'] as any).push(c);
     }
     for (const i of this.tool.outputs) {
@@ -509,10 +509,10 @@ export abstract class Process {
       }
 
       c.type = avroizeType(c.type, c.name);
+      make_valid_avro(c.type, {}, new Set(), false, false, {});
 
       (this.outputs_record_schema['fields'] as any).push(c);
     }
-
     this.container_engine = 'docker';
     if (loadingContext.podman) {
       this.container_engine = 'podman';

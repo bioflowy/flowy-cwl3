@@ -391,7 +391,11 @@ export abstract class JobBase {
     //     _logger.exception("Exception while running job");
     //     processStatus = "permanentFail";
     // }
-    if (runtimeContext.research_obj !== undefined && this.prov_obj !== undefined && runtimeContext.process_run_id !== undefined) {
+    if (
+      runtimeContext.research_obj !== undefined &&
+      this.prov_obj !== undefined &&
+      runtimeContext.process_run_id !== undefined
+    ) {
       // creating entities for the outputs produced by each step (in the provenance document)
       this.prov_obj.record_process_end(String(this.name), runtimeContext.process_run_id, outputs, new Date());
     }
@@ -558,7 +562,12 @@ const CONTROL_CODE_RE = '\\x1b\\[[0-9;]*[a-zA-Z]';
 export abstract class ContainerCommandLineJob extends JobBase {
   static readonly CONTAINER_TMPDIR: string = '/tmp';
 
-  abstract get_from_requirements(r: any, pull_image: boolean, force_pull: boolean, tmp_outdir_prefix: string): Promise<string | undefined>;
+  abstract get_from_requirements(
+    r: any,
+    pull_image: boolean,
+    force_pull: boolean,
+    tmp_outdir_prefix: string,
+  ): Promise<string | undefined>;
 
   abstract create_runtime(env: { [key: string]: string }, runtime_context: any): [string[], any];
 
@@ -691,13 +700,12 @@ export abstract class ContainerCommandLineJob extends JobBase {
     } else {
       try {
         if (docker_req !== undefined && runtimeContext.use_container) {
-          img_id = await
-            this.get_from_requirements(
-              docker_req,
-              runtimeContext.pull_image,
-              runtimeContext.force_docker_pull,
-              runtimeContext.tmp_outdir_prefix,
-            )
+          img_id = await this.get_from_requirements(
+            docker_req,
+            runtimeContext.pull_image,
+            runtimeContext.force_docker_pull,
+            runtimeContext.tmp_outdir_prefix,
+          );
         }
         if (img_id === undefined) {
           if (this.builder.find_default_container) {
@@ -719,7 +727,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
           this.prov_obj.document.wasAssociatedWith(runtimeContext.process_run_id, container_agent);
         }
       } catch (err: any) {
-        console.log(err.stack)
+        console.log(err.stack);
         const container = runtimeContext.singularity ? 'Singularity' : 'Docker';
         _logger.debug(`${container} error`, err);
         if (docker_is_req) {

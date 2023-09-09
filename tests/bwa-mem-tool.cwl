@@ -4,14 +4,9 @@ cwlVersion: v1.2
 
 class: CommandLineTool
 
-requirements:
-  - class: InlineJavascriptRequirement
-  
 hints:
   - class: ResourceRequirement
     coresMin: 2
-  - class: DockerRequirement
-    dockerPull: docker.io/python:3-slim
 
 inputs:
   - id: reference
@@ -57,7 +52,7 @@ baseCommand: python3
 arguments:
   - bwa
   - mem
-  - valueFrom: ${runtime.cores}
+  - valueFrom: $(runtime.cores)
     position: 1
     prefix: -t
 

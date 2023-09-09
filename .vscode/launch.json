@@ -13,7 +13,7 @@
       "name": "test",
       "type": "node",
       "request": "launch",
-      "cwd": "${workspaceFolder}",
+      "cwd": "${workspaceFolder}/cwl-v1.2-1.2.1_proposed",
       "runtimeExecutable": "/home/uehara/.nodenv/shims/npm",
       "runtimeArgs": ["run", "test"]
     }

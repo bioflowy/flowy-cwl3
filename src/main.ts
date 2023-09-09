@@ -3,15 +3,20 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import cwlTsAuto from 'cwl-ts-auto';
 import yaml from 'js-yaml';
-import { v4 } from 'uuid';
 import { CommandLineTool } from './command_line_tool.js';
 import { LoadingContext, RuntimeContext } from './context.js';
 import { SingleJobExecutor } from './executors.js';
-import { _job_popen } from './job.js';
 import { _logger } from './loghandler.js';
 import { shortname, type Process, add_sizes } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import { visit_class, type CWLObjectType, normalizeFilesDirs, urlJoin, filePathToURI } from './utils.js';
+import {
+  visit_class,
+  type CWLObjectType,
+  normalizeFilesDirs,
+  urlJoin,
+  filePathToURI,
+  type CWLOutputType,
+} from './utils.js';
 
 function parseFile(filePath: string): object | null {
   const extname = path.extname(filePath).toLowerCase();
@@ -133,17 +138,38 @@ function init_job_order(
   }
   return job_order_object;
 }
-
 export async function main(): Promise<number> {
-  const doc = await cwlTsAuto.loadDocument('tests/bwa-mem-tool.cwl');
+  const test_path = path.join(process.cwd(), 'conformance_tests.yaml');
+  const content = fs.readFileSync(test_path, 'utf-8');
+  const data = yaml.load(content) as { [key: string]: any }[];
+  for (let index = 2; index < data.length; index++) {
+    const test = data[index];
+    console.log(test['id']);
+    console.log(test['doc']);
+    const job_path = test['job'] as string;
+    const tool_path = test['tool'] as string;
+    const expected_outputs = test['output'] as string;
+    const [output, status] = await exec(tool_path, job_path);
+    console.log(status);
+    const expected_str = JSON.stringify(expected_outputs, null, 2);
+    const output_str = JSON.stringify(output, null, 2);
+    if (expected_str !== output_str) {
+      console.log(`expected: ${expected_str}`);
+      console.log(`output: ${output_str}`);
+    }
+  }
+  return 1;
+}
+export async function exec(tool_path: string, job_path: string): Promise<[CWLOutputType, string]> {
+  const doc = await cwlTsAuto.loadDocument(tool_path);
   console.log(doc);
   if (!(doc instanceof cwlTsAuto.CommandLineTool)) {
-    return 1;
+    return [undefined, 'failed'];
   }
   const loadingContext = new LoadingContext({});
   const tool = new CommandLineTool(doc, loadingContext);
   console.log(tool);
-  const [job_order_object, input_basedir] = load_job_order(undefined, 'tests/bwa-mem-job.json');
+  const [job_order_object, input_basedir] = load_job_order(undefined, job_path);
   const initialized_job_order = init_job_order(
     job_order_object,
     tool,
@@ -158,5 +184,5 @@ export async function main(): Promise<number> {
   const [out, status] = await process_executor.execute(tool, initialized_job_order, runtimeContext);
   console.log(JSON.stringify(out));
   console.log(status);
-  return 0;
+  return [out, status];
 }

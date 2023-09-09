@@ -1,5 +1,10 @@
 import * as fs from 'node:fs';
-import { InlineJavascriptRequirement } from 'cwl-ts-auto';
+import {
+  CommandInputEnumSchema,
+  CommandInputRecordSchema,
+  InlineJavascriptRequirement,
+  InputRecordSchema,
+} from 'cwl-ts-auto';
 import { ValidationException, WorkflowException } from './errors.js';
 import * as expression from './expression.js';
 import { _logger } from './loghandler.js';
@@ -22,7 +27,7 @@ import {
   getRequirement,
 } from './utils.js';
 
-const INPUT_OBJ_VOCAB: { [key: string]: string } = {
+export const INPUT_OBJ_VOCAB: { [key: string]: string } = {
   Any: 'https://w3id.org/cwl/salad#Any',
   File: 'https://w3id.org/cwl/cwl#File',
   Directory: 'https://w3id.org/cwl/cwl#Directory',
@@ -49,9 +54,6 @@ export function substitute(value: string, replace: string): string {
     }
   }
   return value + replace;
-}
-function isEmptyObject(obj: object): boolean {
-  return Object.keys(obj).length === 0;
 }
 
 export class Builder {
@@ -142,13 +144,51 @@ export class Builder {
     }
     return null;
   }
-  validate(t, datum) {
+  validate(t, datum, raise_ex: boolean) {
     if (t === 'null' && !datum) {
-      return false;
+      if (raise_ex) {
+        throw new ValidationException(`${datum} is not null`);
+      }
+      return true;
     } else if (t === 'string' && isString(datum)) {
       return true;
     } else if (t === 'org.w3id.cwl.cwl.File' && datum instanceof Object && datum['class'] === 'File') {
       return true;
+    } else if (t === 'int' || t === 'long') {
+      if (typeof datum === 'number' && Number.MIN_SAFE_INTEGER <= datum && datum <= Number.MAX_SAFE_INTEGER) {
+        return true;
+      }
+      if (raise_ex) {
+        throw new ValidationException(`${datum} is not int`);
+      }
+      return false;
+    } else if (typeof t === 'number') {
+      if (typeof datum === 'number') {
+        return true;
+      }
+      if (raise_ex) {
+        throw new ValidationException(`the value ${datum} is not long`);
+      }
+      return false;
+    } else if (t instanceof CommandInputEnumSchema) {
+      return t.symbols.includes(datum);
+    } else if (t instanceof CommandInputRecordSchema) {
+      if (!(datum instanceof Object)) {
+        return false;
+      }
+      for (const ft of t.fields) {
+        const val = datum[ft.name];
+        if (!this.validate(ft.type, val, false)) {
+          return false;
+        }
+      }
+      return true;
+    } else if (Array.isArray(t)) {
+      for (let index = 0; index < t.length; index++) {
+        if (this.validate(t[index], datum, raise_ex)) {
+          return true;
+        }
+      }
     }
     return false;
   }
@@ -162,8 +202,14 @@ export class Builder {
     tail_pos: string | number[] | undefined = undefined,
   ): Promise<CommandLineBinding[] | undefined> {
     let bound_input = false;
-    for (const t of schema['type'] as any[]) {
-      if (this.validate(t, datum)) {
+    for (let t of schema['type'] as any[]) {
+      if (isString(t) && t in this.schemaDefs) {
+        t = this.schemaDefs[t];
+      } else if (t instanceof Object && 'name' in t && (t['name'] as string) in this.schemaDefs) {
+        t = this.schemaDefs[t['name']];
+      }
+
+      if (this.validate(t, datum, false)) {
         schema = JSON.parse(JSON.stringify(schema));
         schema['type'] = t;
         if (!value_from_expression) {
@@ -655,7 +701,7 @@ export class Builder {
     }
 
     const prefix = binding['prefix'] as string | undefined;
-    const sep = binding['separate'] || true;
+    const sep = !(binding['separate'] === false);
     if (prefix == null && !sep) {
       throw new WorkflowException("'separate' option can not be specified without prefix");
     }
