@@ -1,15 +1,15 @@
-import {createLogger,format,transports} from 'winston';
+import { createLogger, format, transports } from 'winston';
 export const _logger = createLogger({
-    level: 'info',  // Set the minimum log level to 'info'
-    format: format.combine(
-      format.simple()  // You can customize the log format as needed
-    ),
-    transports: [
-      new transports.Console()  // Log to the console (i.e., standard output)
-    ]
-  });
+  level: 'debug', // Set the minimum log level to 'info'
+  format: format.combine(
+    format.simple(), // You can customize the log format as needed
+  ),
+  transports: [
+    new transports.Console(), // Log to the console (i.e., standard output)
+  ],
+});
 
-  // TODO
+// TODO
 // function configureLogging(stderrHandler: logging.Handler, quiet: boolean, debug: boolean, enableColor: boolean, timestamps: boolean, baseLogger: logging.Logger = _logger) {
 //     let rdflibLogger = logging.getLogger("rdflib.term");
 //     rdflibLogger.addHandler(stderrHandler);

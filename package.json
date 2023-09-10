@@ -67,6 +67,7 @@
     "dist"
   ],
   "dependencies": {
+    "crypto": "^1.0.1",
     "cwl-ts-auto": "^0.1.3",
     "fs-extra": "^11.1.1",
     "glob": "^10.3.4",

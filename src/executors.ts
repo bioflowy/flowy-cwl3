@@ -46,7 +46,7 @@ class JobExecutor {
     job_order_object: CWLObjectType,
     runtime_context: RuntimeContext,
     logger: Logger = _logger,
-  ): Promise<[CWLObjectType | null, string] | [null, string]> {
+  ): Promise<[CWLObjectType | null, string]> {
     this.final_output = [];
     this.final_status = [];
 

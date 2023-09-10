@@ -6,7 +6,7 @@ export function abspath(src: string, basedir: string): string {
   let abpath: string;
   if (src.startsWith('file://')) {
     abpath = url.fileURLToPath(src);
-  } else if (src.startsWith("http://") || src.startsWith("https://")) {
+  } else if (src.startsWith('http://') || src.startsWith('https://')) {
     return src;
   } else {
     if (basedir.startsWith('file://')) {
@@ -25,7 +25,7 @@ export class StdFsAccess {
   }
 
   private _abs(p: string): string {
-    const p2 =abspath(p,this.basedir)
+    const p2 = abspath(p, this.basedir);
     return p2;
   }
 
@@ -35,11 +35,11 @@ export class StdFsAccess {
     return matches.map((match: any) => `file://${match}`); // Placeholder implementation
   }
 
-  async open(fn: string, mode: string) :Promise<fs.promises.FileHandle>{
+  async open(fn: string, mode: string): Promise<fs.promises.FileHandle> {
     return fs.promises.open(this._abs(fn), mode);
   }
-  async read(fn: string):Promise<string> {
-    return fs.promises.readFile(this._abs(fn),{encoding:"utf-8"})
+  async read(fn: string): Promise<string> {
+    return fs.promises.readFile(this._abs(fn), { encoding: 'utf-8' });
   }
   exists(fn: string): boolean {
     return fs.existsSync(this._abs(fn));
@@ -63,8 +63,12 @@ export class StdFsAccess {
     return entries.map((entry) => `file://${path.join(fn, entry)}`); // Placeholder implementation
   }
 
-  join(basePath: string, ...paths: string[]): string {
-    return path.join(basePath, ...paths);
+  join(...paths: string[]): string {
+    let count = paths.length - 1;
+    for (; 0 < count; count -= 1) {
+      if (paths[count].startsWith('/')) break;
+    }
+    return paths.slice(count).join('/');
   }
 
   realpath(p: string): string {

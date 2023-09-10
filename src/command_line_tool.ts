@@ -9,7 +9,7 @@ import { _logger } from './loghandler.js';
 import { PathMapper } from './pathmapper.js';
 import { Process, compute_checksums, shortname, uniquename } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import type { Tool } from './types.js';
+import type { CommandOutputParameter, Tool } from './types.js';
 import {
   type CWLObjectType,
   type CWLOutputType,
@@ -120,34 +120,33 @@ function revmap_file(builder: Builder, outdir: string, f: CWLObjectType): CWLObj
     delete f['dirname'];
   }
   if (f.hasOwnProperty('path')) {
-    const path = builder.fs_access.join(builder.outdir, f['path'] as string);
-    const uripath = fileUri(path);
+    const path1 = builder.fs_access.join(builder.outdir, f['path'] as string);
+    const uripath = fileUri(path1);
     delete f['path'];
     if (!f.hasOwnProperty('basename')) {
-      f['basename'] = require('node:path').basename(path);
+      f['basename'] = path.basename(path1);
     }
     if (!builder.pathmapper) {
       throw new Error("Do not call revmap_file using a builder that doesn't have a pathmapper.");
     }
-    const revmap_f = builder.pathmapper.reversemap(path);
+    const revmap_f = builder.pathmapper.reversemap(path1);
     if (revmap_f && !builder.pathmapper.mapper(revmap_f[0]).type.startsWith('Writable')) {
       f['location'] = revmap_f[1];
-    } else if (
-      uripath == outdir ||
-      uripath.startsWith(outdir + require('node:path').sep) ||
-      uripath.startsWith(`${outdir}/`)
-    ) {
+    } else if (uripath == outdir || uripath.startsWith(outdir + path.sep) || uripath.startsWith(`${outdir}/`)) {
       f['location'] = uripath;
     } else if (
-      path == builder.outdir ||
-      path.startsWith(builder.outdir + require('node:path').sep) ||
-      path.startsWith(`${builder.outdir}/`)
+      path1 == builder.outdir ||
+      path1.startsWith(builder.outdir + path.sep) ||
+      path1.startsWith(`${builder.outdir}/`)
     ) {
-      const joined_path = builder.fs_access.join(outdir, encodeURIComponent(path.substring(builder.outdir.length + 1)));
+      const joined_path = builder.fs_access.join(
+        outdir,
+        encodeURIComponent(path1.substring(builder.outdir.length + 1)),
+      );
       f['location'] = joined_path;
     } else {
       throw new WorkflowException(
-        `Output file path ${path} must be within designated output directory ${builder.outdir} or an input file pass through.`,
+        `Output file path ${path1} must be within designated output directory ${builder.outdir} or an input file pass through.`,
       );
     }
     return f;
@@ -483,7 +482,7 @@ export class CommandLineTool extends Process {
   check_output_items(initialWorkdir: cwlTsAuto.InitialWorkDirRequirement, ls: CWLObjectType[]): void {
     for (let i = 0; i < ls.length; i++) {
       const t2 = ls[i];
-      if (!(t2 instanceof Map)) {
+      if (!(t2 instanceof Object)) {
         throw new WorkflowException(`Entry at index ${i} of listing is not a record, was ${typeof t2}`);
       }
 
@@ -505,15 +504,15 @@ export class CommandLineTool extends Process {
         continue;
       }
 
-      if (!(t2['entry'] instanceof Map)) {
+      if (!(t2['entry'] instanceof Object)) {
         throw new WorkflowException(`Entry at index ${i} of listing is not a record, was ${typeof t2['entry']}`);
       }
 
-      if (!['File', 'Directory'].includes(t2['entry'].get('class'))) {
+      if (!['File', 'Directory'].includes(t2['entry']['class'])) {
         throw new WorkflowException(`Entry at index ${i} of listing is not a File or Directory object, was ${t2}`);
       }
 
-      if (t2.get('entryname') || t2.get('writable')) {
+      if (t2['entryname'] || t2['writable']) {
         const t3 = JSON.parse(JSON.stringify(t2));
         const t2entry = t3['entry'] as CWLObjectType;
         if (t3.get('entryname')) {
@@ -839,7 +838,7 @@ export class CommandLineTool extends Process {
       let cmd: string[] = []; // type: List[str]
       for (const b of builder.bindings) {
         let arg = await builder.generate_arg(b);
-        if (b.get('shellQuote', true)) {
+        if (!(b.shellQuote === false)) {
           arg = aslist(arg).map((a) => quote(a));
         }
         cmd = [...cmd, ...aslist(arg)];
@@ -879,7 +878,7 @@ export class CommandLineTool extends Process {
   }
   async setup_std_io(builder: any, j: any, reffiles: any[], debug: boolean): Promise<void> {
     if (this.tool.stdin) {
-      const stdin_eval = builder.do_eval(this.tool['stdin']);
+      const stdin_eval = await builder.do_eval(this.tool['stdin']);
       if (!(typeof stdin_eval === 'string' || stdin_eval === null)) {
         throw new Error(
           `'stdin' expression must return a string or null. Got ${stdin_eval} for ${this.tool['stdin']}.`,
@@ -892,7 +891,7 @@ export class CommandLineTool extends Process {
     }
 
     if (this.tool.stderr) {
-      const stderr_eval = builder.do_eval(this.tool.stderr);
+      const stderr_eval = await builder.do_eval(this.tool.stderr);
       if (typeof stderr_eval !== 'string') {
         throw new Error(`'stderr' expression must return a string. Got ${stderr_eval} for ${this.tool['stderr']}.`);
       }
@@ -1051,7 +1050,7 @@ export class CommandLineTool extends Process {
     j.pathmapper = builder.pathmapper;
     j.collect_outputs = async (outdir, rcode) =>
       this.collect_output_ports(
-        this.tool['outputs'],
+        this.tool.outputs,
         builder,
         outdir,
         rcode,
@@ -1065,7 +1064,7 @@ export class CommandLineTool extends Process {
     yield j;
   }
   async collect_output_ports(
-    ports: {} | Set<CWLObjectType>,
+    ports: CommandOutputParameter[] | Set<CWLObjectType>,
     builder: Builder,
     outdir: string,
     rcode: number,
@@ -1085,18 +1084,12 @@ export class CommandLineTool extends Process {
         if (debug) {
           _logger.debug(`Raw output from ${custom_output}: ${JSON.stringify(ret, null, 4)}`);
         }
-      } else {
-        // for (let i = 0; i < ports.length; i++) {
-        //     let port = ports[i];
-        //     const fragment = shortname(port["id"]);
-        //     ret[fragment] = this.collect_output(
-        //         port,
-        //         builder,
-        //         outdir,
-        //         fs_access,
-        //         compute_checksum,
-        //     );
-        // }
+      } else if (Array.isArray(ports)) {
+        for (let i = 0; i < ports.length; i++) {
+          const port = ports[i] as any;
+          const fragment = shortname(port['id']);
+          ret[fragment] = await this.collect_output(port, builder, outdir, fs_access, compute_checksum);
+        }
       }
       if (ret) {
         const revmap = (val) => revmap_file(builder, outdir, val);
@@ -1154,7 +1147,7 @@ export class CommandLineTool extends Process {
 
     try {
       for (let gb of aslist(binding['glob'])) {
-        gb = builder.do_eval(gb);
+        gb = await builder.do_eval(gb);
         if (gb) {
           let gb_eval_fail = false;
           if (typeof gb !== 'string') {
@@ -1243,7 +1236,7 @@ export class CommandLineTool extends Process {
     }
   }
   async collect_secondary_files(
-    schema: CWLObjectType,
+    schema: CommandOutputParameter,
     builder: Builder,
     result: CWLOutputType | null,
     debug: boolean,
@@ -1256,7 +1249,7 @@ export class CommandLineTool extends Process {
           primary['secondaryFiles'] = [];
         }
         const pathprefix = primary['path'].substring(0, primary['path'].lastIndexOf(path.sep) + 1);
-        for (const sf of aslist(schema['secondaryFiles'])) {
+        for (const sf of aslist(schema.secondaryFiles)) {
           let sf_required: boolean;
           if ('required' in sf) {
             const sf_required_eval = await builder.do_eval(sf['required'], primary);
@@ -1303,9 +1296,9 @@ export class CommandLineTool extends Process {
       }
     }
   }
-  handle_output_format(schema: CWLObjectType, builder: Builder, result: CWLOutputType, debug: boolean): void {
-    if ('format' in schema) {
-      const format_field: string = schema['format'] as string;
+  handle_output_format(schema: CommandOutputParameter, builder: Builder, result: CWLOutputType, debug: boolean): void {
+    if (schema.format) {
+      const format_field: string = schema.format;
       if (format_field.includes('$(') || format_field.includes('${')) {
         aslist(result).forEach((primary, index) => {
           const format_eval: any = builder.do_eval(format_field, primary);
@@ -1326,7 +1319,7 @@ export class CommandLineTool extends Process {
     }
   }
   async collect_output(
-    schema: CWLObjectType,
+    schema: CommandOutputParameter,
     builder: Builder,
     outdir: string,
     fs_access: StdFsAccess,
@@ -1334,9 +1327,9 @@ export class CommandLineTool extends Process {
   ): Promise<CWLOutputType | undefined> {
     const empty_and_optional = false;
     const debug = _logger.isDebugEnabled();
-    const result: CWLOutputType | undefined = undefined;
-    if (schema.hasOwnProperty('outputBinding')) {
-      const binding = schema['outputBinding'] as Object;
+    let result: CWLOutputType | undefined = undefined;
+    if (schema.outputBinding) {
+      const binding = schema.outputBinding;
       const revmap = revmap_file.bind(null, builder, outdir);
       const [r, globpatterns] = await this.glob_output(
         builder,
@@ -1349,20 +1342,19 @@ export class CommandLineTool extends Process {
       );
       let optional = false;
       let single = false;
-      if (Array.isArray(schema['type'])) {
-        if (schema['type'].includes('null')) {
+      if (Array.isArray(schema.type)) {
+        if (schema.type.includes('null')) {
           optional = true;
         }
-        if (schema['type'].includes('File') || schema['type'].includes('Directory')) {
+        if (schema.type.includes('File') || schema.type.includes('Directory')) {
           single = true;
         }
-      } else if (schema['type'] === 'File' || schema['type'] === 'Directory') {
+      } else if (schema.type === 'File' || schema.type === 'Directory') {
         single = true;
       }
-      let result: CWLOutputType;
-      if (binding.hasOwnProperty('outputEval')) {
+      if (binding.outputEval) {
         try {
-          result = await builder.do_eval(binding['outputEval'] as CWLOutputType, { context: r });
+          result = await builder.do_eval(binding.outputEval, { context: r });
         } catch (error) {
           // Log the error here
         }
@@ -1386,7 +1378,7 @@ export class CommandLineTool extends Process {
           // Log the error here
         }
       }
-      if (schema.hasOwnProperty('secondaryFiles')) {
+      if (schema.secondaryFiles) {
         await this.collect_secondary_files(schema, builder, result, debug, fs_access, revmap);
       }
       this.handle_output_format(schema, builder, result, debug);
@@ -1395,11 +1387,12 @@ export class CommandLineTool extends Process {
         return undefined;
       }
     }
-    if (!result && !empty_and_optional && typeof schema['type'] === 'object' && schema['type']['type'] === 'record') {
+    if (!result && !empty_and_optional && typeof schema.type === 'object' && schema.type['type'] === 'record') {
       const out = {};
       for (const field of schema['type']['fields'] as CWLObjectType[]) {
         out[shortname(field['name'] as string)] = this.collect_output(
-          field,
+          // todo
+          field as unknown as CommandOutputParameter,
           builder,
           outdir,
           fs_access,

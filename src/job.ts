@@ -91,7 +91,7 @@ export async function _job_popen(
     stdout = fs.openSync(stdout_path, 'w');
   }
   if (stderr_path !== undefined) {
-    stderr = fs.openSync(stdout_path, 'w');
+    stderr = fs.openSync(stderr_path, 'w');
   }
   const [cmd, ...args] = commands;
   return new Promise((resolve, reject) => {
@@ -384,7 +384,10 @@ export abstract class JobBase {
       //     }
       //     processStatus = "permanentFail";
     } catch (err) {
-      _logger.error(`[job ${this.name}] Job error:\n${err}`);
+      if (err instanceof Error) {
+        _logger.error(`[job ${this.name}] Job error${err.message}\n${err.stack}`);
+        console.log(err);
+      }
       processStatus = 'permanentFail';
     }
     //  catch {

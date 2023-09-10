@@ -1,10 +1,10 @@
 /**
  * Classes and methods relevant for all CWL Process types.
  */
+import * as crypto from 'node:crypto';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { inspect } from 'node:util';
 import cwlTsAuto, {
   CommandInputArraySchema,
   CommandInputEnumSchema,
@@ -287,7 +287,7 @@ function fill_in_defaults(inputs: CommandInputParameter[], job: CWLObjectType, f
       continue;
     } else if (job[fieldname] == null && inp.default_) {
       job[fieldname] = JSON.parse(JSON.stringify(inp.default_));
-    } else if (job[fieldname] == null && 'null' in aslist(inp['type'])) {
+    } else if (job[fieldname] == null && aslist(inp['type']).includes('null')) {
       job[fieldname] = undefined;
     } else {
       throw new WorkflowException(`Missing required input parameter '${shortname(String(inp['id']))}'`);
@@ -415,7 +415,7 @@ export abstract class Process {
     this.tool = toolpath_object;
     const debug = loadingContext.debug;
     this.requirements = copy.deepcopy(getDefault(loadingContext.requirements, []));
-    const tool_requirements = this.tool['requirements'] || [];
+    const tool_requirements = this.tool.requirements || [];
 
     if (tool_requirements === null) {
       throw new ValidationException(
@@ -1123,12 +1123,24 @@ async function calculateSHA1(filePath: string): Promise<string> {
     });
   });
 }
-export async function compute_checksums(fs_access: StdFsAccess, fileobj: CWLObjectType): Promise<void> {
-  // TODO
-  if (!('checksum' in fileobj)) {
+export async function compute_checksums(fsAccess: StdFsAccess, fileobj: CWLObjectType): Promise<void> {
+  if (!fileobj['checksum']) {
+    const checksum = crypto.createHash('sha1');
     const location = fileobj['location'] as string;
-    const hash = await createHash(location);
-    fileobj['checksum'] = `sha1$${hash}`;
-    fileobj['size'] = fs_access.size(location);
+
+    const fileHandle = await fsAccess.open(location, 'r');
+    let contents = await fileHandle.readFile();
+
+    while (contents.length > 0) {
+      checksum.update(contents);
+      contents = await fileHandle.readFile();
+    }
+
+    await fileHandle.close();
+
+    // eslint-disable-next-line require-atomic-updates
+    fileobj['checksum'] = `sha1$${checksum.digest('hex')}`;
+    // eslint-disable-next-line require-atomic-updates
+    fileobj['size'] = fsAccess.size(location);
   }
 }

@@ -59,7 +59,7 @@ export function substitute(value: string, replace: string): string {
 export class Builder {
   job: any;
   files: any[];
-  bindings: any[];
+  bindings: CommandLineBinding[];
   schemaDefs: { [key: string]: any };
   names: any;
   requirements?: undefined | ToolRequirement;
@@ -88,7 +88,7 @@ export class Builder {
   constructor(
     job: any,
     files: any[],
-    bindings: any[],
+    bindings: CommandLineBinding[],
     schemaDefs: { [key: string]: any },
     names: any,
     requirements: undefined | ToolRequirement,
@@ -152,6 +152,16 @@ export class Builder {
       return true;
     } else if (t === 'string' && isString(datum)) {
       return true;
+    } else if (t === 'boolean' && typeof datum === 'boolean') {
+      return true;
+    } else if (['org.w3id.cwl.salad.Any', 'Any'].includes(t)) {
+      if (datum) {
+        return true;
+      }
+      if (raise_ex) {
+        throw new ValidationException("'Any' type must be non-null");
+      }
+      return false;
     } else if (t === 'org.w3id.cwl.cwl.File' && datum instanceof Object && datum['class'] === 'File') {
       return true;
     } else if (t === 'int' || t === 'long') {
@@ -688,30 +698,30 @@ export class Builder {
       return value.toString();
     }
   }
-  async generate_arg(binding: CWLObjectType): Promise<string[]> {
-    let value = binding['datum'];
+  async generate_arg(binding: CommandLineBinding): Promise<string[]> {
+    let value = binding.datum;
     const debug = _logger.isDebugEnabled();
 
-    if ('valueFrom' in binding && binding['valueFrom']) {
+    if (binding.valueFrom) {
       try {
-        value = await this.do_eval(String(binding['valueFrom']), value);
+        value = await this.do_eval(binding.valueFrom, value);
       } catch (e) {
         throw e;
       }
     }
 
-    const prefix = binding['prefix'] as string | undefined;
-    const sep = !(binding['separate'] === false);
+    const prefix = binding.prefix;
+    const sep = !(binding.separate === false);
     if (prefix == null && !sep) {
       throw new WorkflowException("'separate' option can not be specified without prefix");
     }
 
     let argl: CWLOutputType[] = [];
     if (value instanceof Array) {
-      if (binding['itemSeparator'] && value.length > 0) {
-        const itemSeparator = String(binding['itemSeparator']);
+      if (binding.itemSeparator && value.length > 0) {
+        const itemSeparator = binding.itemSeparator;
         argl = [value.map((v) => this.tostr(v)).join(itemSeparator)];
-      } else if (binding['valueFrom']) {
+      } else if (binding.valueFrom) {
         const v2 = value.map((v) => this.tostr(v));
         return (prefix ? [prefix] : []).concat(v2);
       } else if (prefix && value.length > 0) {

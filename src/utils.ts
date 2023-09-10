@@ -101,10 +101,10 @@ export function fileUri(inputPath: string, splitFrag = false): string {
   } else {
     urlPath = pathToFileURL(inputPath);
   }
-  if (urlPath.startsWith('//')) {
+  if (urlPath.startsWith('/')) {
     return `file:${urlPath}${frag}`;
   }
-  return `file://${urlPath}${frag}`;
+  return `${urlPath}${frag}`;
 }
 export function copyTree(src: string, dest: string): void {
   if (!fs.existsSync(dest)) {

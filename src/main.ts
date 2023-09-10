@@ -1,11 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import cwlTsAuto from 'cwl-ts-auto';
 import yaml from 'js-yaml';
 import { CommandLineTool } from './command_line_tool.js';
 import { LoadingContext, RuntimeContext } from './context.js';
 import { SingleJobExecutor } from './executors.js';
+import { loadDocument } from './loader.js';
 import { _logger } from './loghandler.js';
 import { shortname, type Process, add_sizes } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
@@ -142,7 +142,8 @@ export async function main(): Promise<number> {
   const test_path = path.join(process.cwd(), 'conformance_tests.yaml');
   const content = fs.readFileSync(test_path, 'utf-8');
   const data = yaml.load(content) as { [key: string]: any }[];
-  for (let index = 2; index < data.length; index++) {
+  for (let index = 13; index < data.length; index++) {
+    console.log(`test index =${index}`);
     const test = data[index];
     console.log(test['id']);
     console.log(test['doc']);
@@ -161,14 +162,8 @@ export async function main(): Promise<number> {
   return 1;
 }
 export async function exec(tool_path: string, job_path: string): Promise<[CWLOutputType, string]> {
-  const doc = await cwlTsAuto.loadDocument(tool_path);
-  console.log(doc);
-  if (!(doc instanceof cwlTsAuto.CommandLineTool)) {
-    return [undefined, 'failed'];
-  }
   const loadingContext = new LoadingContext({});
-  const tool = new CommandLineTool(doc, loadingContext);
-  console.log(tool);
+  const [tool] = await loadDocument(tool_path, loadingContext);
   const [job_order_object, input_basedir] = load_job_order(undefined, job_path);
   const initialized_job_order = init_job_order(
     job_order_object,
