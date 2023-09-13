@@ -72,7 +72,7 @@ export class ExpressionJob {
         this.output_callback(ev as CWLObjectType, 'success');
       }
     } catch (err: any) {
-      _logger.warning('Failed to evaluate expression:\n%s', err.toString(), { exc_info: runtimeContext.debug });
+      _logger.warn('Failed to evaluate expression:\n%s', err.toString(), { exc_info: runtimeContext.debug });
 
       if (this.output_callback) {
         this.output_callback({}, 'permanentFail');

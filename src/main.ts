@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import ivm from 'isolated-vm';
 import yaml from 'js-yaml';
 import { CommandLineTool } from './command_line_tool.js';
 import { LoadingContext, RuntimeContext } from './context.js';
@@ -138,11 +139,12 @@ function init_job_order(
   }
   return job_order_object;
 }
+
 export async function main(): Promise<number> {
   const test_path = path.join(process.cwd(), 'conformance_tests.yaml');
   const content = fs.readFileSync(test_path, 'utf-8');
   const data = yaml.load(content) as { [key: string]: any }[];
-  for (let index = 13; index < data.length; index++) {
+  for (let index = 16; index < data.length; index++) {
     console.log(`test index =${index}`);
     const test = data[index];
     console.log(test['id']);
@@ -150,13 +152,24 @@ export async function main(): Promise<number> {
     const job_path = test['job'] as string;
     const tool_path = test['tool'] as string;
     const expected_outputs = test['output'] as string;
-    const [output, status] = await exec(tool_path, job_path);
-    console.log(status);
-    const expected_str = JSON.stringify(expected_outputs, null, 2);
-    const output_str = JSON.stringify(output, null, 2);
-    if (expected_str !== output_str) {
-      console.log(`expected: ${expected_str}`);
-      console.log(`output: ${output_str}`);
+    try {
+      const [output, status] = await exec(tool_path, job_path);
+      console.log(status);
+      if (test['should_fail']) {
+        console.log('should_failed flag is true, but no error occurred.');
+      }
+      const expected_str = JSON.stringify(expected_outputs, null, 2);
+      const output_str = JSON.stringify(output, null, 2);
+      if (expected_str !== output_str) {
+        console.log(`expected: ${expected_str}`);
+        console.log(`output: ${output_str}`);
+      }
+    } catch (e: any) {
+      if (!test['should_fail']) {
+        console.log(e);
+      } else {
+        console.log('OK expected error has occurred');
+      }
     }
   }
   return 1;
@@ -171,13 +184,9 @@ export async function exec(tool_path: string, job_path: string): Promise<[CWLOut
     (basedir) => new StdFsAccess(basedir),
     input_basedir,
   );
-  console.log(initialized_job_order);
-  console.log(input_basedir);
   const runtimeContext = new RuntimeContext();
   runtimeContext.basedir = input_basedir;
   const process_executor = new SingleJobExecutor();
   const [out, status] = await process_executor.execute(tool, initialized_job_order, runtimeContext);
-  console.log(JSON.stringify(out));
-  console.log(status);
   return [out, status];
 }

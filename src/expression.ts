@@ -1,3 +1,4 @@
+import exp from 'node:constants';
 import type { InlineJavascriptRequirement } from 'cwl-ts-auto';
 import IsolatedVM from 'isolated-vm';
 import { JavascriptException, SubstitutionError, WorkflowException } from './errors.js';
@@ -100,6 +101,16 @@ interface JSEngine {
   eval(scan: string, jslib: string, rootvars: { [key: string]: any }): Promise<CWLOutputType>;
 }
 class JSEngine1 implements JSEngine {
+  code_fragment_to_js(jscript: string, jslib = ''): string {
+    let inner_js = '';
+    if (jscript.length > 1 && jscript[0] == '{') {
+      inner_js = jscript;
+    } else {
+      inner_js = `{return JSON.stringify(${jscript});}`;
+    }
+
+    return `"use strict";\n${jslib}\n(function()${inner_js})()`;
+  }
   async eval(expr: string, jslib: string, rootvars: { [key: string]: any }): Promise<CWLOutputType> {
     const isolate = new IsolatedVM.Isolate({ memoryLimit: 128 });
 
@@ -110,10 +121,13 @@ class JSEngine1 implements JSEngine {
     for (const key of Object.keys(rootvars)) {
       context.global.setSync(key, new IsolatedVM.ExternalCopy(rootvars[key]).copyInto());
     }
-
+    const jail = context.global;
+    jail.setSync('global', jail.derefInto());
     // Contextにスクリプトを実行する
-    const script = isolate.compileScriptSync(`${jslib}\n${expr}`);
-    const rslt = await script.run(context);
+    const scr = this.code_fragment_to_js(expr, jslib);
+    const script = isolate.compileScriptSync(scr);
+    const rslt_str = await script.run(context);
+    const rslt = JSON.parse(rslt_str);
     return rslt;
   }
 }
