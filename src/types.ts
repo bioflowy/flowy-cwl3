@@ -93,6 +93,10 @@ export class CommandInputParameter {
   default_?: undefined | any;
   type: ToolType;
   inputBinding?: undefined | cwlTsAuto.CommandLineBinding;
+  _tool_entry?: cwlTsAuto.CommandInputParameter
+   id?: string;
+   used_by_step?: boolean;
+   not_connected?: boolean;
 }
 export class CommandOutputParameter {
   extensionFields?: { [key: string]: any };
@@ -105,17 +109,17 @@ export class CommandOutputParameter {
   type: ToolType;
   outputBinding?: undefined | cwlTsAuto.CommandOutputBinding;
 }
-export function convertCommandInputParameter(input: cwlTsAuto.CommandInputParameter) {
+export function convertCommandInputParameter(input: cwlTsAuto.CommandInputParameter|cwlTsAuto.WorkflowStepInput) {
   const input2 = new CommandInputParameter();
   transferProperties(input, input2);
   return input2;
 }
-export function convertCommandOutputParameter(output: cwlTsAuto.CommandOutputParameter) {
+export function convertCommandOutputParameter(output: cwlTsAuto.CommandOutputParameter|cwlTsAuto.WorkflowStepOutput) {
   const output2 = new CommandOutputParameter();
   transferProperties(output, output2);
   return output2;
 }
-function transferProperties(source: any, target: any, exclude: string[] = []): void {
+export function transferProperties(source: any, target: any, exclude: string[] = []): void {
   for (const key of Object.keys(source)) {
     if (!(key in exclude) && key in target) {
       target[key] = source[key];
@@ -124,8 +128,8 @@ function transferProperties(source: any, target: any, exclude: string[] = []): v
 }
 export interface Tool {
   id?: undefined | string;
-  inputs: cwlTsAuto.CommandInputParameter[];
-  outputs: cwlTsAuto.CommandOutputParameter[];
+  inputs?: cwlTsAuto.CommandInputParameter[];
+  outputs?: cwlTsAuto.CommandOutputParameter[];
   requirements?: undefined | ToolRequirement;
   hints?: undefined | any[];
   baseCommand?: undefined | string | string[];

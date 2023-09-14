@@ -6,7 +6,7 @@
       "type": "node",
       "request": "launch",
       "cwd": "${workspaceFolder}",
-      "runtimeExecutable": "/home/uehara/.nodenv/shims/npm",
+      "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"]
     },
     {

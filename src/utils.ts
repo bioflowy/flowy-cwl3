@@ -41,14 +41,14 @@ export type CWLOutputType =
 
 export type CWLObjectType = MutableMapping<CWLOutputType | undefined>;
 
-export type JobsType = CommandLineJob | JobBase | ExpressionJob | CallbackJob | undefined; // | WorkflowJob  ;
+export type JobsType = CommandLineJob | JobBase | ExpressionJob | CallbackJob | undefined;// | WorkflowJob  ;
 export type JobsGeneratorType = AsyncGenerator<JobsType, void>;
 export type OutputCallbackType = (arg1: CWLObjectType, arg2: string) => void;
 // type ResolverType = (Loader, string)=>string?;
 // type DestinationsType = MutableMapping<string, CWLOutputType?>;
 // type ScatterDestinationsType = MutableMapping<string, (CWLOutputType|undefined)[]>;
 // type ScatterOutputCallbackType = (ScatterDestinationsType?, string)=> void;
-// type SinkType = CWLOutputType | CWLObjectType;
+export type SinkType = CWLOutputType | CWLObjectType;
 export type DirectoryType = {
   class: string;
   listing: CWLObjectType[];

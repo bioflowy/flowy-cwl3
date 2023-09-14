@@ -14,15 +14,13 @@ import { _logger } from './loghandler.js';
 import { shortname, uniquename } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
 import { CWLObjectType, CWLOutputType, JobsGeneratorType, OutputCallbackType, ParametersType, ScatterDestinationsType, ScatterOutputCallbackType, SinkType, WorkflowStateItem, adjustDirObjs, aslist, get_listing } from './utils';
-
-if (TYPE_CHECKING) {
-    import { ProvenanceProfile } from './cwlprov.provenance_profile';
-    import { Workflow, WorkflowStep } from './workflow';
-}
+import { Workflow, WorkflowStep } from './workflow.js';
+import * as cwlTsAuto from 'cwl-ts-auto'
+import { do_eval } from './expression.js';
 
 class WorkflowJobStep {
     step: WorkflowStep;
-    tool: any;
+    tool: cwlTsAuto.WorkflowStep ;
     id: string;
     submitted: boolean;
     iterable?: JobsGeneratorType;
@@ -42,7 +40,7 @@ class WorkflowJobStep {
         this.parent_wf = step.parent_wf;
     }
 
-    *job(joborder: CWLObjectType, output_callback? OutputCallbackType, runtimeContext: RuntimeContext) {
+    *job(joborder: CWLObjectType, output_callback :OutputCallbackType, runtimeContext: RuntimeContext) {
         let { ...context } = runtimeContext;
         context.part_of = this.name;
         context.name = shortname(this.id);
@@ -194,7 +192,7 @@ function* nested_crossproduct_scatter(
     rc.setTotal(jobl, steps);
     yield* parallel_steps(steps, rc, runtimeContext);
 }
-crossproduct_size(joborder: CWLObjectType, scatter_keys: MutableSequence<string>): number {
+function crossproduct_size(joborder: CWLObjectType, scatter_keys: string[]): number {
     let scatter_key = scatter_keys[0];
     let ssum;
 
@@ -209,10 +207,10 @@ crossproduct_size(joborder: CWLObjectType, scatter_keys: MutableSequence<string>
     return ssum;
 }
 
-flat_crossproduct_scatter(
+function flat_crossproduct_scatter(
     process: WorkflowJobStep,
     joborder: CWLObjectType,
-    scatter_keys: MutableSequence<string>,
+    scatter_keys: string[],
     output_callback: ScatterOutputCallbackType,
     runtimeContext: RuntimeContext,
 ): JobsGeneratorType {
@@ -229,10 +227,10 @@ flat_crossproduct_scatter(
     return parallel_steps(steps, callback, runtimeContext);
 }
 
-_flat_crossproduct_scatter(
+function _flat_crossproduct_scatter(
     process: WorkflowJobStep,
     joborder: CWLObjectType,
-    scatter_keys: MutableSequence<string>,
+    scatter_keys: string[],
     callback: ReceiveScatterOutput,
     startindex: number,
     runtimeContext: RuntimeContext,
@@ -275,7 +273,7 @@ _flat_crossproduct_scatter(
 function dotproduct_scatter(
     process: WorkflowJobStep,
     joborder: CWLObjectType,
-    scatter_keys: MutableSequence<string>,
+    scatter_keys: string[],
     output_callback: ScatterOutputCallbackType,
     runtimeContext: RuntimeContext,
 ): JobsGeneratorType {
@@ -482,12 +480,12 @@ function objectFromState(
     }
     return inputobj;
 }
-class WorkflowJob {
-    workflow: any;
+export class WorkflowJob {
+    workflow: Workflow;
     prov_obj: ProvenanceProfile | null;
     parent_wf: ProvenanceProfile | null;
-    tool: any;
-    steps: Array<WorkflowJobStep>;
+    tool: cwlTsAuto.Workflow;
+    steps: WorkflowJobStep[];
     state: { [key: string]: WorkflowStateItem | null };
     processStatus: string;
     did_callback: boolean;
@@ -495,7 +493,7 @@ class WorkflowJob {
     outdir: any;
     name: string;
 
-    constructor(workflow: any, runtimeContext: any) {
+    constructor(workflow: Workflow, runtimeContext: any) {
         this.workflow = workflow;
         this.prov_obj = null;
         this.parent_wf = null;
@@ -512,24 +510,24 @@ class WorkflowJob {
         this.outdir = runtimeContext.get_outdir();
 
         this.name = uniquename(`workflow ${
-            getdefault(runtimeContext.name, shortname(this.workflow.tool.get("id", "embedded")))}
+            getdefault(runtimeContext.name, shortname(this.workflow.tool.id || "embedded"))}
         `);
 
         _logger.debug(
             "[%s] initialized from %s",
             this.name,
-            this.tool.get("id", `workflow embedded in ${runtimeContext.part_of}`),
+            this.tool.id || `workflow embedded in ${runtimeContext.part_of}`,
         );
     }
 
     do_output_callback(final_output_callback: any) {
-        const supportsMultipleInput = Boolean(this.workflow.get_requirement("MultipleInputFeatureRequirement")[0]);
+        const supportsMultipleInput = Boolean(this.workflow.getRequirement(cwlTsAuto.MultipleInputFeatureRequirement)[0]);
 
         let wo: any | null = null;
         try {
             wo = object_from_state(
                 this.state,
-                this.tool["outputs"],
+                this.tool.outputs,
                 true,
                 supportsMultipleInput,
                 "outputSource",
@@ -553,7 +551,7 @@ class WorkflowJob {
         }
 
         _logger.info("[%s] completed %s", this.name, this.processStatus);
-        if (_logger.isEnabledFor(logging.DEBUG)) {
+        if (_logger.isDebugEnabled()) {
             _logger.debug("[%s] outputs %s", this.name, JSON.stringify(wo, null, 4));
         }
 
@@ -561,193 +559,192 @@ class WorkflowJob {
 
         final_output_callback(wo, this.processStatus);
     }
-}
-receive_output(
-    step: WorkflowJobStep,
-    outputparms: CWLObjectType[],
-    final_output_callback: OutputCallbackType,
-    jobout: CWLObjectType,
-    processStatus: string,
-) {
-    for (let i of outputparms) {
-        if ("id" in i) {
-            let iid = i["id"] as string;
-            if (iid in jobout) {
-                this.state[iid] = new WorkflowStateItem(i, jobout[iid], processStatus);
-            } else {
-                _logger.error(`[${step.name}] Output is missing expected field ${iid}`);
-                processStatus = "permanentFail";
+    receive_output(
+        step: WorkflowJobStep,
+        outputparms: CWLObjectType[],
+        final_output_callback: OutputCallbackType,
+        jobout: CWLObjectType,
+        processStatus: string,
+    ) {
+        for (let i of outputparms) {
+            if ("id" in i) {
+                let iid = i["id"] as string;
+                if (iid in jobout) {
+                    this.state[iid] = new WorkflowStateItem(i, jobout[iid], processStatus);
+                } else {
+                    _logger.error(`[${step.name}] Output is missing expected field ${iid}`);
+                    processStatus = "permanentFail";
+                }
             }
         }
-    }
 
-    if (_logger.isEnabledFor(logging.DEBUG)) {
-        _logger.debug(`[${step.name}] produced output ${json_dumps(jobout, 4)}`);
-    }
-
-    if (!["success", "skipped"].includes(processStatus)) {
-        if (this.processStatus != "permanentFail") {
-            this.processStatus = processStatus;
-        }
-        _logger.warning(`[${step.name}] completed ${processStatus}`);
-    } else {
-        _logger.info(`[${step.name}] completed ${processStatus}`);
-    }
-
-    step.completed = true;
-    step.iterable = null;
-    this.made_progress = true;
-
-    let completed = this.steps.filter(s => s.completed).length;
-    if (completed == this.steps.length) {
-        this.do_output_callback(final_output_callback);
-    }
-}
-tryMakeJob(
-    this: any,
-    step: WorkflowJobStep,
-    finalOutputCallback: OutputCallbackType | undefined,
-    runtimeContext: RuntimeContext,
-): IterableIterator<JobsGeneratorType> {
-    let containerEngine: string = "docker";
-    if (runtimeContext.podman) {
-        containerEngine = "podman";
-    } else if (runtimeContext.singularity) {
-        containerEngine = "singularity";
-    }
-    if (step.submitted) return;
-
-    const inputParms = step.tool["inputs"];
-    const outputParms = step.tool["outputs"];
-
-    const supportsMultipleInput = Boolean(
-        this.workflow.getRequirement("MultipleInputFeatureRequirement")[0]
-    );
-
-    try {
-        const inputObj = objectFromState(
-            this.state, inputParms, false, supportsMultipleInput, "source"
-        );
-        if (!inputObj) {
-            _logger.debug(`[${this.name}] job step ${step.id} not ready`);
-            return;
+        if (_logger.isDebugEnabled()) {
+            _logger.debug(`[${step.name}] produced output ${json_dumps(jobout, 4)}`);
         }
 
-        _logger.info(`[${this.name}] starting ${step.name}`);
-
-        const callback = this.receiveOutput.bind(
-            this, step, outputParms, finalOutputCallback
-        );
-
-        const valueFrom: {
-            [key: string]: any;
-        } = {};
-        step.tool["inputs"].forEach((i: any) => {
-            if ("valueFrom" in i) valueFrom[i["id"]] = i["valueFrom"];
-        });
-
-        const loadContents = new Set(
-            step.tool["inputs"].map((i: any) => i.get("loadContents") && i["id"])
-        );
-
-        if (Object.keys(valueFrom).length > 0 &&
-            !Boolean(this.workflow.getRequirement("StepInputExpressionRequirement")[0])
-        ) {
-            throw new WorkflowException(
-                "Workflow step contains valueFrom but StepInputExpressionRequirement not in requirements"
-            );
+        if (!["success", "skipped"].includes(processStatus)) {
+            if (this.processStatus != "permanentFail") {
+                this.processStatus = processStatus;
+            }
+            _logger.warn(`[${step.name}] completed ${processStatus}`);
+        } else {
+            _logger.info(`[${step.name}] completed ${processStatus}`);
         }
 
-        const postScatterEval = (io: CWLObjectType): CWLObjectType | undefined => {       
-
-        // ... rest of the code
-    }
-    catch (err) {
-        if (err instanceof WorkflowException) throw err;
-       
-        _logger.error("Unhandled exception", err);
-       
-        this.processStatus = "permanentFail";
         step.completed = true;
+        step.iterable = null;
+        this.made_progress = true;
+
+        let completed = this.steps.filter(s => s.completed).length;
+        if (completed == this.steps.length) {
+            this.do_output_callback(final_output_callback);
+        }
     }
-}
-run(runtimeContext: RuntimeContext, tmpdir_lock?: threading.Lock): void {
-    _logger.info(`[${this.name}] start`);
-}
+    tryMakeJob(
+        this: any,
+        step: WorkflowJobStep,
+        finalOutputCallback: OutputCallbackType | undefined,
+        runtimeContext: RuntimeContext,
+    ): IterableIterator<JobsGeneratorType> {
+        let containerEngine: string = "docker";
+        if (runtimeContext.podman) {
+            containerEngine = "podman";
+        } else if (runtimeContext.singularity) {
+            containerEngine = "singularity";
+        }
+        if (step.submitted) return;
 
-*job(joborder: CWLObjectType, output_callback?: OutputCallbackType, runtimeContext: RuntimeContext): Generator<JobsGeneratorType, void, unknown> {
-    this.state = {};
-    this.processStatus = "success";
+        const inputParms = step.tool["inputs"];
+        const outputParms = step.tool["outputs"];
 
-    if (_logger.isEnabledFor(logging.DEBUG)) {
-        _logger.debug(`[${this.name}] inputs ${json_dumps(joborder, 4)}`);
+        const supportsMultipleInput = Boolean(
+            this.workflow.getRequirement("MultipleInputFeatureRequirement")[0]
+        );
+
+        try {
+            const inputObj = objectFromState(
+                this.state, inputParms, false, supportsMultipleInput, "source"
+            );
+            if (!inputObj) {
+                _logger.debug(`[${this.name}] job step ${step.id} not ready`);
+                return;
+            }
+
+            _logger.info(`[${this.name}] starting ${step.name}`);
+
+            const callback = this.receiveOutput.bind(
+                this, step, outputParms, finalOutputCallback
+            );
+
+            const valueFrom: {
+                [key: string]: any;
+            } = {};
+            step.tool["inputs"].forEach((i: any) => {
+                if ("valueFrom" in i) valueFrom[i["id"]] = i["valueFrom"];
+            });
+
+            const loadContents = new Set(
+                step.tool["inputs"].map((i: any) => i.get("loadContents") && i["id"])
+            );
+
+            if (Object.keys(valueFrom).length > 0 &&
+                !Boolean(this.workflow.getRequirement("StepInputExpressionRequirement")[0])
+            ) {
+                throw new WorkflowException(
+                    "Workflow step contains valueFrom but StepInputExpressionRequirement not in requirements"
+                );
+            }
+
+            const postScatterEval = (io: CWLObjectType): CWLObjectType | undefined => {       
+
+            // ... rest of the code
+            }
+        }catch (err) {
+            if (err instanceof WorkflowException) throw err;
+        
+            _logger.error("Unhandled exception", err);
+        
+            this.processStatus = "permanentFail";
+            step.completed = true;
+        }
+    }
+    run(runtimeContext: RuntimeContext, tmpdir_lock?: threading.Lock): void {
+        _logger.info(`[${this.name}] start`);
     }
 
-    runtimeContext = { ...runtimeContext, outdir: null };
-    const debug = runtimeContext.debug;
+    *job(joborder: CWLObjectType, output_callback: OutputCallbackType, runtimeContext: RuntimeContext): Generator<JobsGeneratorType, void, unknown> {
+        this.state = {};
+        this.processStatus = "success";
 
-    this.tool["inputs"].forEach((inp: any, index: number) => {
-        with SourceLine(this.tool["inputs"], index, WorkflowException, debug) {
-            const inp_id = shortname(inp["id"]);
+        if (_logger.isDebugEnabled()) {
+            _logger.debug(`[${this.name}] inputs ${json_dumps(joborder, 4)}`);
+        }
+
+        runtimeContext = runtimeContext.copy()
+        runtimeContext.outdir = undefined;
+        const debug = runtimeContext.debug;
+
+        this.tool.inputs.forEach((inp: cwlTsAuto.WorkflowInputParameter, index: number) => {
+            const inp_id = shortname(inp.id);
             if (inp_id in joborder) {
                 this.state[inp["id"]] = new WorkflowStateItem(inp, joborder[inp_id], "success");
             } else if ("default" in inp) {
-                this.state[inp["id"]] = new WorkflowStateItem(inp, inp["default"], "success");
+                this.state[inp["id"]] = new WorkflowStateItem(inp, inp.default_, "success");
             } else {
                 throw new WorkflowException(`Input '${inp["id"]}' not in input object and does not have a default value.`);
             }
-        }
-    });
-
-    this.steps.forEach((step: any) => {
-        step.tool["outputs"].forEach((out: any) => {
-            this.state[out["id"]] = null;
         });
-    });
 
-    let completed = 0;
-    while (completed < this.steps.length) {
-        this.made_progress = false;
-        for (const step of this.steps) {
-            if (getdefault(runtimeContext.on_error, "stop") === "stop" && this.processStatus !== "success") break;
-            if (!step.submitted) {
-                try {
-                    step.iterable = this.try_make_job(step, output_callback, runtimeContext);
-                } catch (exc) {
-                    _logger.error(`[${step.name}] Cannot make job: ${exc}`);
-                    _logger.debug("", { info: true });
-                    this.processStatus = "permanentFail";
-                }
-            }
-            if (step.iterable) {
-                try {
-                    for (let newjob of step.iterable) {
-                        if (
-                            getdefault(runtimeContext.on_error, "stop") === "stop" &&
-                            this.processStatus !== "success"
-                        ) break;
-                        if (newjob) {
-                            this.made_progress = true;
-                            yield newjob;
-                        } else {
-                            break;
-                        }
+        this.steps.forEach((step: any) => {
+            step.tool.outputs.forEach((out: any) => {
+                this.state[out["id"]] = null;
+            });
+        });
+
+        let completed = 0;
+        while (completed < this.steps.length) {
+            this.made_progress = false;
+            for (const step of this.steps) {
+                if (getdefault(runtimeContext.on_error, "stop") === "stop" && this.processStatus !== "success") break;
+                if (!step.submitted) {
+                    try {
+                        step.iterable = this.tryMakeJob(step, output_callback, runtimeContext);
+                    } catch (exc) {
+                        _logger.error(`[${step.name}] Cannot make job: ${exc}`);
+                        _logger.debug("", { info: true });
+                        this.processStatus = "permanentFail";
                     }
-                } catch (exc) {
-                    _logger.error(`[${step.name}] Cannot make job: ${exc}`);
-                    _logger.debug("", { info: true });
-                    this.processStatus = "permanentFail";
+                }
+                if (step.iterable) {
+                    try {
+                        for (let newjob of step.iterable) {
+                            if (
+                                getdefault(runtimeContext.on_error, "stop") === "stop" &&
+                                this.processStatus !== "success"
+                            ) break;
+                            if (newjob) {
+                                this.made_progress = true;
+                                yield newjob;
+                            } else {
+                                break;
+                            }
+                        }
+                    } catch (exc) {
+                        _logger.error(`[${step.name}] Cannot make job: ${exc}`);
+                        _logger.debug("", { info: true });
+                        this.processStatus = "permanentFail";
+                    }
                 }
             }
+            completed = this.steps.filter(s => s.completed).length;
+            if (!this.made_progress && completed < this.steps.length) {
+                if (this.processStatus !== "success") break;
+                else yield null;
+            }
         }
-        completed = this.steps.filter(s => s.completed).length;
-        if (!this.made_progress && completed < this.steps.length) {
-            if (this.processStatus !== "success") break;
-            else yield null;
+        if (!this.did_callback && output_callback) {
+            this.do_output_callback(output_callback);
         }
-    }
-    if (!this.did_callback && output_callback) {
-        this.do_output_callback(output_callback);
     }
 }
 class WorkflowJobLoopStep {
@@ -794,7 +791,7 @@ class WorkflowJobLoopStep {
         try {
             while (true) {
                 let evalinputs = Object.fromEntries(Object.entries(this.joborder).map(([k, v]) => [shortname(k), v]));
-                let whenval = expression.do_eval(
+                let whenval = do_eval(
                     loop_req["loopWhen"],
                     evalinputs,
                     this.step.step.requirements,
@@ -804,7 +801,6 @@ class WorkflowJobLoopStep {
                     runtimeContext.debug,
                     runtimeContext.js_console,
                     runtimeContext.eval_timeout,
-                    this.container_engine,
                 );
                 if (whenval === true) {
                     this.processStatus = "";
@@ -844,20 +840,20 @@ class WorkflowJobLoopStep {
                 }
             }
         }
-        catch (WorkflowException) {
-            throw;
-        }
-        catch (Exception) {
-            _logger.exception("Unhandled exception");
-            this.processStatus = "permanentFail";
-            if (this.iteration === 0) {
-                this._set_empty_output(loop_req);
+        catch (e:any) {
+            if(e instanceof WorkflowException){
+                throw e
+            }else{
+                _logger.warn("Unhandled exception");
+                this.processStatus = "permanentFail";
+                if (this.iteration === 0) {
+                    this._set_empty_output(loop_req);
+                }
+                output_callback(this.output_buffer, this.processStatus);
             }
-            output_callback(this.output_buffer, this.processStatus);
         }
     }
-}
-loop_callback(runtimeContext: any, jobout: any, processStatus: string) {
+    loop_callback(runtimeContext: any, jobout: any, processStatus: string) {
         this.iteration += 1;
         try {
             let loop_req = this.step.step.get_requirement('http://commonwl.org/cwltool#Loop')[0] as CWLObjectType;
@@ -881,7 +877,7 @@ loop_callback(runtimeContext: any, jobout: any, processStatus: string) {
                     }
                 }
             }
-            if (_logger.isEnabledFor(logging.DEBUG)) {
+            if (_logger.isDebugEnabled()) {
                 _logger.debug(`Iteration ${this.iteration} of [${this.step.name}] produced output ${JSON.stringify(jobout, null, 4)}`);
             }
             if (this.processStatus !== 'permanentFail') {
@@ -895,7 +891,7 @@ loop_callback(runtimeContext: any, jobout: any, processStatus: string) {
             let supportsMultipleInput = Boolean(this.step.step.get_requirement('MultipleInputFeatureRequirement')[0]);
             let inputobj = {
                 ...this.joborder as CWLObjectType,
-                ...object_from_state(state, (loop_req.get('loop', []) as CWLObjectType[]).map(value => ({...value, type: 'Any'})), false, supportsMultipleInput, 'loopSource')
+                ...objectFromState(state, (loop_req.get('loop', []) as CWLObjectType[]).map(value => ({...value, type: 'Any'})), false, supportsMultipleInput, 'loopSource')
             };
             let fs_access = getdefault(runtimeContext.make_fs_access, StdFsAccess)('');
             let valueFrom = (loop_req.get('loop', []) as CWLObjectType[]).filter(value => 'valueFrom' in value)
@@ -906,7 +902,7 @@ loop_callback(runtimeContext: any, jobout: any, processStatus: string) {
             for (let [k, v] of Object.entries(inputobj)) {
                 if (k in valueFrom) {
                     adjustDirObjs(v, (value: any) => get_listing(fs_access, true));
-                    inputobj[k] = expression.do_eval(valueFrom[k], this.joborder, this.step.step.requirements, null, null, {}, v, runtimeContext.debug, runtimeContext.js_console, runtimeContext.eval_timeout, this.container_engine);
+                    inputobj[k] = do_eval(valueFrom[k], this.joborder, this.step.step.requirements, null, null, {}, v, runtimeContext.debug, runtimeContext.js_console);
                 }
             }
             this.joborder = inputobj;
@@ -915,3 +911,4 @@ loop_callback(runtimeContext: any, jobout: any, processStatus: string) {
             throw error;
         }
     }
+}

@@ -52,6 +52,7 @@ import {
   urldefrag,
   visit_class,
   getRequirement,
+  type RequirementParam,
 } from './utils.js';
 
 const _logger_validation_warnings = _logger;
@@ -567,7 +568,23 @@ export abstract class Process {
       var_spool_cwl_detector(this.tool);
     }
   }
-
+  getRequirement<T>(cls: new (any) => T): [T | undefined, boolean] {
+    if (this.requirements) {
+      const req = this.requirements.find((item) => item instanceof cls);
+      if (req) {
+        return [req as T, true];
+      }
+    }
+    if (this.hints) {
+      const req = this.hints.find((item) => item['class'] === cls.name);
+  
+      if (req) {
+        // eslint-disable-next-line new-cap
+        return [new cls(req), false];
+      }
+    }
+    return [undefined, false];
+  }
   // Remaining code skipped as it involves missing functions or types. The conversion follows the same pattern.
   async _init_job(joborder: CWLObjectType, runtime_context: RuntimeContext): Promise<Builder> {
     const job = { ...joborder };
