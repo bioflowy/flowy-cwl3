@@ -93,10 +93,11 @@ export class CommandInputParameter {
   default_?: undefined | any;
   type: ToolType;
   inputBinding?: undefined | cwlTsAuto.CommandLineBinding;
-  _tool_entry?: cwlTsAuto.CommandInputParameter
-   id?: string;
-   used_by_step?: boolean;
-   not_connected?: boolean;
+  _tool_entry?: cwlTsAuto.CommandInputParameter;
+  id?: string;
+  used_by_step?: boolean;
+  not_connected?: boolean;
+  source?: string;
 }
 export class CommandOutputParameter {
   extensionFields?: { [key: string]: any };
@@ -108,13 +109,14 @@ export class CommandOutputParameter {
   format?: undefined | string;
   type: ToolType;
   outputBinding?: undefined | cwlTsAuto.CommandOutputBinding;
+  outputSource?: string;
 }
-export function convertCommandInputParameter(input: cwlTsAuto.CommandInputParameter|cwlTsAuto.WorkflowStepInput) {
+export function convertCommandInputParameter(input: cwlTsAuto.CommandInputParameter | cwlTsAuto.WorkflowStepInput) {
   const input2 = new CommandInputParameter();
   transferProperties(input, input2);
   return input2;
 }
-export function convertCommandOutputParameter(output: cwlTsAuto.CommandOutputParameter|cwlTsAuto.WorkflowStepOutput) {
+export function convertCommandOutputParameter(output: cwlTsAuto.CommandOutputParameter | cwlTsAuto.WorkflowStepOutput) {
   const output2 = new CommandOutputParameter();
   transferProperties(output, output2);
   return output2;

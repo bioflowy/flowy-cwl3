@@ -66,13 +66,14 @@ export class LoadingContext extends ContextBase {
   do_update: boolean | null = null;
   jobdefaults: CommentedMap | null = null;
   doc_cache = true;
-  relax_path_checks = false;
+  relax_path_checks = true;
   singularity = false;
   podman = false;
   eval_timeout = 60;
   fast_parser = false;
   skip_resolve_all = false;
   skip_schemas = false;
+  baseuri: string;
 
   constructor(kwargs?: { [key: string]: any } | null) {
     super(kwargs);
@@ -189,7 +190,7 @@ export class RuntimeContext extends ContextBase {
   }
 
   copy(): RuntimeContext {
-    return { ...this };
+    return new RuntimeContext(this);
   }
 }
 export function getDefault(val: any, def: any): any {

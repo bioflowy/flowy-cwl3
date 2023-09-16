@@ -1,7 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import ivm from 'isolated-vm';
 import yaml from 'js-yaml';
 import { CommandLineTool } from './command_line_tool.js';
 import { LoadingContext, RuntimeContext } from './context.js';
@@ -18,6 +17,40 @@ import {
   filePathToURI,
   type CWLOutputType,
 } from './utils.js';
+// export async function main(): Promise<number> {
+//   const test_path = path.join(process.cwd(), 'conformance_tests.yaml');
+//   const content = fs.readFileSync(test_path, 'utf-8');
+//   const data = yaml.load(content) as { [key: string]: any }[];
+//   for (let index = 16; index < data.length; index++) {
+//     console.log(`test index =${index}`);
+//     const test = data[index];
+//     console.log(test['id']);
+//     console.log(test['doc']);
+//     const job_path = test['job'] as string;
+//     const tool_path = test['tool'] as string;
+//     const expected_outputs = test['output'] as string;
+//     try {
+//       const [output, status] = await exec(tool_path, job_path);
+//       console.log(status);
+//       if (test['should_fail']) {
+//         console.log('should_failed flag is true, but no error occurred.');
+//       }
+//       const expected_str = JSON.stringify(expected_outputs, null, 2);
+//       const output_str = JSON.stringify(output, null, 2);
+//       if (expected_str !== output_str) {
+//         console.log(`expected: ${expected_str}`);
+//         console.log(`output: ${output_str}`);
+//       }
+//     } catch (e: any) {
+//       if (!test['should_fail']) {
+//         console.log(e);
+//       } else {
+//         console.log('OK expected error has occurred');
+//       }
+//     }
+//   }
+//   return 1;
+// }
 
 function parseFile(filePath: string): object | null {
   const extname = path.extname(filePath).toLowerCase();
@@ -140,46 +173,16 @@ function init_job_order(
   return job_order_object;
 }
 export async function main(): Promise<number> {
-  const loadingContext = new LoadingContext({});
-  const [tool] = await loadDocument("tests/count-lines1-wf.cwl", loadingContext);
-  return 0
+  const [output, status] = await exec('tests/count-lines1-wf.cwl', 'tests/wc-job.json');
+  console.log(output);
+  console.log(status);
+  return 0;
 }
-// export async function main(): Promise<number> {
-//   const test_path = path.join(process.cwd(), 'conformance_tests.yaml');
-//   const content = fs.readFileSync(test_path, 'utf-8');
-//   const data = yaml.load(content) as { [key: string]: any }[];
-//   for (let index = 16; index < data.length; index++) {
-//     console.log(`test index =${index}`);
-//     const test = data[index];
-//     console.log(test['id']);
-//     console.log(test['doc']);
-//     const job_path = test['job'] as string;
-//     const tool_path = test['tool'] as string;
-//     const expected_outputs = test['output'] as string;
-//     try {
-//       const [output, status] = await exec(tool_path, job_path);
-//       console.log(status);
-//       if (test['should_fail']) {
-//         console.log('should_failed flag is true, but no error occurred.');
-//       }
-//       const expected_str = JSON.stringify(expected_outputs, null, 2);
-//       const output_str = JSON.stringify(output, null, 2);
-//       if (expected_str !== output_str) {
-//         console.log(`expected: ${expected_str}`);
-//         console.log(`output: ${output_str}`);
-//       }
-//     } catch (e: any) {
-//       if (!test['should_fail']) {
-//         console.log(e);
-//       } else {
-//         console.log('OK expected error has occurred');
-//       }
-//     }
-//   }
-//   return 1;
-// }
 export async function exec(tool_path: string, job_path: string): Promise<[CWLOutputType, string]> {
   const loadingContext = new LoadingContext({});
+  if (!path.isAbsolute(tool_path)) {
+    tool_path = path.join(process.cwd(), tool_path);
+  }
   const [tool] = await loadDocument(tool_path, loadingContext);
   const [job_order_object, input_basedir] = load_job_order(undefined, job_path);
   const initialized_job_order = init_job_order(

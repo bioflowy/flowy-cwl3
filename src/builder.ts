@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   CommandInputEnumSchema,
   CommandInputRecordSchema,
@@ -33,16 +34,23 @@ export const INPUT_OBJ_VOCAB: { [key: string]: string } = {
   Directory: 'https://w3id.org/cwl/cwl#Directory',
 };
 
-function contentLimitRespectedReadBytes(f: fs.ReadStream): Buffer {
-  const contents = f.read(CONTENT_LIMIT + 1);
-  if (contents.length > CONTENT_LIMIT) {
-    throw new WorkflowException(`file is too large, loadContents limited to ${CONTENT_LIMIT} bytes`);
-  }
-  return contents;
-}
-
-export function contentLimitRespectedRead(f: fs.ReadStream): string {
-  return contentLimitRespectedReadBytes(f).toString('utf-8');
+export async function contentLimitRespectedReadBytes(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const buffer = Buffer.alloc(CONTENT_LIMIT + 1);
+    const fd = fs.openSync(fileURLToPath(filePath), 'r');
+    fs.read(fd, buffer, 0, CONTENT_LIMIT + 1, null, (err, bytesRead, buffer) => {
+      fs.closeSync(fd);
+      if (err) {
+        reject(err);
+        return;
+      }
+      if (bytesRead > CONTENT_LIMIT) {
+        reject(new WorkflowException(`file is too large, loadContents limited to ${CONTENT_LIMIT} bytes`));
+        return;
+      }
+      resolve(buffer.slice(0, bytesRead).toString('utf-8'));
+    });
+  });
 }
 
 export function substitute(value: string, replace: string): string {
@@ -388,8 +396,7 @@ export class Builder {
 
     if (loadContentsSourceline && loadContentsSourceline['loadContents']) {
       try {
-        const f2 = fs.createReadStream(datum['location'] as string);
-        datum['contents'] = contentLimitRespectedRead(f2);
+        datum['contents'] = await contentLimitRespectedReadBytes(datum['location'] as string);
       } catch (error) {
         throw new WorkflowException(`Reading ${datum['location']}\n${error}`);
       }

@@ -1,12 +1,8 @@
 import { createLogger, format, transports } from 'winston';
 export const _logger = createLogger({
   level: 'debug', // Set the minimum log level to 'info'
-  format: format.combine(
-    format.simple(), // You can customize the log format as needed
-  ),
-  transports: [
-    new transports.Console(), // Log to the console (i.e., standard output)
-  ],
+  format: format.combine(format.simple()),
+  transports: [new transports.Console()],
 });
 
 // TODO

@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as url from 'node:url';
 
+import type { WorkflowInputParameter } from 'cwl-ts-auto';
 import { v4 as uuidv4 } from 'uuid';
 import { CallbackJob, ExpressionJob } from './command_line_tool.js';
 import { ValidationException, WorkflowException } from './errors.js';
@@ -11,6 +12,7 @@ import { CommandLineJob, JobBase } from './job.js';
 import { MapperEnt, PathMapper } from './pathmapper.js';
 import { StdFsAccess } from './stdfsaccess.js';
 import type { Tool, ToolRequirement } from './types.js';
+import type { WorkflowJob } from './workflow_job.js';
 
 let __random_outdir: string | null = null;
 
@@ -38,10 +40,9 @@ export type CWLOutputType =
   | number
   | MutableSequence<CWLOutputAtomType>
   | MutableMapping<CWLOutputAtomType>;
-
 export type CWLObjectType = MutableMapping<CWLOutputType | undefined>;
 
-export type JobsType = CommandLineJob | JobBase | ExpressionJob | CallbackJob | undefined;// | WorkflowJob  ;
+export type JobsType = CommandLineJob | JobBase | ExpressionJob | CallbackJob | WorkflowJob | undefined; //  ;
 export type JobsGeneratorType = AsyncGenerator<JobsType, void>;
 export type OutputCallbackType = (arg1: CWLObjectType, arg2: string) => void;
 // type ResolverType = (Loader, string)=>string?;
@@ -64,6 +65,18 @@ export type DirectoryType = {
 //         ['success', string]
 //     ]
 // >;
+export class WorkflowStateItem {
+  // / """Workflow state item."""
+
+  parameter: WorkflowInputParameter;
+  value?: CWLOutputType;
+  success: string;
+  constructor(parameter: WorkflowInputParameter, value: CWLOutputType | undefined, success: string) {
+    this.parameter = parameter;
+    this.value = value;
+    this.success = success;
+  }
+}
 export function isString(value: any): value is string {
   return typeof value === 'string';
 }
@@ -178,6 +191,9 @@ export function versionstring(): string {
 export function aslist(thing: any): any[] {
   if (Array.isArray(thing)) {
     return thing;
+  }
+  if (thing === undefined || thing == null) {
+    return [];
   }
   return [thing];
 }

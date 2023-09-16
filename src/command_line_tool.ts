@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import cwlTsAuto, { DockerRequirement, InplaceUpdateRequirement, WorkReuse } from 'cwl-ts-auto';
-import { Builder, contentLimitRespectedRead, substitute } from './builder.js';
+import { Builder, contentLimitRespectedReadBytes, substitute } from './builder.js';
 import { LoadingContext, RuntimeContext, getDefault } from './context.js';
 import { DockerCommandLineJob, PodmanCommandLineJob } from './docker.js';
 import { UnsupportedRequirement, ValidationException, WorkflowException } from './errors.js';
@@ -9,7 +9,12 @@ import { _logger } from './loghandler.js';
 import { PathMapper } from './pathmapper.js';
 import { Process, compute_checksums, shortname, uniquename } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import type { CommandOutputParameter, Tool } from './types.js';
+import {
+  convertCommandInputParameter,
+  type CommandOutputParameter,
+  type Tool,
+  convertCommandOutputParameter,
+} from './types.js';
 import {
   type CWLObjectType,
   type CWLOutputType,
@@ -29,10 +34,6 @@ import {
   getRequirement,
   type JobsType,
 } from './utils.js';
-class PathCheckingMode {
-  static STRICT = new RegExp('^[w.+,-:@]^\u2600-\u26FFU0001f600-U0001f64f]+$');
-  static RELAXED = new RegExp('.*');
-}
 export class ExpressionJob {
   builder: Builder;
   script: string;
@@ -82,10 +83,22 @@ export class ExpressionJob {
 }
 export class ExpressionTool extends Process {
   declare tool: cwlTsAuto.ExpressionTool;
-  constructor(tool: cwlTsAuto.ExpressionTool, loadingContext: LoadingContext) {
-    super(tool, loadingContext);
-    this.tool = tool;
+  override init(loadContent: LoadingContext) {
+    this.inputs = [];
+    this.outputs = [];
+    for (const i of this.tool.inputs) {
+      const c = convertCommandInputParameter(i);
+      c.name = shortname(i.id);
+      this.inputs.push(c);
+    }
+    for (const i of this.tool.outputs) {
+      const c = convertCommandOutputParameter(i);
+      c.name = shortname(i.id);
+      this.outputs.push(c);
+    }
+    super.init(loadContent);
   }
+
   async *job(
     job_order: CWLObjectType,
     output_callbacks: OutputCallbackType | null,
@@ -191,7 +204,7 @@ export class CallbackJob {
     }
   }
 }
-function checkAdjust(acceptRe: any, builder: Builder, fileO: CWLObjectType): CWLObjectType {
+function checkAdjust(acceptRe: RegExp, builder: Builder, fileO: CWLObjectType): CWLObjectType {
   if (!builder.pathmapper) {
     throw new Error("Do not call check_adjust using a builder that doesn't have a pathmapper.");
   }
@@ -216,12 +229,9 @@ function checkAdjust(acceptRe: any, builder: Builder, fileO: CWLObjectType): CWL
       fileO['nameext'] = ne.toString();
     }
   }
-  // TODO
-  // if (!acceptRe.test(basename)) {
-  //     throw new Error(
-  //         `Invalid filename: ${fileO['basename']} contains illegal characters`
-  //     );
-  // }
+  if (!acceptRe.test(basename)) {
+    throw new Error(`Invalid filename: ${fileO['basename']} contains illegal characters`);
+  }
   return fileO;
 }
 
@@ -237,7 +247,43 @@ function checkValidLocations(fsAccess: StdFsAccess, ob: CWLObjectType): void {
     throw new Error(`Does not exist or is not a Directory: '${location}'`);
   }
 }
+class PathCheckingMode {
+  /**
+   * What characters are allowed in path names.
+   * We have the strict (default) mode and the relaxed mode.
+   */
 
+  static STRICT = new RegExp('^[w.+,-:@]^\u2600-\u26FFU0001f600-U0001f64f]+$');
+  /**
+   * Accepts names that contain one or more of the following:
+   *   - `\w`: unicode word characters
+   *          this includes most characters that can be part of a word in any
+   *          language, as well as numbers and the underscore
+   *   - `.`: a literal period
+   *   - `+`: a literal plus sign
+   *   - `,`: a literal comma
+   *   - `-`: a literal minus sign
+   *   - `:`: a literal colon
+   *   - `@`: a literal at-symbol
+   *   - `]`: a literal end-square-bracket
+   *   - `^`: a literal caret symbol
+   *   - `\u2600-\u26FF`: matches a single character in the range between ☀ (index 9728) and ⛿ (index 9983)
+   *   - `\U0001f600-\U0001f64f`: matches a single character in the range between 😀 (index 128512) and 🙏 (index 128591)
+   * Note: the following characters are intentionally not included:
+   * 1. reserved words in POSIX: `!`, `{`, `}`
+   * 2. POSIX metacharacters listed in the CWL standard as okay to reject: `|`,
+   *    `&`, `;`, `<`, `>`, `(`, `)`, `$`, ````, `"`, `'`,
+   *    <space>, <tab>, <newline>.
+   * 3. POSIX path separator: `\`
+   * 4. Additional POSIX metacharacters: `*`, `?`, `[`, `#`, `˜`,
+   *    `=`, `%`.
+   * TODO: switch to https://pypi.org/project/regex/ and use
+   * `\p{Extended_Pictographic}` instead of the manual emoji ranges
+   */
+
+  static RELAXED = new RegExp('.*');
+  /** Accept anything. */
+}
 interface OutputPortsType {
   [key: string]: CWLOutputType | undefined;
 }
@@ -251,16 +297,23 @@ const MPIRequirementName = 'http://commonwl.org/cwltool#MPIRequirement';
 export class CommandLineTool extends Process {
   declare tool: cwlTsAuto.CommandLineTool;
   prov_obj: any; // placeholder type
-  path_check_mode: any; // placeholder type
-
-  constructor(toolpath_object: cwlTsAuto.CommandLineTool, loadingContext: any) {
-    // placeholder types
-    super(toolpath_object, loadingContext);
-    this.tool = toolpath_object;
-    this.prov_obj = loadingContext.prov_obj;
-    this.path_check_mode = loadingContext.relax_path_checks ? PathCheckingMode.RELAXED : PathCheckingMode.STRICT;
+  path_check_mode: RegExp; // placeholder type
+  override init(loadContent: LoadingContext) {
+    this.path_check_mode = loadContent.relax_path_checks ? PathCheckingMode.RELAXED : PathCheckingMode.STRICT;
+    this.inputs = [];
+    this.outputs = [];
+    for (const i of this.tool.inputs) {
+      const c = convertCommandInputParameter(i);
+      c.name = shortname(i.id);
+      this.inputs.push(c);
+    }
+    for (const i of this.tool.outputs) {
+      const c = convertCommandOutputParameter(i);
+      c.name = shortname(i.id);
+      this.outputs.push(c);
+    }
+    super.init(loadContent);
   }
-
   make_job_runner(
     runtimeContext: RuntimeContext,
   ): (
@@ -582,7 +635,7 @@ export class CommandLineTool extends Process {
       }
 
       visit_class([builder.files, builder.bindings], ['File', 'Directory'], (val) =>
-        checkAdjust(this.path_check_mode.value, builder, val),
+        checkAdjust(this.path_check_mode, builder, val),
       );
     }
   }
@@ -994,7 +1047,7 @@ export class CommandLineTool extends Process {
     }
     builder.pathmapper = make_path_mapper(reffiles, builder.stagedir, runtimeContext, true);
 
-    const _check_adjust = (val) => checkAdjust(this.path_check_mode.value, builder, val);
+    const _check_adjust = (val) => checkAdjust(this.path_check_mode, builder, val);
 
     visit_class([builder.files, builder.bindings], ['File', 'Directory'], _check_adjust);
 
@@ -1211,10 +1264,9 @@ export class CommandLineTool extends Process {
           }
         } else {
           if (binding['loadContents']) {
-            let f: any = undefined;
+            const f: any = undefined;
             try {
-              f = fs_access.open(rfile['location'] as string, 'rb');
-              files['contents'] = contentLimitRespectedRead(f);
+              files['contents'] = await contentLimitRespectedReadBytes(rfile['location']);
             } finally {
               if (f) {
                 f.close();

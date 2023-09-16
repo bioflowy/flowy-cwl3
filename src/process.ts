@@ -5,15 +5,9 @@ import * as crypto from 'node:crypto';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import cwlTsAuto, {
-  CommandInputArraySchema,
-  CommandInputEnumSchema,
-  CommandInputParameter,
-  CommandInputRecordSchema,
-  ResourceRequirement,
-  SchemaDefRequirement,
-} from 'cwl-ts-auto';
+import cwlTsAuto from 'cwl-ts-auto';
 import fsExtra from 'fs-extra';
+import type { initial } from 'lodash';
 import { v4 } from 'uuid';
 import { Builder, INPUT_OBJ_VOCAB } from './builder.js';
 import { LoadingContext, RuntimeContext, getDefault } from './context.js';
@@ -35,6 +29,8 @@ import {
   convertToCommandLineBinding,
   type Tool,
   type ToolType,
+  CommandOutputParameter,
+  CommandInputParameter,
 } from './types.js';
 import {
   type CWLObjectType,
@@ -280,7 +276,7 @@ export function add_sizes(fsaccess: StdFsAccess, obj: CWLObjectType): void {
   // best effort
 }
 
-function fill_in_defaults(inputs: CommandInputParameter[], job: CWLObjectType, fsaccess: StdFsAccess): void {
+function fill_in_defaults(inputs: cwlTsAuto.CommandInputParameter[], job: CWLObjectType, fsaccess: StdFsAccess): void {
   for (let e = 0; e < inputs.length; e++) {
     const inp = inputs[e];
     const fieldname = shortname(String(inp['id']));
@@ -396,11 +392,21 @@ export abstract class Process {
   doc_loader: any;
   doc_schema: any;
   formatgraph: any | null;
-  schemaDefs: { [key: string]: CommandInputArraySchema | CommandInputEnumSchema | CommandInputRecordSchema };
+  schemaDefs: {
+    [key: string]:
+      | cwlTsAuto.CommandInputArraySchema
+      | cwlTsAuto.CommandInputEnumSchema
+      | cwlTsAuto.CommandInputRecordSchema;
+  };
   inputs_record_schema: CWLObjectType;
   outputs_record_schema: CWLObjectType;
   container_engine: 'docker' | 'podman' | 'singularity';
-  constructor(toolpath_object: Tool, loadingContext: LoadingContext) {
+  constructor(toolpath_object: Tool) {
+    this.tool = toolpath_object;
+  }
+  inputs: CommandInputParameter[];
+  outputs: CommandOutputParameter[];
+  init(loadingContext: LoadingContext) {
     this.metadata = getDefault(loadingContext.metadata, {});
     this.provenance_object = null;
     this.parent_wf = null;
@@ -413,7 +419,6 @@ export abstract class Process {
     // }
 
     // this.names = make_avro_schema([SCHEMA_FILE, SCHEMA_DIR, SCHEMA_ANY], new Loader({}));
-    this.tool = toolpath_object;
     const debug = loadingContext.debug;
     this.requirements = copy.deepcopy(getDefault(loadingContext.requirements, []));
     const tool_requirements = this.tool.requirements || [];
@@ -459,7 +464,7 @@ export abstract class Process {
 
     this.schemaDefs = {};
 
-    const [sd, _] = getRequirement(this.tool, SchemaDefRequirement);
+    const [sd, _] = getRequirement(this.tool, cwlTsAuto.SchemaDefRequirement);
 
     if (sd) {
       const sdtypes = sd.types;
@@ -483,10 +488,7 @@ export abstract class Process {
       fields: [],
     };
 
-    for (const i of this.tool.inputs) {
-      const c = convertCommandInputParameter(i);
-      c.name = shortname(i.id);
-
+    for (const c of this.inputs) {
       if (!c.type) {
         throw new Error(`Missing 'type' in parameter '${c['name']}'`);
       }
@@ -501,10 +503,7 @@ export abstract class Process {
       make_valid_avro(c.type, {}, new Set(), false, false, {});
       (this.inputs_record_schema['fields'] as any).push(c);
     }
-    for (const i of this.tool.outputs) {
-      const c = convertCommandOutputParameter(i);
-      c.name = shortname(i.id);
-
+    for (const c of this.outputs) {
       if (!c.type) {
         throw new Error(`Missing 'type' in parameter '${c.name}'`);
       }
@@ -521,7 +520,7 @@ export abstract class Process {
       this.container_engine = 'singularity';
     }
 
-    if (toolpath_object['class'] && !getDefault(loadingContext.disable_js_validation, false)) {
+    if (!getDefault(loadingContext.disable_js_validation, false)) {
       let validate_js_options: { [key: string]: string[] | string | number } | null = null;
       if (loadingContext.js_hint_options_file) {
         try {
@@ -534,8 +533,8 @@ export abstract class Process {
         }
       }
       if (this.doc_schema) {
-        const classname = toolpath_object['class'];
-        const avroname = classname;
+        // const classname = toolpath_object['class'];
+        // const avroname = classname;
         // if (this.doc_loader && this.doc_loader.vocab[classname]) {
         //     avroname = avro_type_name(this.doc_loader.vocab[classname]);
         // }
@@ -577,7 +576,7 @@ export abstract class Process {
     }
     if (this.hints) {
       const req = this.hints.find((item) => item['class'] === cls.name);
-  
+
       if (req) {
         // eslint-disable-next-line new-cap
         return [new cls(req), false];
@@ -772,10 +771,10 @@ hints:
     return builder;
   }
   async evalResources(builder: Builder, runtimeContext: RuntimeContext): Promise<{ [key: string]: number }> {
-    let [resourceReq, _] = getRequirement(this.tool, ResourceRequirement);
+    let [resourceReq, _] = getRequirement(this.tool, cwlTsAuto.ResourceRequirement);
 
     if (resourceReq === undefined) {
-      resourceReq = new ResourceRequirement({});
+      resourceReq = new cwlTsAuto.ResourceRequirement({});
     }
 
     const ram = 256;
