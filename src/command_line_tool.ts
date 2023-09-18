@@ -9,12 +9,7 @@ import { _logger } from './loghandler.js';
 import { PathMapper } from './pathmapper.js';
 import { Process, compute_checksums, shortname, uniquename } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import {
-  convertCommandInputParameter,
-  type CommandOutputParameter,
-  type Tool,
-  convertCommandOutputParameter,
-} from './types.js';
+import { type CommandOutputParameter, type Tool, type CommandInputParameter } from './types.js';
 import {
   type CWLObjectType,
   type CWLOutputType,
@@ -84,17 +79,13 @@ export class ExpressionJob {
 export class ExpressionTool extends Process {
   declare tool: cwlTsAuto.ExpressionTool;
   override init(loadContent: LoadingContext) {
-    this.inputs = [];
-    this.outputs = [];
     for (const i of this.tool.inputs) {
-      const c = convertCommandInputParameter(i);
+      const c: CommandInputParameter = i;
       c.name = shortname(i.id);
-      this.inputs.push(c);
     }
     for (const i of this.tool.outputs) {
-      const c = convertCommandOutputParameter(i);
+      const c: CommandOutputParameter = i;
       c.name = shortname(i.id);
-      this.outputs.push(c);
     }
     super.init(loadContent);
   }
@@ -208,7 +199,8 @@ function checkAdjust(acceptRe: RegExp, builder: Builder, fileO: CWLObjectType): 
   if (!builder.pathmapper) {
     throw new Error("Do not call check_adjust using a builder that doesn't have a pathmapper.");
   }
-  const path1 = builder.pathmapper.mapper(fileO['location'] as string).target;
+  const m = builder.pathmapper.mapper(fileO['location'] as string);
+  const path1 = m.target;
   fileO['path'] = path1;
   let basename = fileO['basename'];
   const dn = path.dirname(path1);
@@ -300,17 +292,13 @@ export class CommandLineTool extends Process {
   path_check_mode: RegExp; // placeholder type
   override init(loadContent: LoadingContext) {
     this.path_check_mode = loadContent.relax_path_checks ? PathCheckingMode.RELAXED : PathCheckingMode.STRICT;
-    this.inputs = [];
-    this.outputs = [];
     for (const i of this.tool.inputs) {
-      const c = convertCommandInputParameter(i);
+      const c: CommandInputParameter = i;
       c.name = shortname(i.id);
-      this.inputs.push(c);
     }
     for (const i of this.tool.outputs) {
-      const c = convertCommandOutputParameter(i);
+      const c: CommandOutputParameter = i;
       c.name = shortname(i.id);
-      this.outputs.push(c);
     }
     super.init(loadContent);
   }

@@ -2,17 +2,19 @@ import * as cwlTsAuto from 'cwl-ts-auto';
 import { circular_dependency_checker, static_checker } from './checker.js';
 import * as command_line_tool from './command_line_tool.js';
 import { LoadingContext, RuntimeContext } from './context.js';
+import { deepcopy } from './copy.js';
 import { ValidationException, WorkflowException } from './errors.js';
 import { loadDocument } from './loader.js';
 import { _logger } from './loghandler.js';
 import { Process, shortname } from './process.js';
 import {
-  CommandInputParameter,
-  convertCommandInputParameter,
-  CommandOutputParameter,
+  type CommandOutputParameter,
   type Tool,
   transferProperties,
-  convertCommandOutputParameter,
+  type CommandInputParameter,
+  type WorkflowStepInput,
+  type IWorkflowStep,
+  type WorkflowStepOutput,
 } from './types.js';
 import { isString, type CWLObjectType, type JobsGeneratorType, type OutputCallbackType, aslist } from './utils.js';
 import { WorkflowJob } from './workflow_job.js';
@@ -50,17 +52,13 @@ export class Workflow extends Process {
   steps: WorkflowStep[];
 
   override async init(loadingContext: LoadingContext) {
-    this.inputs = [];
-    this.outputs = [];
     for (const i of this.tool.inputs) {
-      const c = convertCommandInputParameter(i);
+      const c: CommandInputParameter = i;
       c.name = shortname(i.id);
-      this.inputs.push(c);
     }
     for (const i of this.tool.outputs) {
-      const c = convertCommandOutputParameter(i);
+      const c: CommandOutputParameter = i;
       c.name = shortname(i.id);
-      this.outputs.push(c);
     }
     super.init(loadingContext);
     loadingContext = loadingContext.copy();
@@ -96,15 +94,15 @@ export class Workflow extends Process {
 
     let step_inputs: CommandInputParameter[] = [];
     let step_outputs: CommandOutputParameter[] = [];
-    const param_to_step: { [key: string]: cwlTsAuto.WorkflowStep } = {};
+    const param_to_step: { [key: string]: IWorkflowStep } = {};
 
     for (const step of this.steps) {
-      step_inputs = step_inputs.concat(step.inputs);
-      step_outputs = step_outputs.concat(step.outputs);
-      for (const s of step.inputs) {
+      step_inputs = step_inputs.concat(step.tool.inputs);
+      step_outputs = step_outputs.concat(step.tool.outputs);
+      for (const s of step.tool.inputs) {
         param_to_step[s.id] = step.tool;
       }
-      for (const s of step.outputs) {
+      for (const s of step.tool.outputs) {
         param_to_step[s.name] = step.tool;
       }
     }
@@ -155,7 +153,7 @@ export class Workflow extends Process {
   }
 }
 
-function used_by_step(step: cwlTsAuto.WorkflowStep, shortinputid: string): boolean {
+function used_by_step(step: IWorkflowStep, shortinputid: string): boolean {
   for (const st of step.in_) {
     if (st.valueFrom) {
       if (st.valueFrom.includes(`inputs.${shortinputid}`)) {
@@ -171,20 +169,17 @@ function used_by_step(step: cwlTsAuto.WorkflowStep, shortinputid: string): boole
   return false;
 }
 export class WorkflowStep extends Process {
-  declare tool: cwlTsAuto.WorkflowStep;
+  declare tool: IWorkflowStep;
   handleInput(
     toolpath_object: cwlTsAuto.WorkflowStepInput[],
     bound: Set<any>,
     validation_errors,
     debug: boolean,
-  ): CommandInputParameter[] {
-    const inputs: CommandInputParameter[] = [];
+  ): WorkflowStepInput[] {
+    const inputs: WorkflowStepInput[] = [];
     toolpath_object.forEach((step_entry: cwlTsAuto.WorkflowStepInput, index: number) => {
-      let param: CommandInputParameter;
-      let inputid = '';
-
-      param = convertCommandInputParameter(step_entry);
-      inputid = step_entry.id;
+      const param: WorkflowStepInput = step_entry;
+      const inputid = step_entry.id;
       const shortinputid = shortname(inputid);
       let found = false;
 
@@ -221,17 +216,17 @@ export class WorkflowStep extends Process {
     bound: Set<any>,
     validation_errors,
     debug: boolean,
-  ): CommandOutputParameter[] {
+  ): WorkflowStepOutput[] {
     const outputs: CommandOutputParameter[] = [];
     stepOutputs.forEach((step_entry, index: number) => {
-      let param: any;
+      let param: WorkflowStepOutput;
       let inputid;
 
       if (isString(step_entry)) {
-        param = new CommandOutputParameter();
+        param = {};
         inputid = step_entry;
       } else {
-        param = convertCommandOutputParameter(step_entry);
+        param = deepcopy(step_entry);
         inputid = step_entry.id;
       }
 
@@ -343,8 +338,8 @@ export class WorkflowStep extends Process {
       //   }
       //   toolpath_object['requirements'].push(this.embedded_tool.get_requirement('SchemaDefRequirement')[0]);
     }
-    this.inputs = this.handleInput(this.tool.in_, bound, validation_errors, debug);
-    this.outputs = this.handleOutput(this.tool.out, bound, validation_errors, debug);
+    this.tool.inputs = this.handleInput(this.tool.in_, bound, validation_errors, debug);
+    this.tool.outputs = this.handleOutput(this.tool.out, bound, validation_errors, debug);
 
     const missing_values = [];
     for (const tool_entry of this.embedded_tool.tool.inputs) {
@@ -382,8 +377,8 @@ export class WorkflowStep extends Process {
         throw new WorkflowException('Workflow contains scatter but ScatterFeatureRequirement not in requirements');
       }
 
-      const inputparms = [...this.inputs];
-      const outputparms = [...this.outputs];
+      const inputparms = [...this.tool.inputs];
+      const outputparms = [...this.tool.outputs];
       const scatter = aslist(this.tool.scatter);
 
       const method = this.tool.scatterMethod;
@@ -439,7 +434,7 @@ export class WorkflowStep extends Process {
 
   receive_output(output_callback: OutputCallbackType, jobout: CWLObjectType, processStatus: string): void {
     const output: { [key: string]: any } = {};
-    for (const i of this.outputs) {
+    for (const i of this.tool.outputs) {
       const field = shortname(i['id']);
       if (field in jobout) {
         output[i['id']] = jobout[field];
@@ -467,7 +462,7 @@ export class WorkflowStep extends Process {
     // }
 
     const step_input: { [key: string]: any } = {};
-    for (const inp of this.inputs) {
+    for (const inp of this.tool.inputs) {
       const field = shortname(inp['id']);
       if (!inp['not_connected']) {
         step_input[field] = job_order[inp['id']];

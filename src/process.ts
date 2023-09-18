@@ -23,14 +23,11 @@ import { StdFsAccess } from './stdfsaccess.js';
 
 import {
   compareInputBinding,
-  CommandLineBinding,
-  convertCommandInputParameter,
-  convertCommandOutputParameter,
-  convertToCommandLineBinding,
   type Tool,
   type ToolType,
-  CommandOutputParameter,
-  CommandInputParameter,
+  type CommandInputParameter,
+  CommandLineBinded,
+  type WorkflowStepInput,
 } from './types.js';
 import {
   type CWLObjectType,
@@ -276,7 +273,7 @@ export function add_sizes(fsaccess: StdFsAccess, obj: CWLObjectType): void {
   // best effort
 }
 
-function fill_in_defaults(inputs: cwlTsAuto.CommandInputParameter[], job: CWLObjectType, fsaccess: StdFsAccess): void {
+function fill_in_defaults(inputs: CommandInputParameter[], job: CWLObjectType, fsaccess: StdFsAccess): void {
   for (let e = 0; e < inputs.length; e++) {
     const inp = inputs[e];
     const fieldname = shortname(String(inp['id']));
@@ -398,14 +395,12 @@ export abstract class Process {
       | cwlTsAuto.CommandInputEnumSchema
       | cwlTsAuto.CommandInputRecordSchema;
   };
-  inputs_record_schema: CWLObjectType;
+  inputs_record_schema: CommandInputParameter;
   outputs_record_schema: CWLObjectType;
   container_engine: 'docker' | 'podman' | 'singularity';
   constructor(toolpath_object: Tool) {
     this.tool = toolpath_object;
   }
-  inputs: CommandInputParameter[];
-  outputs: CommandOutputParameter[];
   init(loadingContext: LoadingContext) {
     this.metadata = getDefault(loadingContext.metadata, {});
     this.provenance_object = null;
@@ -476,34 +471,36 @@ export abstract class Process {
       }
     }
     // Build record schema from inputs
+
     this.inputs_record_schema = {
       name: 'input_record_schema',
       type: 'record',
       fields: [],
     };
-
     this.outputs_record_schema = {
       name: 'outputs_record_schema',
       type: 'record',
       fields: [],
     };
 
-    for (const c of this.inputs) {
+    for (const i of this.tool.inputs) {
+      const c = { ...i };
       if (!c.type) {
-        throw new Error(`Missing 'type' in parameter '${c['name']}'`);
+        throw new Error(`Missing 'type' in parameter '${c.name}'`);
       }
 
       if (c.default_ && !aslist(c.type).includes('null')) {
         const nullable = ['null'];
-        nullable.push(...aslist(c['type']));
+        nullable.push(...aslist(c.type));
         c.type = nullable;
       }
 
       c.type = avroizeType(c.type, c.name);
       make_valid_avro(c.type, {}, new Set(), false, false, {});
-      (this.inputs_record_schema['fields'] as any).push(c);
+      this.inputs_record_schema.fields.push(c);
     }
-    for (const c of this.outputs) {
+    for (const i of this.tool.outputs) {
+      const c = { ...i };
       if (!c.type) {
         throw new Error(`Missing 'type' in parameter '${c.name}'`);
       }
@@ -658,7 +655,7 @@ hints:
     }
 
     const files: CWLObjectType[] = [];
-    const bindings: CommandLineBinding[] = [];
+    const bindings: CommandLineBinded[] = [];
     let outdir = '';
     let tmpdir = '';
     let stagedir = '';
@@ -725,7 +722,7 @@ hints:
 
     if (this.tool.baseCommand) {
       aslist(this.tool.baseCommand).forEach((command: any, index: number) => {
-        bindings.push({ position: [-1000000, index], datum: command });
+        bindings.push({ positions: [-1000000, index], datum: command });
       });
     }
 
@@ -733,7 +730,7 @@ hints:
       for (let i = 0; i < this.tool.arguments_.length; i++) {
         const arg = this.tool.arguments_[i];
         if (arg instanceof cwlTsAuto.CommandLineBinding) {
-          const arg2 = convertToCommandLineBinding(arg);
+          const arg2 = CommandLineBinded.fromBinding(arg);
           if (arg.position) {
             let position = arg.position;
             if (typeof position === 'string') {
@@ -742,20 +739,20 @@ hints:
                 position = 0;
               }
             }
-            arg2.position = [position, i];
+            arg2.positions = [position, i];
           } else {
-            arg2.position = [0, i];
+            arg2.positions = [0, i];
           }
           bindings.push(arg2);
         } else if (arg.includes('$(') || arg.includes('${')) {
           const cm = {
-            position: [0, i],
+            positions: [0, i],
             valueFrom: arg,
           };
           bindings.push(cm);
         } else {
           const cm = {
-            position: [0, i],
+            positions: [0, i],
             datum: arg,
           };
           bindings.push(cm);

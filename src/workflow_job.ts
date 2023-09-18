@@ -6,7 +6,7 @@ import { do_eval } from './expression.js';
 import { _logger } from './loghandler.js';
 import { shortname, uniquename } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import type { CommandInputParameter, CommandOutputParameter } from './types.js';
+import type { CommandInputParameter, CommandOutputParameter, IWorkflowStep } from './types.js';
 import {
   type CWLObjectType,
   type CWLOutputType,
@@ -26,7 +26,7 @@ import { Workflow, WorkflowStep } from './workflow.js';
 
 class WorkflowJobStep {
   step: WorkflowStep;
-  tool: cwlTsAuto.WorkflowStep;
+  tool: IWorkflowStep;
   id: string;
   submitted: boolean;
   iterable?: JobsGeneratorType;
@@ -555,7 +555,7 @@ export class WorkflowJob {
   ) {
     for (const i of outputparms) {
       if ('id' in i) {
-        const iid = i['id'] as string;
+        const iid = i['id'];
         if (iid in jobout) {
           this.state[iid] = new WorkflowStateItem(i as any, jobout[iid], processStatus);
         } else {
@@ -603,8 +603,8 @@ export class WorkflowJob {
       // return;
     }
 
-    const inputParms = step.step.inputs;
-    const outputParms = step.step.outputs;
+    const inputParms = step.step.tool.inputs;
+    const outputParms = step.step.tool.outputs;
 
     const supportsMultipleInput = Boolean(this.workflow.getRequirement(cwlTsAuto.MultipleInputFeatureRequirement)[0]);
 
@@ -624,11 +624,11 @@ export class WorkflowJob {
       const valueFrom: {
         [key: string]: any;
       } = {};
-      step.step.inputs.forEach((i: any) => {
-        if ('valueFrom' in i) valueFrom[i['id']] = i['valueFrom'];
+      step.step.tool.inputs.forEach((i: any) => {
+        if (i.valueFrom) valueFrom[i.id] = i.valueFrom;
       });
 
-      const loadContents = new Set(step.step.inputs.map((i) => i.loadContents && i.id));
+      const loadContents = new Set(step.step.tool.inputs.map((i) => i.loadContents && i.id));
 
       if (
         Object.keys(valueFrom).length > 0 &&
@@ -708,7 +708,7 @@ export class WorkflowJob {
     });
 
     this.steps.forEach((step) => {
-      step.step.outputs.forEach((out) => {
+      step.step.tool.outputs.forEach((out) => {
         this.state[out['id']] = null;
       });
     });

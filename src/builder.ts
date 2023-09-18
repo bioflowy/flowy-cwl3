@@ -1,17 +1,27 @@
 import * as fs from 'node:fs';
+import type { CpuInfo } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import * as cwlTsAuto from 'cwl-ts-auto';
 import {
   CommandInputEnumSchema,
+  CommandInputRecordField,
   CommandInputRecordSchema,
   InlineJavascriptRequirement,
   InputRecordSchema,
+  SecondaryFileSchema,
 } from 'cwl-ts-auto';
+import { deepcopy } from './copy.js';
 import { ValidationException, WorkflowException } from './errors.js';
 import * as expression from './expression.js';
 import { _logger } from './loghandler.js';
 import { PathMapper } from './pathmapper.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import type { CommandLineBinding, Tool, ToolRequirement } from './types.js';
+import {
+  type CommandInputParameter,
+  type ToolRequirement,
+  CommandLineBinded,
+  type CommandLineBinding,
+} from './types.js';
 import {
   CONTENT_LIMIT,
   type CWLObjectType,
@@ -67,7 +77,7 @@ export function substitute(value: string, replace: string): string {
 export class Builder {
   job: any;
   files: any[];
-  bindings: CommandLineBinding[];
+  bindings: CommandLineBinded[];
   schemaDefs: { [key: string]: any };
   names: any;
   requirements?: undefined | ToolRequirement;
@@ -96,7 +106,7 @@ export class Builder {
   constructor(
     job: any,
     files: any[],
-    bindings: CommandLineBinding[],
+    bindings: CommandLineBinded[],
     schemaDefs: { [key: string]: any },
     names: any,
     requirements: undefined | ToolRequirement,
@@ -211,20 +221,25 @@ export class Builder {
     return false;
   }
   async handle_union(
-    schema: CWLObjectType,
+    schema: CommandInputParameter,
     datum: CWLObjectType | CWLObjectType[],
     discover_secondaryFiles: boolean,
     value_from_expression: boolean,
     lead_pos: number | number[] | undefined = undefined,
     // eslint-disable-next-line
     tail_pos: string | number[] | undefined = undefined,
-  ): Promise<CommandLineBinding[] | undefined> {
+  ): Promise<CommandLineBinded[] | undefined> {
     let bound_input = false;
-    for (let t of schema['type'] as any[]) {
-      if (isString(t) && t in this.schemaDefs) {
-        t = this.schemaDefs[t];
-      } else if (t instanceof Object && 'name' in t && (t['name'] as string) in this.schemaDefs) {
-        t = this.schemaDefs[t['name']];
+    if (!Array.isArray(schema.type)) {
+      throw new Error('Unexpected');
+    }
+    for (let t of schema.type) {
+      if (isString(t)) {
+        if (t in this.schemaDefs) {
+          t = this.schemaDefs[t];
+        }
+      } else if (t.name in this.schemaDefs) {
+        t = this.schemaDefs[t.name];
       }
 
       if (this.validate(t, datum, false)) {
@@ -245,12 +260,12 @@ export class Builder {
     return undefined;
   }
   async bind_input(
-    schema: CWLObjectType,
+    schema: CommandInputParameter,
     datum: CWLObjectType | CWLObjectType[],
     discover_secondaryFiles: boolean,
     lead_pos?: number | number[],
     tail_pos?: string | number[],
-  ): Promise<CommandLineBinding[]> {
+  ): Promise<CommandLineBinded[]> {
     const debug = _logger.isDebugEnabled();
 
     if (tail_pos === undefined) {
@@ -261,8 +276,8 @@ export class Builder {
       lead_pos = [];
     }
 
-    const bindings: CommandLineBinding[] = [];
-    let binding: CommandLineBinding | undefined;
+    const bindings: CommandLineBinded[] = [];
+    let binding: CommandLineBinded | undefined;
     let value_from_expression = false;
 
     if ('inputBinding' in schema && typeof schema['inputBinding'] === 'object') {
@@ -318,6 +333,7 @@ export class Builder {
           bindings,
           binding,
         );
+        binding = undefined;
       }
 
       const _capture_files = (f: CWLObjectType): CWLObjectType => {
@@ -339,33 +355,38 @@ export class Builder {
     }
     if (binding) {
       for (const bi of bindings) {
-        const position: number[] = [...(binding['position'] as number[])];
-        position.push(...(bi['position'] as number[]));
-        bi['position'] = position;
+        const positions: (string | number)[] = [...binding.positions];
+        positions.push(...bi.positions);
+        bi.positions = positions;
       }
       bindings.push(binding);
     }
     return bindings;
   }
-  handle_any(schema: CWLObjectType, datum: CWLObjectType | CWLObjectType[]): void {
+  handle_any(schema: CommandInputParameter, datum: CWLObjectType | CWLObjectType[]): void {
     if (datum instanceof Array) {
-      schema['type'] = 'array';
+      schema.type = 'array';
       schema['items'] = 'Any';
     } else if (datum instanceof Object) {
       if (datum['class'] === 'File') {
-        schema['type'] = 'org.w3id.cwl.cwl.File';
+        schema.type = 'org.w3id.cwl.cwl.File';
       } else if (datum['class'] === 'Directory') {
-        schema['type'] = 'org.w3id.cwl.cwl.Directory';
+        schema.type = 'org.w3id.cwl.cwl.Directory';
       } else {
-        schema['type'] = 'record';
-        schema['fields'] = Object.keys(datum).map((field_name) => ({ name: field_name, type: 'Any' }));
+        schema.type = 'record';
+        const fields = Object.keys(datum).map((field_name) => {
+          const t: CommandInputParameter = new cwlTsAuto.CommandInputParameter({ type: 'Any' });
+          t.name = field_name;
+          return t;
+        });
+        schema.fields['fields'] = fields;
       }
     }
   }
 
-  handle_directory(schema: CWLObjectType, datum: CWLObjectType | CWLObjectType[]): CWLObjectType {
+  handle_directory(schema: CommandInputParameter, datum: CWLObjectType | CWLObjectType[]): CWLObjectType {
     datum = datum as CWLObjectType;
-    const ll = schema['loadListing'] || this.loadListing;
+    const ll = schema.loadListing;
     if (ll && ll !== 'no_listing') {
       get_listing(this.fs_access, datum, ll === 'deep_listing');
     }
@@ -373,7 +394,7 @@ export class Builder {
     return datum;
   }
   async handleFile(
-    schema: CWLObjectType,
+    schema: CommandInputParameter,
     datum: CWLObjectType | CWLObjectType[],
     discoverSecondaryFiles: boolean,
     debug: boolean,
@@ -387,10 +408,10 @@ export class Builder {
     datum = datum as CWLObjectType;
     this.files.push(datum);
 
-    let loadContentsSourceline: { [key: string]: string | number[] } | CWLObjectType | null = null;
+    let loadContentsSourceline: { [key: string]: string | number[] } | CommandInputParameter | null = null;
     if (binding && binding['loadContents']) {
       loadContentsSourceline = binding;
-    } else if (schema['loadContents']) {
+    } else if (schema.loadContents) {
       loadContentsSourceline = schema;
     }
 
@@ -412,8 +433,8 @@ export class Builder {
 
     visit_class(datum['secondaryFiles'] || [], ['File', 'Directory'], _captureFiles);
   }
-  handleFileFormat(schema: CWLObjectType, datum: CWLObjectType | CWLObjectType[], debug: boolean) {
-    const eval_format: any = this.do_eval(schema['format']);
+  handleFileFormat(schema: CommandInputParameter, datum: CWLObjectType | CWLObjectType[], debug: boolean) {
+    const eval_format: any = this.do_eval(schema.format);
     let evaluated_format: string | string[];
 
     if (typeof eval_format === 'string') {
@@ -424,7 +445,7 @@ export class Builder {
         let message = '';
         if (typeof entry !== 'string') {
           message = `An expression in the 'format' field must evaluate to a string, or list of strings. However a non-string item was received: ${entry} of type ${typeof entry}. The expression was ${
-            schema['format']
+            schema.format
           } and its fully evaluated result is ${eval_format}.`;
         }
         // TODO
@@ -453,35 +474,29 @@ export class Builder {
     // }
   }
   async handleSecondaryFile(
-    schema: CWLObjectType,
+    schema: CommandInputParameter,
     datum: CWLObjectType,
     discover_secondaryFiles: boolean,
     debug: boolean,
   ): Promise<void> {
-    let sf_schema: CWLObjectType[] = [];
+    let sf_schema: SecondaryFileSchema[] = [];
     if (!('secondaryFiles' in datum)) {
       datum['secondaryFiles'] = [];
-      sf_schema = aslist(schema['secondaryFiles']);
+      sf_schema = aslist(schema.secondaryFiles);
     } else if (!discover_secondaryFiles) {
       sf_schema = []; // trust the inputs
     } else {
-      sf_schema = aslist(schema['secondaryFiles']);
+      sf_schema = aslist(schema.secondaryFiles);
     }
 
     let sf_required = true;
     for (const [num, sf_entry] of sf_schema.entries()) {
-      if ('required' in sf_entry && sf_entry['required'] !== null) {
-        const required_result = await this.do_eval(sf_entry['required'], { context: datum });
+      if (sf_entry.required !== undefined) {
+        const required_result = await this.do_eval(sf_entry.required, { context: datum });
         if (!(typeof required_result === 'boolean' || required_result === null)) {
-          let sf_item: any;
-          if (sf_schema === schema['secondaryFiles']) {
-            sf_item = sf_schema[num];
-          } else {
-            sf_item = sf_schema;
-          }
           throw new WorkflowException(
             `The result of a expression in the field 'required' must be a bool or None, not a ${typeof required_result}. Expression ${
-              sf_entry['required']
+              sf_entry.required
             } resulted in ${required_result}.`,
           );
         }
@@ -489,10 +504,10 @@ export class Builder {
       }
 
       let sfpath: any;
-      const pattern = sf_entry['pattern'];
+      const pattern = sf_entry.pattern;
       if (typeof pattern === 'string') {
         if (pattern.includes('$(') || pattern.includes('${')) {
-          sfpath = this.do_eval(sf_entry['pattern'], { context: datum });
+          sfpath = this.do_eval(sf_entry.pattern, { context: datum });
         } else {
           sfpath = substitute(datum['basename'] as string, pattern);
         }
@@ -509,7 +524,7 @@ export class Builder {
     normalizeFilesDirs(datum['secondaryFiles'] as MutableSequence<CWLObjectType>);
   }
   handle_secondary_path(
-    schema: CWLObjectType,
+    schema: CommandInputParameter,
     datum: CWLObjectType,
     discover_secondaryFiles: boolean,
     debug: boolean,
@@ -579,71 +594,66 @@ export class Builder {
     }
   }
   async handle_array(
-    schema: CWLObjectType,
+    schema: CommandInputParameter,
     datum: CWLObjectType[],
     discover_secondaryFiles: boolean,
     lead_pos: number | number[] | undefined,
     tail_pos: string | number[] | undefined,
-    bindings: CommandLineBinding[],
-    binding: CommandLineBinding | CommentedMap,
-  ): Promise<void> {
+    bindeds: CommandLineBinded[],
+    binded: CommandLineBinded,
+  ): Promise<CommandLineBinded> {
     for (const [n, item] of datum.entries()) {
-      let b2: CWLObjectType = undefined;
-      if (binding) {
-        b2 = JSON.parse(JSON.stringify(binding));
-        b2['datum'] = item;
+      let b2: CommandLineBinding | undefined = undefined;
+      if (binded) {
+        b2 = { ...binded };
+        b2.position = binded.positions;
       }
-      const itemschema: CWLObjectType = {
-        type: schema['items'],
-        inputBinding: b2,
+      const itemschema: CommandInputParameter = {
+        type: schema.items,
+        format: schema.format,
+        streamable: schema.streamable,
       };
-      for (const k of ['secondaryFiles', 'format', 'streamable']) {
-        if (schema.hasOwnProperty(k)) {
-          itemschema[k] = schema[k];
-        }
-      }
+      itemschema.inputBinding = b2;
       const bs = await this.bind_input(itemschema, item, discover_secondaryFiles, n, tail_pos);
-      bindings.push(...bs);
+      bindeds.push(...bs);
     }
+    return { positions: undefined };
   }
   async handle_record(
-    schema: any,
+    schema: CommandInputParameter,
     datum: any,
     discover_secondaryFiles: any,
-    lead_pos: any,
-    tail_pos: any,
+    lead_pos: number | number[] | undefined,
+    tail_pos: string | number[] | undefined,
     bindings: CommandLineBinding[],
   ): Promise<any> {
-    for (const f of schema['fields']) {
-      const name = String(f['name']);
+    for (const f of schema.fields) {
+      const name = f.name;
       if (name in datum && datum[name] !== null) {
         const bs = await this.bind_input(f, datum[name], discover_secondaryFiles, lead_pos, name);
         bindings.push(...bs);
       } else {
-        datum[name] = f['default'];
+        datum[name] = f.default_;
       }
     }
     return datum;
   }
   async handle_map(
-    schema: any,
+    schema: CommandInputParameter,
     datum: any,
     discover_secondaryFiles: any,
-    lead_pos: any,
-    tail_pos: any,
-    bindings: CommandLineBinding[],
-    binding: CommandLineBinding | undefined,
+    lead_pos: number | number[] | undefined,
+    tail_pos: string | number[] | undefined,
+    bindings: CommandLineBinded[],
+    binding: CommandLineBinded | undefined,
     value_from_expression: any,
   ) {
-    const st = JSON.parse(JSON.stringify(schema['type']));
-    if (
-      binding &&
-      !('inputBinding' in st) &&
-      'type' in st &&
-      st['type'] == 'array' &&
-      binding.itemSeparator === undefined
-    ) {
-      st['inputBinding'] = {};
+    if (isString(schema.type) || Array.isArray(schema.type)) {
+      throw new Error('Error');
+    }
+    const st = deepcopy(schema.type);
+    if (binding && !st.inputBinding && st.type == 'array' && binding.itemSeparator === undefined) {
+      st.inputBinding = new cwlTsAuto.InputBinding({});
     }
     for (const k of ['secondaryFiles', 'format', 'streamable']) {
       if (k in schema) {
@@ -657,12 +667,19 @@ export class Builder {
       bindings.push(...bs);
     }
   }
-  handle_binding(schema: any, datum: any, lead_pos: any, tail_pos: any, debug: any): [CommandLineBinding, boolean] {
-    const binding = { ...schema['inputBinding'] };
+  handle_binding(
+    schema: CommandInputParameter,
+    datum: any,
+    lead_pos: number | number[] | undefined,
+    tail_pos: string | number[] | undefined,
+    debug: any,
+  ): [CommandLineBinded, boolean] {
+    const binding = schema.inputBinding;
+    const binded = CommandLineBinded.fromBinding(binding);
 
     const bp = [...aslist(lead_pos)];
-    if ('position' in binding) {
-      const position = binding['position'];
+    if (binding.position) {
+      const position = binding.position;
       if (typeof position === 'string') {
         const result = this.do_eval(position, { context: datum });
         if (typeof result !== 'number') {
@@ -672,20 +689,20 @@ export class Builder {
               `resulted in ${result?.toString()}.`,
           );
         }
-        binding['position'] = result;
+        binding.position = result;
         bp.push(result);
       } else {
-        bp.push(...aslist(binding['position']));
+        bp.push(...aslist(binding.position));
       }
     } else {
       bp.push(0);
     }
     bp.push(...aslist(tail_pos));
-    binding['position'] = bp;
+    binded.positions = bp;
 
-    binding['datum'] = datum;
-    const valueFrom: boolean = 'valueFrom' in binding && binding['valueFrom'] !== undefined;
-    return [binding, valueFrom];
+    binded.datum = datum;
+    const valueFrom: boolean = binded.valueFrom !== undefined;
+    return [binded, valueFrom];
   }
   tostr(value: any): string {
     if (value instanceof Object && ['File', 'Directory'].indexOf(value['class']) !== -1) {
@@ -705,7 +722,7 @@ export class Builder {
       return value.toString();
     }
   }
-  async generate_arg(binding: CommandLineBinding): Promise<string[]> {
+  async generate_arg(binding: CommandLineBinded): Promise<string[]> {
     let value = binding.datum;
     const debug = _logger.isDebugEnabled();
 

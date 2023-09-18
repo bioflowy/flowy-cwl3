@@ -1,4 +1,5 @@
 import cwlTsAuto from 'cwl-ts-auto';
+import type { Dictionary } from 'cwl-ts-auto/dist/util/Dict.js';
 import type { CWLOutputType } from './utils.js';
 
 export type ToolRequirement = (
@@ -36,28 +37,34 @@ export type ToolType =
       | cwlTsAuto.CommandInputArraySchema
       | string
     )[];
-export class CommandLineBinding {
+export class CommandLineBinded {
   extensionFields?: { [key: string]: any };
   datum?: CWLOutputType;
   loadContents?: undefined | boolean;
-  position: (number | string)[];
+  position?: number | string;
+  positions: (number | string)[];
   prefix?: undefined | string;
   separate?: undefined | boolean;
   itemSeparator?: undefined | string;
   valueFrom?: undefined | string;
   shellQuote?: undefined | boolean;
+  static fromBinding(binding: CommandLineBinding) {
+    const t = new CommandLineBinded();
+    transferProperties(binding, t);
+    return t;
+  }
 }
-export function compareInputBinding(a: CommandLineBinding, b: CommandLineBinding): number {
-  if (!a.position) {
+export function compareInputBinding(a: CommandLineBinded, b: CommandLineBinded): number {
+  if (!a.positions) {
     return -1;
   }
-  if (!b.position) {
+  if (!b.positions) {
     return 1;
   }
-  const maxIndex = Math.max(a.position.length, b.position.length);
+  const maxIndex = Math.max(a.positions.length, b.positions.length);
   for (let index = 0; index < maxIndex; index++) {
-    const i = index < a.position.length ? a.position[index] : undefined;
-    const j = index < b.position.length ? b.position[index] : undefined;
+    const i = index < a.positions.length ? a.positions[index] : undefined;
+    const j = index < b.positions.length ? b.positions[index] : undefined;
     if (i === j) {
       continue;
     }
@@ -74,13 +81,35 @@ export function compareInputBinding(a: CommandLineBinding, b: CommandLineBinding
   }
   return 0;
 }
-
-export function convertToCommandLineBinding(binding1: cwlTsAuto.CommandLineBinding) {
-  const binding2 = new CommandLineBinding();
-  transferProperties(binding1, binding2, ['position']);
-  return binding2;
+export interface CommandLineBinding {
+  extensionFields?: Dictionary<any>;
+  loadContents?: undefined | boolean;
+  position?: undefined | number | string | (string | number)[];
+  prefix?: undefined | string;
+  separate?: undefined | boolean;
+  itemSeparator?: undefined | string;
+  valueFrom?: undefined | string;
+  shellQuote?: undefined | boolean;
 }
-export class CommandInputParameter {
+
+export interface CommandInputRecordField {
+  extensionFields?: Dictionary<any>;
+  name?: string;
+  doc?: undefined | string | string[];
+  type?: ToolType;
+  label?: undefined | string;
+  secondaryFiles?: undefined | cwlTsAuto.SecondaryFileSchema | cwlTsAuto.SecondaryFileSchema[];
+  streamable?: undefined | boolean;
+  format?: undefined | string | string[];
+  loadContents?: undefined | boolean;
+  loadListing?: undefined | cwlTsAuto.LoadListingEnum;
+  default_?: undefined | any;
+  /**
+   * Describes how to turn this object into command line arguments.
+   */
+  inputBinding?: undefined | CommandLineBinding;
+}
+export interface CommandInputParameter {
   extensionFields?: { [key: string]: any };
   name?: undefined | string;
   label?: undefined | string;
@@ -91,47 +120,95 @@ export class CommandInputParameter {
   loadContents?: undefined | boolean;
   loadListing?: undefined | cwlTsAuto.LoadListingEnum;
   default_?: undefined | any;
-  type: ToolType;
-  inputBinding?: undefined | cwlTsAuto.CommandLineBinding;
-  _tool_entry?: cwlTsAuto.CommandInputParameter;
+  type?: ToolType;
+  inputBinding?: undefined | CommandLineBinding;
   id?: string;
-  used_by_step?: boolean;
-  not_connected?: boolean;
-  source?: string;
+  items?:
+    | cwlTsAuto.CWLType
+    | cwlTsAuto.CommandInputRecordSchema
+    | cwlTsAuto.CommandInputEnumSchema
+    | cwlTsAuto.CommandInputArraySchema
+    | string
+    | (
+        | cwlTsAuto.CWLType
+        | cwlTsAuto.CommandInputRecordSchema
+        | cwlTsAuto.CommandInputEnumSchema
+        | cwlTsAuto.CommandInputArraySchema
+        | string
+      )[];
+  fields?: CommandInputRecordField[];
+  symbols?: string[];
 }
-export class CommandOutputParameter {
+export interface CommandOutputParameter {
   extensionFields?: { [key: string]: any };
+  id?: undefined | string;
   name?: undefined | string;
   label?: undefined | string;
   secondaryFiles?: undefined | cwlTsAuto.SecondaryFileSchema | cwlTsAuto.SecondaryFileSchema[];
   streamable?: undefined | boolean;
   doc?: undefined | string | string[];
   format?: undefined | string;
-  type: ToolType;
+  type?: ToolType;
   outputBinding?: undefined | cwlTsAuto.CommandOutputBinding;
-  outputSource?: string;
+  outputSource?: string | string[];
 }
-export function convertCommandInputParameter(input: cwlTsAuto.CommandInputParameter | cwlTsAuto.WorkflowStepInput) {
-  const input2 = new CommandInputParameter();
-  transferProperties(input, input2);
-  return input2;
+export interface WorkflowStepInput extends CommandInputParameter {
+  not_connected?: boolean;
+  used_by_step?: boolean;
+  _tool_entry?: CommandInputParameter;
+  linkMerge?: undefined | cwlTsAuto.LinkMergeMethod;
+  pickValue?: undefined | cwlTsAuto.PickValueMethod;
 }
-export function convertCommandOutputParameter(output: cwlTsAuto.CommandOutputParameter | cwlTsAuto.WorkflowStepOutput) {
-  const output2 = new CommandOutputParameter();
-  transferProperties(output, output2);
-  return output2;
+export interface WorkflowStepOutput extends CommandOutputParameter {
+  default_?: any;
+  _tool_entry?: CommandOutputParameter;
 }
 export function transferProperties(source: any, target: any, exclude: string[] = []): void {
   for (const key of Object.keys(source)) {
-    if (!(key in exclude) && key in target) {
+    if (!(key in exclude)) {
       target[key] = source[key];
     }
   }
 }
+export interface IWorkflowStep {
+  extensionFields?: Dictionary<any>;
+  id?: undefined | string;
+  label?: undefined | string;
+  doc?: undefined | string | string[];
+  in_: cwlTsAuto.WorkflowStepInput[];
+  inputs: WorkflowStepInput[];
+  out: (string | cwlTsAuto.WorkflowStepOutput)[];
+  outputs: WorkflowStepOutput[];
+  requirements?:
+    | undefined
+    | (
+        | cwlTsAuto.InlineJavascriptRequirement
+        | cwlTsAuto.SchemaDefRequirement
+        | cwlTsAuto.LoadListingRequirement
+        | cwlTsAuto.DockerRequirement
+        | cwlTsAuto.SoftwareRequirement
+        | cwlTsAuto.InitialWorkDirRequirement
+        | cwlTsAuto.EnvVarRequirement
+        | cwlTsAuto.ShellCommandRequirement
+        | cwlTsAuto.ResourceRequirement
+        | cwlTsAuto.WorkReuse
+        | cwlTsAuto.NetworkAccess
+        | cwlTsAuto.InplaceUpdateRequirement
+        | cwlTsAuto.ToolTimeLimit
+        | cwlTsAuto.SubworkflowFeatureRequirement
+        | cwlTsAuto.ScatterFeatureRequirement
+        | cwlTsAuto.MultipleInputFeatureRequirement
+      )[];
+  hints?: undefined | any[];
+  run: string | cwlTsAuto.CommandLineTool | cwlTsAuto.ExpressionTool | cwlTsAuto.Workflow | cwlTsAuto.Operation;
+  when?: undefined | string;
+  scatter?: undefined | string | string[];
+  scatterMethod?: undefined | cwlTsAuto.ScatterMethod;
+}
 export interface Tool {
   id?: undefined | string;
-  inputs?: cwlTsAuto.CommandInputParameter[];
-  outputs?: cwlTsAuto.CommandOutputParameter[];
+  inputs?: CommandInputParameter[];
+  outputs?: CommandOutputParameter[];
   requirements?: undefined | ToolRequirement;
   hints?: undefined | any[];
   baseCommand?: undefined | string | string[];
