@@ -19,8 +19,8 @@ import {
 import { isString, type CWLObjectType, type JobsGeneratorType, type OutputCallbackType, aslist } from './utils.js';
 import { WorkflowJob } from './workflow_job.js';
 
-async function default_make_tool(
-  toolpath_object: cwlTsAuto.ExpressionTool | cwlTsAuto.CommandLineTool | cwlTsAuto.Workflow,
+export async function default_make_tool(
+  toolpath_object: cwlTsAuto.ExpressionTool | cwlTsAuto.CommandLineTool | cwlTsAuto.Workflow | cwlTsAuto.Operation,
   loadingContext: LoadingContext,
 ): Promise<Process> {
   if (toolpath_object instanceof cwlTsAuto.CommandLineTool) {
@@ -320,7 +320,7 @@ export class WorkflowStep extends Process {
         const [tool, _] = await loadDocument(this.tool.run, loadingContext);
         this.embedded_tool = tool;
       } else {
-        this.embedded_tool = loadingContext.construct_tool_object(this.tool.run, loadingContext);
+        this.embedded_tool = await loadingContext.construct_tool_object(this.tool.run, loadingContext);
       }
     } catch (vexc) {
       if (loadingContext.debug) {

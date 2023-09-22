@@ -1,4 +1,4 @@
-import path from 'node:path';
+import * as cwlTsAuto from 'cwl-ts-auto';
 import { PathMapper } from './pathmapper.js';
 import { Process } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
@@ -15,8 +15,10 @@ class ContextBase {
     }
   }
 }
-
-function make_tool_notimpl(toolpath_object: CommentedMap, loadingContext: LoadingContext): Process {
+async function make_tool_notimpl(
+  _: cwlTsAuto.ExpressionTool | cwlTsAuto.CommandLineTool | cwlTsAuto.Workflow | cwlTsAuto.Operation,
+  _i: LoadingContext,
+): Promise<Process> {
   throw new Error('Not implemented');
 }
 
