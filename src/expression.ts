@@ -106,10 +106,10 @@ class JSEngine1 implements JSEngine {
     if (jscript.length > 1 && jscript[0] == '{') {
       inner_js = jscript;
     } else {
-      inner_js = `{return JSON.stringify(${jscript});}`;
+      inner_js = `{return ${jscript};}`;
     }
 
-    return `"use strict";\n${jslib}\n(function()${inner_js})()`;
+    return `"use strict";\n${jslib}\nJSON.stringify((function()${inner_js})())`;
   }
   async eval(expr: string, jslib: string, rootvars: { [key: string]: any }): Promise<CWLOutputType> {
     const isolate = new IsolatedVM.Isolate({ memoryLimit: 128 });

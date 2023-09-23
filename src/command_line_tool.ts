@@ -9,7 +9,7 @@ import { _logger } from './loghandler.js';
 import { PathMapper } from './pathmapper.js';
 import { Process, compute_checksums, shortname, uniquename } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import { type CommandOutputParameter, type Tool, type CommandInputParameter } from './types.js';
+import { type CommandOutputParameter, type Tool, type CommandInputParameter, type ToolRequirement } from './types.js';
 import {
   type CWLObjectType,
   type CWLOutputType,
@@ -33,8 +33,8 @@ export class ExpressionJob {
   builder: Builder;
   script: string;
   output_callback: OutputCallbackType | null;
-  requirements: CWLObjectType[];
-  hints: CWLObjectType[];
+  requirements: ToolRequirement;
+  hints: ToolRequirement;
   outdir: string | null;
   tmpdir: string | null;
   prov_obj: any | null;
@@ -43,8 +43,8 @@ export class ExpressionJob {
     builder: Builder,
     script: string,
     output_callback: OutputCallbackType | null,
-    requirements: CWLObjectType[],
-    hints: CWLObjectType[],
+    requirements: ToolRequirement,
+    hints: ToolRequirement,
     outdir: string | null = null,
     tmpdir: string | null = null,
   ) {
@@ -1394,7 +1394,7 @@ export class CommandLineTool extends Process {
       }
       if (binding.outputEval) {
         try {
-          result = await builder.do_eval(binding.outputEval, { context: r });
+          result = await builder.do_eval(binding.outputEval, r);
         } catch (error) {
           // Log the error here
         }

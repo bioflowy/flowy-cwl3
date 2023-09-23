@@ -1,7 +1,9 @@
 import * as cwlTsAuto from 'cwl-ts-auto';
+import * as lodash from 'lodash';
 import { PathMapper } from './pathmapper.js';
 import { Process } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
+import type { ToolRequirement } from './types.js';
 import { DEFAULT_TMP_PREFIX, type CWLObjectType, mkdtemp, type CommentedMap, splitPath } from './utils.js';
 
 class ContextBase {
@@ -52,8 +54,8 @@ function set_log_dir(outdir: string, log_dir: string, subdir_name: string): stri
 export class LoadingContext extends ContextBase {
   debug = false;
   metadata: CWLObjectType = {};
-  requirements: CWLObjectType[] | null = null;
-  hints: CWLObjectType[] | null = null;
+  requirements: ToolRequirement = [];
+  hints: ToolRequirement = [];
   disable_js_validation = false;
   js_hint_options_file: string | null = null;
   do_validate = true;
@@ -77,13 +79,16 @@ export class LoadingContext extends ContextBase {
   skip_schemas = false;
   baseuri: string;
 
-  constructor(kwargs?: { [key: string]: any } | null) {
-    super(kwargs);
-  }
-
   copy(): LoadingContext {
-    return Object.assign(Object.create(Object.getPrototypeOf(this)), this);
+    const t = new LoadingContext();
+    for (const [k, v] of Object.entries(this)) {
+      (t as any)[k] = v;
+    }
+    return t;
   }
+}
+export function make_default_fs_access(basedir: string): StdFsAccess {
+  return new StdFsAccess(basedir);
 }
 export class RuntimeContext extends ContextBase {
   outdir?: string = undefined;
@@ -91,7 +96,7 @@ export class RuntimeContext extends ContextBase {
   tmpdir_prefix: string = DEFAULT_TMP_PREFIX;
   tmp_outdir_prefix = '';
   stagedir = '';
-  make_fs_access: StdFsAccess;
+  make_fs_access: (basedir: string) => StdFsAccess;
   user_space_docker_cmd?: string = undefined;
   secret_store?: any = undefined;
   no_read_only = false;
@@ -135,7 +140,7 @@ export class RuntimeContext extends ContextBase {
   js_console = false;
   job_script_provider?: any = undefined;
   eval_timeout = 60;
-  postScatterEval?: any = undefined;
+  postScatterEval?: (io: CWLObjectType) => Promise<CWLObjectType | undefined>;
   on_error: 'stop' | 'continue' = 'stop';
   strict_memory_limit = false;
   strict_cpu_limit = false;
@@ -156,7 +161,7 @@ export class RuntimeContext extends ContextBase {
     if (this.tmp_outdir_prefix == '') {
       this.tmp_outdir_prefix = this.tmpdir_prefix;
     }
-    this.make_fs_access = new StdFsAccess(this.basedir);
+    this.make_fs_access = make_default_fs_access;
   }
 
   getOutdir(): string {
@@ -196,7 +201,7 @@ export class RuntimeContext extends ContextBase {
   }
 }
 export function getDefault(val: any, def: any): any {
-  if (val === null) {
+  if (val === null || val === undefined) {
     return def;
   } else {
     return val;

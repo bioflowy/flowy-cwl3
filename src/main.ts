@@ -18,6 +18,7 @@ import {
   filePathToURI,
   type CWLOutputType,
 } from './utils.js';
+import { default_make_tool } from './workflow.js';
 
 function parseFile(filePath: string): object | null {
   const extname = path.extname(filePath).toLowerCase();
@@ -139,24 +140,6 @@ function init_job_order(
   }
   return job_order_object;
 }
-function outputs(obj: object): object {
-  if (obj['class'] === 'File') {
-    return {
-      checksum: obj['checksum'],
-      class: 'File',
-      location: path.basename(obj['location']),
-      size: obj['size'],
-    };
-  } else {
-    for (const key of Object.keys(obj)) {
-      const val = obj[key];
-      if (val instanceof Object) {
-        obj[key] = outputs(val);
-      }
-    }
-    return obj;
-  }
-}
 function deepSortObject(obj: object) {
   if (typeof obj !== 'object' || obj === null) return obj;
 
@@ -172,6 +155,41 @@ function deepSortObject(obj: object) {
 function toJsonString(obj: object): string {
   return JSON.stringify(deepSortObject(obj), null, 2);
 }
+function equals(expected: any, actual: any): boolean {
+  if (expected instanceof Array) {
+    if (!(actual instanceof Array)) {
+      return false;
+    }
+    if (expected.length !== actual.length) {
+      return false;
+    }
+    for (let index = 0; index < expected.length; index++) {
+      if (!equals(expected[index], actual[index])) {
+        return false;
+      }
+    }
+  } else if (expected instanceof Object) {
+    if (!(actual instanceof Object)) {
+      return false;
+    }
+    for (const key of Object.keys(expected)) {
+      const expectedValue = expected[key];
+      let actualValue = actual[key];
+      if (expectedValue === 'Any') {
+        continue;
+      }
+      if (key === 'location') {
+        actualValue = path.basename(actualValue);
+      }
+      if (!equals(expectedValue, actualValue)) {
+        return false;
+      }
+    }
+  } else {
+    return expected === actual;
+  }
+  return true;
+}
 export async function main(): Promise<number> {
   const test_path = path.join(process.cwd(), 'conformance_tests.yaml');
   const content = fs.readFileSync(test_path, 'utf-8');
@@ -186,15 +204,14 @@ export async function main(): Promise<number> {
     const expected_outputs = test['output'];
     try {
       const [output, status] = await exec(tool_path, job_path);
-      const output2 = outputs(output as object);
       console.log(status);
       if (test['should_fail']) {
         console.log('should_failed flag is true, but no error occurred.');
       }
 
-      const expected_str = toJsonString(expected_outputs);
-      const output_str = toJsonString(output2);
-      if (expected_str !== output_str) {
+      if (!equals(expected_outputs, output)) {
+        const expected_str = toJsonString(expected_outputs);
+        const output_str = toJsonString(output as object);
         console.log(`expected: ${expected_str}`);
         console.log(`output: ${output_str}`);
       }
@@ -210,6 +227,7 @@ export async function main(): Promise<number> {
 }
 export async function exec(tool_path: string, job_path: string): Promise<[CWLOutputType, string]> {
   const loadingContext = new LoadingContext({});
+  loadingContext.construct_tool_object = default_make_tool;
   if (!path.isAbsolute(tool_path)) {
     tool_path = path.join(process.cwd(), tool_path);
   }

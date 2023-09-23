@@ -47,8 +47,8 @@ export type JobsGeneratorType = AsyncGenerator<JobsType, void>;
 export type OutputCallbackType = (arg1: CWLObjectType, arg2: string) => void;
 // type ResolverType = (Loader, string)=>string?;
 // type DestinationsType = MutableMapping<string, CWLOutputType?>;
-// type ScatterDestinationsType = MutableMapping<string, (CWLOutputType|undefined)[]>;
-// type ScatterOutputCallbackType = (ScatterDestinationsType?, string)=> void;
+export type ScatterDestinationsType = MutableMapping<(CWLOutputType | undefined)[]>;
+export type ScatterOutputCallbackType = (arg1: ScatterDestinationsType, arg2: string) => void;
 export type SinkType = CWLOutputType | CWLObjectType;
 export type DirectoryType = {
   class: string;

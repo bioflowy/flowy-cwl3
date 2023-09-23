@@ -158,6 +158,7 @@ export interface WorkflowStepInput extends CommandInputParameter {
   _tool_entry?: CommandInputParameter;
   linkMerge?: undefined | cwlTsAuto.LinkMergeMethod;
   pickValue?: undefined | cwlTsAuto.PickValueMethod;
+  valueFrom?: undefined | string;
 }
 export interface WorkflowStepOutput extends CommandOutputParameter {
   default_?: any;
@@ -179,27 +180,8 @@ export interface IWorkflowStep {
   inputs: WorkflowStepInput[];
   out: (string | cwlTsAuto.WorkflowStepOutput)[];
   outputs: WorkflowStepOutput[];
-  requirements?:
-    | undefined
-    | (
-        | cwlTsAuto.InlineJavascriptRequirement
-        | cwlTsAuto.SchemaDefRequirement
-        | cwlTsAuto.LoadListingRequirement
-        | cwlTsAuto.DockerRequirement
-        | cwlTsAuto.SoftwareRequirement
-        | cwlTsAuto.InitialWorkDirRequirement
-        | cwlTsAuto.EnvVarRequirement
-        | cwlTsAuto.ShellCommandRequirement
-        | cwlTsAuto.ResourceRequirement
-        | cwlTsAuto.WorkReuse
-        | cwlTsAuto.NetworkAccess
-        | cwlTsAuto.InplaceUpdateRequirement
-        | cwlTsAuto.ToolTimeLimit
-        | cwlTsAuto.SubworkflowFeatureRequirement
-        | cwlTsAuto.ScatterFeatureRequirement
-        | cwlTsAuto.MultipleInputFeatureRequirement
-      )[];
-  hints?: undefined | any[];
+  requirements: ToolRequirement;
+  hints: ToolRequirement;
   run: string | cwlTsAuto.CommandLineTool | cwlTsAuto.ExpressionTool | cwlTsAuto.Workflow | cwlTsAuto.Operation;
   when?: undefined | string;
   scatter?: undefined | string | string[];
@@ -210,7 +192,7 @@ export interface Tool {
   inputs?: CommandInputParameter[];
   outputs?: CommandOutputParameter[];
   requirements?: undefined | ToolRequirement;
-  hints?: undefined | any[];
+  hints?: undefined | ToolRequirement;
   baseCommand?: undefined | string | string[];
   /**
    * Command line bindings which are not directly associated with input

@@ -28,6 +28,7 @@ import {
   type CommandInputParameter,
   CommandLineBinded,
   type WorkflowStepInput,
+  type ToolRequirement,
 } from './types.js';
 import {
   type CWLObjectType,
@@ -382,8 +383,8 @@ export abstract class Process {
   parent_wf: any | null;
   names: any;
   tool: Tool;
-  requirements: any[];
-  hints: any[];
+  requirements: ToolRequirement = [];
+  hints: ToolRequirement = [];
   original_requirements: any[];
   original_hints: any[];
   doc_loader: any;
@@ -415,10 +416,10 @@ export abstract class Process {
 
     // this.names = make_avro_schema([SCHEMA_FILE, SCHEMA_DIR, SCHEMA_ANY], new Loader({}));
     const debug = loadingContext.debug;
-    this.requirements = copy.deepcopy(getDefault(loadingContext.requirements, []));
+    this.requirements = getDefault(loadingContext.requirements, []);
     const tool_requirements = this.tool.requirements || [];
 
-    if (tool_requirements === null) {
+    if (tool_requirements === undefined) {
       throw new ValidationException(
         "If 'requirements' is present then it must be a list or map/dictionary, not empty.",
       );
@@ -436,16 +437,16 @@ export abstract class Process {
     //     )
     // );
 
-    this.hints = copy.deepcopy(getDefault(loadingContext.hints, []));
+    this.hints = [...getDefault(loadingContext.hints, [])];
     const tool_hints = this.tool.hints || [];
 
     if (tool_hints === null) {
       throw new ValidationException("If 'hints' is present then it must be a list or map/dictionary, not empty.");
     }
 
-    this.hints = this.hints.concat(tool_hints);
-    this.original_requirements = copy.deepcopy(this.requirements);
-    this.original_hints = copy.deepcopy(this.hints);
+    this.hints.concat(tool_hints);
+    this.original_requirements = this.requirements;
+    this.original_hints = this.hints;
     // this.doc_loader = loadingContext.loader;
     // this.doc_schema = loadingContext.avsc_names;
     this.formatgraph = null;
@@ -459,7 +460,7 @@ export abstract class Process {
 
     this.schemaDefs = {};
 
-    const [sd, _] = getRequirement(this.tool, cwlTsAuto.SchemaDefRequirement);
+    const [sd, _] = getRequirement(this, cwlTsAuto.SchemaDefRequirement);
 
     if (sd) {
       const sdtypes = sd.types;
@@ -545,7 +546,7 @@ export abstract class Process {
       }
     }
 
-    const [dockerReq, is_req] = getRequirement(this.tool, cwlTsAuto.DockerRequirement);
+    const [dockerReq, is_req] = getRequirement(this, cwlTsAuto.DockerRequirement);
 
     if (dockerReq && dockerReq.dockerOutputDirectory && is_req) {
       _logger.warning(

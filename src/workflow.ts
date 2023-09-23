@@ -1,7 +1,7 @@
 import * as cwlTsAuto from 'cwl-ts-auto';
 import { circular_dependency_checker, static_checker } from './checker.js';
 import * as command_line_tool from './command_line_tool.js';
-import { LoadingContext, RuntimeContext } from './context.js';
+import { LoadingContext, RuntimeContext, getDefault } from './context.js';
 import { deepcopy } from './copy.js';
 import { ValidationException, WorkflowException } from './errors.js';
 import { loadDocument } from './loader.js';
@@ -287,22 +287,23 @@ export class WorkflowStep extends Process {
 
     loadingContext = loadingContext.copy();
 
-    // const parent_requirements = copy.deepcopy(getdefault(loadingContext.requirements, []));
-    // loadingContext.requirements = copy.deepcopy(toolpath_object.get('requirements', []));
-    // if (loadingContext.requirements === null) throw new Error('');
+    const parent_requirements = getDefault(loadingContext.requirements, []);
+    loadingContext.requirements = this.tool.requirements || [];
+    if (loadingContext.requirements === null) throw new Error('');
 
-    // for (const parent_req of parent_requirements) {
-    //   let found_in_step = false;
-    //   for (const step_req of loadingContext.requirements) {
-    //     if (parent_req['class'] === step_req['class']) {
-    //       found_in_step = true;
-    //       break;
-    //     }
-    //   }
-    //   if (!found_in_step && parent_req.get('class') !== 'http://commonwl.org/cwltool#Loop') {
-    //     loadingContext.requirements.push(parent_req);
-    //   }
-    // }
+    for (const parent_req of parent_requirements) {
+      let found_in_step = false;
+      for (const step_req of loadingContext.requirements) {
+        if (parent_req['class'] === step_req['class']) {
+          found_in_step = true;
+          break;
+        }
+      }
+      if (!found_in_step) {
+        // && parent_req.get('class_') !== 'http://commonwl.org/cwltool#Loop') {
+        loadingContext.requirements.push(parent_req);
+      }
+    }
     // loadingContext.requirements = loadingContext.requirements.concat(
     //   cast(
     //     List[CWLObjectType],
@@ -310,33 +311,25 @@ export class WorkflowStep extends Process {
     //   ),
     // );
 
-    let hints = []; // copy.deepcopy(getdefault(loadingContext.hints, []));
-    hints = hints.concat(aslist(this.tool.hints), []);
+    let hints = loadingContext.hints ? [...loadingContext.hints] : [];
+    hints = hints.concat(this.tool.hints ?? []);
     loadingContext.hints = hints;
 
-    try {
-      if (isString(this.tool.run)) {
-        loadingContext.metadata = {};
-        const [tool, _] = await loadDocument(this.tool.run, loadingContext);
-        this.embedded_tool = tool;
-      } else {
-        this.embedded_tool = await loadingContext.construct_tool_object(this.tool.run, loadingContext);
-      }
-    } catch (vexc) {
-      if (loadingContext.debug) {
-        console.error('Validation exception');
-      }
-      throw new WorkflowException(`Tool definition ${this.tool.run} failed validation:\n${vexc.toString()}`, vexc);
+    if (isString(this.tool.run)) {
+      loadingContext.metadata = {};
+      const [tool, _] = await loadDocument(this.tool.run, loadingContext);
+      this.embedded_tool = tool;
+    } else {
+      this.embedded_tool = await loadingContext.construct_tool_object(this.tool.run, loadingContext);
     }
-
     const validation_errors = [];
     const bound = new Set();
 
     if (this.embedded_tool.getRequirement(cwlTsAuto.SchemaDefRequirement)[0]) {
-      //   if (!toolpath_object.has('requirements')) {
-      //     toolpath_object['requirements'] = [];
-      //   }
-      //   toolpath_object['requirements'].push(this.embedded_tool.get_requirement('SchemaDefRequirement')[0]);
+      if (!this.tool.requirements) {
+        this.tool.requirements = [];
+      }
+      this.tool.requirements.push(this.embedded_tool.getRequirement(cwlTsAuto.SchemaDefRequirement)[0]);
     }
     this.tool.inputs = this.handleInput(this.tool.in_, bound, validation_errors, debug);
     this.tool.outputs = this.handleOutput(this.tool.out, bound, validation_errors, debug);

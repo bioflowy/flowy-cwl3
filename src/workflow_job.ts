@@ -1,12 +1,19 @@
 import * as cwlTsAuto from 'cwl-ts-auto';
+import { contentLimitRespectedReadBytes } from './builder.js';
 import { can_assign_src_to_sink } from './checker.js';
-import { RuntimeContext, getDefault } from './context.js';
+import { RuntimeContext, getDefault, make_default_fs_access } from './context.js';
 import { WorkflowException } from './errors.js';
 import { do_eval } from './expression.js';
 import { _logger } from './loghandler.js';
 import { shortname, uniquename } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import type { CommandInputParameter, CommandOutputParameter, IWorkflowStep } from './types.js';
+import type {
+  CommandInputParameter,
+  CommandOutputParameter,
+  IWorkflowStep,
+  ToolType,
+  WorkflowStepInput,
+} from './types.js';
 import {
   type CWLObjectType,
   type CWLOutputType,
@@ -21,6 +28,10 @@ import {
   aslist,
   get_listing,
   type JobsType,
+  getRequirement,
+  type ScatterOutputCallbackType,
+  type ScatterDestinationsType,
+  type SinkType,
 } from './utils.js';
 import { Workflow, WorkflowStep } from './workflow.js';
 
@@ -277,6 +288,153 @@ class WorkflowJobStep {
 
 //   return [steps, put];
 // }
+class ReceiveScatterOutput {
+  dest: ScatterDestinationsType;
+  completed: number;
+  processStatus: string;
+  total: number;
+  output_callback: ScatterOutputCallbackType;
+  steps: (JobsGeneratorType | null)[];
+
+  constructor(output_callback: ScatterOutputCallbackType, dest: ScatterDestinationsType, total: number) {
+    this.dest = dest;
+    this.completed = 0;
+    this.processStatus = 'success';
+    this.total = total;
+    this.output_callback = output_callback;
+    this.steps = [];
+  }
+
+  receive_scatter_output(index: number, jobout: CWLObjectType, processStatus: string): void {
+    for (const key in jobout) {
+      this.dest[key][index] = jobout[key];
+    }
+
+    // Release the iterable related to this step to reclaim memory
+    if (this.steps.length > 0) {
+      this.steps[index] = null;
+    }
+
+    if (processStatus !== 'success') {
+      if (this.processStatus !== 'permanentFail') {
+        this.processStatus = processStatus;
+      }
+    }
+
+    this.completed += 1;
+
+    if (this.completed === this.total) {
+      this.output_callback(this.dest, this.processStatus);
+    }
+  }
+
+  setTotal(total: number, steps: (JobsGeneratorType | null)[]): void {
+    this.total = total;
+    this.steps = steps;
+    if (this.completed === this.total) {
+      this.output_callback(this.dest, this.processStatus);
+    }
+  }
+}
+async function* parallel_steps(
+  steps: (JobsGeneratorType | null)[],
+  rc: ReceiveScatterOutput,
+  runtimeContext: RuntimeContext,
+): JobsGeneratorType {
+  while (rc.completed < rc.total) {
+    let made_progress = false;
+    for (let index = 0; index < steps.length; index++) {
+      const step = steps[index];
+      if (
+        getDefault(runtimeContext.on_error, 'stop') === 'stop' &&
+        !['success', 'skipped'].includes(rc.processStatus)
+      ) {
+        break;
+      }
+      if (step === null) {
+        continue;
+      }
+      try {
+        for await (const j of step) {
+          if (
+            getDefault(runtimeContext.on_error, 'stop') === 'stop' &&
+            !['success', 'skipped'].includes(rc.processStatus)
+          ) {
+            break;
+          }
+          if (j !== null) {
+            made_progress = true;
+            yield j;
+          } else {
+            break;
+          }
+        }
+        if (made_progress) {
+          break;
+        }
+      } catch (exc) {
+        if (exc instanceof WorkflowException) {
+          _logger.error(`Cannot make scatter job: ${exc.message}`);
+          _logger.debug('', { exc_info: true }); // Assuming exc_info is a placeholder for additional logging details
+          rc.receive_scatter_output(index, {}, 'permanentFail');
+        }
+      }
+    }
+    if (!made_progress && rc.completed < rc.total) {
+      yield null;
+    }
+  }
+}
+async function dotproduct_scatter(
+  process: WorkflowJobStep,
+  joborder: CWLObjectType,
+  scatter_keys: string[],
+  output_callback: ScatterOutputCallbackType,
+  runtimeContext: RuntimeContext,
+): Promise<JobsGeneratorType> {
+  let jobl: number | null = null;
+  for (const key of scatter_keys) {
+    if (jobl === null) {
+      jobl = (joborder[key] as any[]).length; // Assuming joborder[key] is an array
+    } else if (jobl !== (joborder[key] as any[]).length) {
+      throw new Error('Length of input arrays must be equal when performing dotproduct scatter.');
+    }
+  }
+
+  if (jobl === null) {
+    throw new Error('Impossible codepath');
+  }
+
+  const output: ScatterDestinationsType = {};
+  for (const i of process.tool['outputs']) {
+    output[i['id']] = Array(jobl).fill(null);
+  }
+
+  const rc = new ReceiveScatterOutput(output_callback, output, jobl); // Assuming ReceiveScatterOutput is a class you've defined
+
+  const steps: (JobsGeneratorType | null)[] = [];
+  for (let index = 0; index < jobl; index++) {
+    let sjobo: CWLObjectType | null = { ...joborder }; // Shallow copy of the object
+    for (const key of scatter_keys) {
+      sjobo[key] = (joborder[key] as any[])[index];
+    }
+
+    if (runtimeContext.postScatterEval) {
+      sjobo = await runtimeContext.postScatterEval(sjobo);
+    }
+    const curriedcallback = (jobout: CWLObjectType, processStatus: string) =>
+      rc.receive_scatter_output(index, jobout, processStatus); // Binding index as the first argument
+    if (sjobo) {
+      steps.push(process.job(sjobo, curriedcallback, runtimeContext));
+    } else {
+      curriedcallback({}, 'skipped');
+      steps.push(null);
+    }
+  }
+
+  rc.setTotal(jobl, steps);
+  return parallel_steps(steps, rc, runtimeContext); // Assuming parallel_steps is a function you've defined
+}
 // function dotproduct_scatter(
 //   process: WorkflowJobStep,
 //   joborder: CWLObjectType,
@@ -328,62 +486,62 @@ class WorkflowJobStep {
 
 //   return parallel_steps(steps, rc, runtimeContext);
 // }
-// function match_types(
-//   sinktype: SinkType | null,
-//   src: WorkflowStateItem,
-//   iid: string,
-//   inputobj: CWLObjectType,
-//   linkMerge: string | null,
-//   valueFrom: string | null,
-// ): boolean {
-//   if (sinktype instanceof Array) {
-//     for (const st of sinktype) {
-//       if (match_types(st, src, iid, inputobj, linkMerge, valueFrom)) {
-//         return true;
-//       }
-//     }
-//   } else if (src.parameter['type'] instanceof Array) {
-//     const original_types = src.parameter['type'];
-//     for (const source_type of original_types) {
-//       src.parameter['type'] = source_type;
-//       const match = match_types(sinktype, src, iid, inputobj, linkMerge, valueFrom);
-//       if (match) {
-//         src.parameter['type'] = original_types;
-//         return true;
-//       }
-//     }
-//     src.parameter['type'] = original_types;
-//     return false;
-//   } else if (linkMerge) {
-//     if (!(iid in inputobj)) {
-//       inputobj[iid] = [];
-//     }
-//     let sourceTypes: CWLOutputType[] | null = inputobj[iid];
-//     if (linkMerge === 'merge_nested') {
-//       sourceTypes.push(src.value);
-//     } else if (linkMerge === 'merge_flattened') {
-//       if (src.value instanceof Array) {
-//         sourceTypes = sourceTypes.concat(src.value);
-//       } else {
-//         sourceTypes.push(src.value);
-//       }
-//     } else {
-//       throw new Error(`Unrecognized linkMerge enum '${linkMerge}'`);
-//     }
-//     return true;
-//   } else if (
-//     valueFrom !== null ||
-//     can_assign_src_to_sink(src.parameter['type'] as SinkType, sinktype) ||
-//     sinktype === 'Any'
-//   ) {
-//     inputobj[iid] = JSON.parse(JSON.stringify(src.value));
-//     return true;
-//   }
-//   return false;
-// }
+function matchTypes(
+  sinktype: ToolType,
+  src: WorkflowStateItem,
+  iid: string,
+  inputobj: CWLObjectType,
+  linkMerge: string | null,
+  valueFrom: string | null,
+): boolean {
+  if (sinktype instanceof Array) {
+    for (const st of sinktype) {
+      if (matchTypes(st, src, iid, inputobj, linkMerge, valueFrom)) {
+        return true;
+      }
+    }
+  } else if (src.parameter['type'] instanceof Array) {
+    const original_types = src.parameter['type'];
+    for (const source_type of original_types) {
+      src.parameter['type'] = source_type;
+      const match = matchTypes(sinktype, src, iid, inputobj, linkMerge, valueFrom);
+      if (match) {
+        src.parameter['type'] = original_types;
+        return true;
+      }
+    }
+    src.parameter['type'] = original_types;
+    return false;
+  } else if (linkMerge) {
+    if (!(iid in inputobj)) {
+      inputobj[iid] = [];
+    }
+    const sourceTypes: CWLOutputType[] | undefined = inputobj[iid] as CWLOutputType[] | undefined;
+    if (linkMerge === 'merge_nested') {
+      sourceTypes.push(src.value);
+    } else if (linkMerge === 'merge_flattened') {
+      if (src.value instanceof Array) {
+        sourceTypes.push(...src.value);
+      } else {
+        sourceTypes.push(src.value);
+      }
+    } else {
+      throw new Error(`Unrecognized linkMerge enum '${linkMerge}'`);
+    }
+    return true;
+  } else if (
+    valueFrom !== null ||
+    can_assign_src_to_sink(src.parameter['type'] as SinkType, sinktype as SinkType) ||
+    sinktype === 'Any'
+  ) {
+    inputobj[iid] = JSON.parse(JSON.stringify(src.value));
+    return true;
+  }
+  return false;
+}
 function objectFromState(
   state: { [key: string]: WorkflowStateItem | null | undefined },
-  params: CommandInputParameter[],
+  params: WorkflowStepInput[],
   fragOnly: boolean,
   supportsMultipleInput: boolean,
   sourceField: string,
@@ -408,23 +566,21 @@ function objectFromState(
       for (const src of connections) {
         const aState = state[src] || null;
         if (aState && (aState.success === 'success' || aState.success === 'skipped' || incomplete)) {
-          inputobj[iid] = aState.value;
-          // TODO
-          //   if (
-          //     !matchTypes(
-          //       inp['type'],
-          //       aState,
-          //       iid,
-          //       inputobj,
-          //       (inp['linkMerge'] || (connections.length > 1 ? 'merge_nested' : null)) as string | null,
-          //       inp['valueFrom'] as string,
-          //     )
-          //   ) {
-          //     throw new WorkflowException(
-          //       `Type mismatch between source '${src}' (${aState.parameter['type']}) and ` +
-          //         `sink '${originalId}' (${inp['type']})`,
-          //     );
-          //   }
+          if (
+            !matchTypes(
+              inp.type,
+              aState,
+              iid,
+              inputobj,
+              (inp['linkMerge'] || (connections.length > 1 ? 'merge_nested' : null)) as string | null,
+              inp.valueFrom,
+            )
+          ) {
+            throw new WorkflowException(
+              `Type mismatch between source '${src}' (${aState.parameter['type']}) and ` +
+                `sink '${originalId}' (${inp['type']})`,
+            );
+          }
         } else if (!(src in state)) {
           throw new WorkflowException(`Connect source '${src}' on parameter '${originalId}' does not exist`);
         } else if (!incomplete) {
@@ -587,11 +743,11 @@ export class WorkflowJob {
       this.do_output_callback(final_output_callback);
     }
   }
-  tryMakeJob(
+  async tryMakeJob(
     step: WorkflowJobStep,
     finalOutputCallback: OutputCallbackType | undefined,
     runtimeContext: RuntimeContext,
-  ): JobsGeneratorType {
+  ): Promise<JobsGeneratorType> {
     let containerEngine = 'docker';
     if (runtimeContext.podman) {
       containerEngine = 'podman';
@@ -599,8 +755,7 @@ export class WorkflowJob {
       containerEngine = 'singularity';
     }
     if (step.submitted) {
-      throw new Error('TODO');
-      // return;
+      return undefined;
     }
 
     const inputParms = step.step.tool.inputs;
@@ -639,31 +794,127 @@ export class WorkflowJob {
         );
       }
 
-      const postScatterEval = (io: CWLObjectType): CWLObjectType | undefined => {
-        //     // ... rest of the code
-        return io;
+      const postScatterEval = async (io: CWLObjectType): Promise<CWLObjectType | undefined> => {
+        const shortio: CWLObjectType = {};
+        for (const k in io) {
+          shortio[shortname(k)] = io[k];
+        }
+
+        const fs_access = getDefault(runtimeContext.make_fs_access, make_default_fs_access)('');
+        for (const k in io) {
+          if (k in loadContents) {
+            const val: CWLObjectType = io[k] as CWLObjectType;
+            if (!val['contents']) {
+              // Assuming fs_access.open() returns something that can be used within a TypeScript async context
+              val['contents'] = await contentLimitRespectedReadBytes(val['location'] as string);
+            }
+          }
+        }
+
+        async function valueFromFunc(k: string, v: CWLOutputType | null): Promise<CWLOutputType | null> {
+          if (k in valueFrom) {
+            adjustDirObjs(v, get_listing.bind(null, fs_access, true));
+            return do_eval(valueFrom[k], shortio, this.workflow.requirements, null, null, {}, v, runtimeContext.debug);
+          }
+          return v;
+        }
+
+        const psio: { [key: string]: CWLOutputType | null } = {};
+        for (const k in io) {
+          psio[k] = await valueFromFunc(k, io[k]);
+        }
+
+        if (step.tool['when']) {
+          const evalinputs: { [key: string]: CWLOutputType | null } = {};
+          for (const k in psio) {
+            evalinputs[shortname(k)] = psio[k];
+          }
+          const [InlineJavascriptRequirement] = getRequirement(this.workflow, cwlTsAuto.InlineJavascriptRequirement);
+          const whenval = await do_eval(
+            step.tool['when'],
+            evalinputs,
+            InlineJavascriptRequirement,
+            null,
+            null,
+            {},
+            runtimeContext.debug,
+            runtimeContext.js_console,
+          );
+
+          if (whenval === true) {
+            // Do nothing, analogous to Python's pass
+          } else if (whenval === false) {
+            _logger.debug(`[${step.name}] conditional ${step.tool['when']} evaluated to ${whenval}`);
+            _logger.debug(`[${step.name}] inputs was ${JSON.stringify(evalinputs, null, 2)}`);
+            return null;
+          } else {
+            throw new Error("Conditional 'when' must evaluate to 'true' or 'false'");
+          }
+        }
+        return psio;
       };
       if (_logger.isDebugEnabled()) {
         _logger.debug('[%s] job input %s', step.name, JSON.stringify(inputObj, null, 4));
       }
-      const inputobj = postScatterEval(inputObj);
-      if (inputobj) {
-        if (_logger.isDebugEnabled()) {
-          _logger.debug('[%s] evaluated job input to %s', step.name, JSON.stringify(inputobj, null, 4));
+      let jobs: JobsGeneratorType;
+      if (step.tool.scatter) {
+        const scatter: string[] = aslist(step.tool.scatter);
+        const method = step.tool.scatterMethod;
+        if (method === undefined && scatter.length != 1) {
+          throw new WorkflowException('Must specify scatterMethod when scattering over multiple inputs');
         }
-        // if step.step.get_requirement("http://commonwl.org/cwltool#Loop")[0]:
-        //     jobs = WorkflowJobLoopStep(
-        //         step=step, container_engine=container_engine
-        //     ).job(inputobj, callback, runtimeContext)
-        // else:
-        step.submitted = true;
-        return step.job(inputobj, callback, runtimeContext);
-        // else:
-        //     _logger.info("[%s] will be skipped", step.name)
-        //     callback({k["id"]: None for k in outputparms}, "skipped")
-        //     step.completed = True
-        //     jobs = (_ for _ in ())
+        runtimeContext = runtimeContext.copy();
+        runtimeContext.postScatterEval = postScatterEval;
+
+        const emptyscatter = scatter.filter((value) => {
+          const inputobj = inputObj[value];
+          return inputobj && inputobj instanceof Array && inputobj.length === 0;
+        });
+        if (emptyscatter) {
+          _logger.warn(
+            `[job ${step.name}] Notice: scattering over empty input in '${emptyscatter.join(
+              "', '",
+            )}'.  All outputs will be empty.`,
+          );
+        }
+        if (!method || method === 'dotproduct') {
+          jobs = await dotproduct_scatter(step, inputObj, scatter, callback, runtimeContext);
+        }
+        // else if( method == "nested_crossproduct"){
+        //     jobs = nested_crossproduct_scatter(
+        //         step, inputobj, scatter, callback, runtimeContext
+        //     )
+        //     }else if( method == "flat_crossproduct"){
+        //     jobs = flat_crossproduct_scatter(
+        //         step, inputobj, scatter, callback, runtimeContext
+        //     )
+        //     }
+      } else {
+        const inputobj = await postScatterEval(inputObj);
+        if (inputobj) {
+          if (_logger.isDebugEnabled()) {
+            _logger.debug('[%s] evaluated job input to %s', step.name, JSON.stringify(inputobj, null, 4));
+          }
+          // if step.step.get_requirement("http://commonwl.org/cwltool#Loop")[0]:
+          //     jobs = WorkflowJobLoopStep(
+          //         step=step, container_engine=container_engine
+          //     ).job(inputobj, callback, runtimeContext)
+          // else:
+          jobs = step.job(inputobj, callback, runtimeContext);
+        } else {
+          _logger.info('[%s] will be skipped', step.name);
+          // callback({k["id"]: None for k in outputparms}, "skipped")
+          // step.completed = True
+          // jobs = (_ for _ in ())
+        }
       }
+      step.submitted = true;
+      return jobs;
+      // else:
+      //     _logger.info("[%s] will be skipped", step.name)
+      //     callback({k["id"]: None for k in outputparms}, "skipped")
+      //     step.completed = True
+      //     jobs = (_ for _ in ())
     } catch (err) {
       if (err instanceof WorkflowException) throw err;
       if (err instanceof Error) {
@@ -720,7 +971,7 @@ export class WorkflowJob {
         if (getDefault(runtimeContext.on_error, 'stop') === 'stop' && this.processStatus !== 'success') break;
         if (!step.submitted) {
           try {
-            step.iterable = this.tryMakeJob(step, output_callback, runtimeContext);
+            step.iterable = await this.tryMakeJob(step, output_callback, runtimeContext);
           } catch (exc: any) {
             if (exc instanceof Error) {
               _logger.error(`[${step.name}] Cannot make job: ${exc.message} ${exc.stack}`);

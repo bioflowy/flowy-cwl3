@@ -109,8 +109,8 @@ export class Builder {
     bindings: CommandLineBinded[],
     schemaDefs: { [key: string]: any },
     names: any,
-    requirements: undefined | ToolRequirement,
-    hints: undefined | any[],
+    requirements: ToolRequirement,
+    hints: ToolRequirement,
     resources: { [key: string]: number },
     mutation_manager: any | null,
     formatgraph: any | null,
@@ -492,7 +492,7 @@ export class Builder {
     let sf_required = true;
     for (const [num, sf_entry] of sf_schema.entries()) {
       if (sf_entry.required !== undefined) {
-        const required_result = await this.do_eval(sf_entry.required, { context: datum });
+        const required_result = await this.do_eval(sf_entry.required, datum);
         if (!(typeof required_result === 'boolean' || required_result === null)) {
           throw new WorkflowException(
             `The result of a expression in the field 'required' must be a bool or None, not a ${typeof required_result}. Expression ${
@@ -681,7 +681,7 @@ export class Builder {
     if (binding.position) {
       const position = binding.position;
       if (typeof position === 'string') {
-        const result = this.do_eval(position, { context: datum });
+        const result = this.do_eval(position, datum);
         if (typeof result !== 'number') {
           throw new WorkflowException(
             "'position' expressions must evaluate to an int, " +
