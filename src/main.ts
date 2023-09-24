@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import * as cwlTsAuto from 'cwl-ts-auto';
 import ivm from 'isolated-vm';
 import yaml from 'js-yaml';
 import { CommandLineTool } from './command_line_tool.js';
@@ -100,6 +101,26 @@ function load_job_order(basedir: string | undefined, job_order_file: string): [C
 
   return [job_order_object, input_basedir];
 }
+const convertFileDirectoryToDict = (obj: any) => {
+  if (obj instanceof cwlTsAuto.File) {
+    const file = { class: 'File' };
+    for (const key of Object.keys(obj)) {
+      if (obj[key] !== undefined || obj[key] !== null) {
+        file[key] = obj[key];
+      }
+    }
+    return file;
+  } else if (obj instanceof cwlTsAuto.Directory) {
+    const file = { class: 'Directory' };
+    for (const key of Object.keys(obj)) {
+      if (obj[key] !== undefined || obj[key] !== null) {
+        file[key] = obj[key];
+      }
+    }
+    return file;
+  }
+  return obj;
+};
 function init_job_order(
   job_order_object: CWLObjectType,
   process: Process,
@@ -111,7 +132,7 @@ function init_job_order(
       if (job_order_object === undefined) {
         job_order_object = {};
       }
-      job_order_object[shortname(inp.id)] = inp.default_;
+      job_order_object[shortname(inp.id)] = convertFileDirectoryToDict(inp.default_);
     }
   }
 

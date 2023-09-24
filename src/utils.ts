@@ -249,13 +249,21 @@ function visit_field(rec: any, field: string, op: (...args: any[]) => any): void
   }
 }
 export function filePathToURI(filePath: string): string {
+  let flag: string | undefined = undefined;
+  const splits = filePath.split('#');
+  if (splits.length > 1) {
+    filePath = splits[0];
+    flag = splits[1];
+  }
   const pathName = path.resolve(filePath).replace(/\\/g, '/');
   return url.format({
     protocol: 'file',
     slashes: true,
     pathname: pathName,
+    hash: flag,
   });
 }
+
 export function random_outdir(): string {
   if (!__random_outdir) {
     __random_outdir = `/${Array.from({ length: 6 }, () => Math.random().toString(36)[2]?.toUpperCase()).join('')}`;
@@ -603,7 +611,7 @@ function reversed<T>(arrays: T[]): T[] {
 }
 export interface RequirementParam {
   requirements?: undefined | ToolRequirement;
-  hints?: undefined | any[];
+  hints?: undefined | ToolRequirement;
 }
 
 export function getRequirement<T>(reqs: RequirementParam, cls: new (any) => T): [T | undefined, boolean] {
@@ -614,11 +622,10 @@ export function getRequirement<T>(reqs: RequirementParam, cls: new (any) => T): 
     }
   }
   if (reqs.hints) {
-    const req = reqs.hints.find((item) => item['class'] === cls.name);
+    const req = reqs.hints.find((item) => item instanceof cls);
 
     if (req) {
-      // eslint-disable-next-line new-cap
-      return [new cls(req), false];
+      return [req as T, false];
     }
   }
   return [undefined, false];

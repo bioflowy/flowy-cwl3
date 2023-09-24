@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import * as cwlTsAuto from 'cwl-ts-auto';
 import { circular_dependency_checker, static_checker } from './checker.js';
 import * as command_line_tool from './command_line_tool.js';
@@ -16,14 +17,63 @@ import {
   type IWorkflowStep,
   type WorkflowStepOutput,
 } from './types.js';
+
 import { isString, type CWLObjectType, type JobsGeneratorType, type OutputCallbackType, aslist } from './utils.js';
 import { WorkflowJob } from './workflow_job.js';
+
+function sha1(data: string): string {
+  const hash = crypto.createHash('sha1');
+  hash.update(data);
+  return hash.digest('hex');
+}
+
+function _convert_stdstreams_to_files(tool: cwlTsAuto.CommandLineTool) {
+  for (const out of tool.outputs) {
+    for (const streamtype of ['stdout', 'stderr']) {
+      if (out.type === streamtype) {
+        if (out.outputBinding) {
+          throw new ValidationException(`Not allowed to specify outputBinding when using ${streamtype} shortcut.`);
+        }
+        let filename = undefined;
+        if (streamtype === 'stdout') {
+          filename = tool.stdout;
+        } else if (streamtype === 'stderr') {
+          filename = tool.stderr;
+        }
+        if (!filename) {
+          filename = sha1(JSON.stringify(tool));
+        }
+        if (streamtype === 'stdout') {
+          tool.stdout = filename;
+        } else if (streamtype === 'stderr') {
+          tool.stderr = filename;
+        }
+        out.type = 'File';
+        out.outputBinding = new cwlTsAuto.CommandOutputBinding({ glob: filename });
+      }
+    }
+  }
+  for (const inp of tool.inputs) {
+    if (inp.type === 'stdin') {
+      if (inp.inputBinding) {
+        throw new ValidationException('Not allowed to specify inputBinding when using stdin shortcut.');
+      }
+      if (tool.stdin) {
+        throw new ValidationException('Not allowed to specify stdin path when using stdin type shortcut.');
+      } else {
+        tool.stdin = inp.id.split('#').pop()?.split('/').pop();
+        inp.type = 'File';
+      }
+    }
+  }
+}
 
 export async function default_make_tool(
   toolpath_object: cwlTsAuto.ExpressionTool | cwlTsAuto.CommandLineTool | cwlTsAuto.Workflow | cwlTsAuto.Operation,
   loadingContext: LoadingContext,
 ): Promise<Process> {
   if (toolpath_object instanceof cwlTsAuto.CommandLineTool) {
+    _convert_stdstreams_to_files(toolpath_object);
     const t = new command_line_tool.CommandLineTool(toolpath_object);
     t.init(loadingContext);
     return t;
@@ -32,6 +82,11 @@ export async function default_make_tool(
     t.init(loadingContext);
     return t;
   } else if (toolpath_object instanceof cwlTsAuto.Workflow) {
+    // toolpath_object.outputs.forEach((output) => {
+    //   const base = output.id.split('#')[0];
+    //   const id = output.outputSource.slice(output.id.length + 1) as string;
+    //   output.outputSource = `${base}#${id}`;
+    // });
     const t = new Workflow(toolpath_object);
     await t.init(loadingContext);
     return t;
@@ -168,108 +223,111 @@ function used_by_step(step: IWorkflowStep, shortinputid: string): boolean {
   }
   return false;
 }
+function handleInput(
+  embedded_tool: Process,
+  toolpath_object: cwlTsAuto.WorkflowStepInput[],
+  bound: Set<any>,
+  validation_errors,
+  debug: boolean,
+): WorkflowStepInput[] {
+  const inputs: WorkflowStepInput[] = [];
+  toolpath_object.forEach((step_entry: cwlTsAuto.WorkflowStepInput) => {
+    const inputid = step_entry.id;
+    const param: WorkflowStepInput = step_entry;
+    const shortinputid = shortname(inputid);
+    let found = false;
+
+    for (const tool_entry of embedded_tool.tool.inputs) {
+      const frag = shortname(tool_entry.id);
+      if (frag === shortinputid) {
+        let step_default = null;
+        if (param.default_ && tool_entry.default_) {
+          step_default = param.default_;
+        }
+        transferProperties(tool_entry, param);
+        param._tool_entry = tool_entry;
+        if (step_default !== null) {
+          param.default_ = step_default;
+        }
+        found = true;
+        bound.add(frag);
+        break;
+      }
+    }
+    if (!found) {
+      param.type = 'Any';
+      param.used_by_step = used_by_step(this.tool, shortinputid);
+      param.not_connected = true;
+    }
+
+    param.id = inputid;
+    inputs.push(param);
+  });
+  return inputs;
+}
+function handleOutput(
+  embedded_tool: Process,
+  stepOutputs: (cwlTsAuto.WorkflowStepOutput | string)[],
+  bound: Set<any>,
+  validation_errors,
+  debug: boolean,
+): WorkflowStepOutput[] {
+  const outputs: CommandOutputParameter[] = [];
+  stepOutputs.forEach((step_entry) => {
+    let param: WorkflowStepOutput;
+    let inputid;
+
+    if (isString(step_entry)) {
+      param = {};
+      inputid = step_entry;
+    } else {
+      param = deepcopy(step_entry);
+      inputid = step_entry.id;
+    }
+
+    const shortinputid = shortname(inputid);
+    let found = false;
+
+    for (const tool_entry of embedded_tool.tool.outputs) {
+      const frag = shortname(tool_entry.id);
+      if (frag === shortinputid) {
+        const step_default = null;
+        transferProperties(tool_entry, param);
+        param._tool_entry = tool_entry;
+        if (step_default !== null) {
+          param.default_ = step_default;
+        }
+        found = true;
+        bound.add(frag);
+        break;
+      }
+    }
+    if (!found) {
+      let step_entry_name;
+
+      if (step_entry instanceof Map) {
+        step_entry_name = step_entry['id'];
+      } else {
+        step_entry_name = step_entry;
+      }
+
+      validation_errors.push(
+        `Workflow step output '${shortname(step_entry_name)}' does not correspond to\n` +
+          '\n' +
+          `  tool output (expected '${this.embedded_tool.tool['outputs']
+            .map((tool_entry: any) => shortname(tool_entry['id']))
+            .join("', '")}`,
+      );
+    }
+
+    param.id = inputid;
+    outputs.push(param);
+  });
+  return outputs;
+}
+
 export class WorkflowStep extends Process {
   declare tool: IWorkflowStep;
-  handleInput(
-    toolpath_object: cwlTsAuto.WorkflowStepInput[],
-    bound: Set<any>,
-    validation_errors,
-    debug: boolean,
-  ): WorkflowStepInput[] {
-    const inputs: WorkflowStepInput[] = [];
-    toolpath_object.forEach((step_entry: cwlTsAuto.WorkflowStepInput, index: number) => {
-      const param: WorkflowStepInput = step_entry;
-      const inputid = step_entry.id;
-      const shortinputid = shortname(inputid);
-      let found = false;
-
-      for (const tool_entry of this.embedded_tool.tool.inputs) {
-        const frag = shortname(tool_entry.id);
-        if (frag === shortinputid) {
-          let step_default = null;
-          if (param.default_ && 'default' in tool_entry) {
-            step_default = param['default'];
-          }
-          transferProperties(tool_entry, param);
-          param._tool_entry = tool_entry;
-          if (step_default !== null) {
-            param.default_ = step_default;
-          }
-          found = true;
-          bound.add(frag);
-          break;
-        }
-      }
-      if (!found) {
-        param.type = 'Any';
-        param.used_by_step = used_by_step(this.tool, shortinputid);
-        param.not_connected = true;
-      }
-
-      param.id = inputid;
-      inputs.push(param);
-    });
-    return inputs;
-  }
-  handleOutput(
-    stepOutputs: (cwlTsAuto.WorkflowStepOutput | string)[],
-    bound: Set<any>,
-    validation_errors,
-    debug: boolean,
-  ): WorkflowStepOutput[] {
-    const outputs: CommandOutputParameter[] = [];
-    stepOutputs.forEach((step_entry, index: number) => {
-      let param: WorkflowStepOutput;
-      let inputid;
-
-      if (isString(step_entry)) {
-        param = {};
-        inputid = step_entry;
-      } else {
-        param = deepcopy(step_entry);
-        inputid = step_entry.id;
-      }
-
-      const shortinputid = shortname(inputid);
-      let found = false;
-
-      for (const tool_entry of this.embedded_tool.tool.outputs) {
-        const frag = shortname(tool_entry.id);
-        if (frag === shortinputid) {
-          const step_default = null;
-          transferProperties(tool_entry, param);
-          param._tool_entry = tool_entry;
-          if (step_default !== null) {
-            param.default_ = step_default;
-          }
-          found = true;
-          bound.add(frag);
-          break;
-        }
-      }
-      if (!found) {
-        let step_entry_name;
-
-        if (step_entry instanceof Map) {
-          step_entry_name = step_entry['id'];
-        } else {
-          step_entry_name = step_entry;
-        }
-
-        validation_errors.push(
-          `Workflow step output '${shortname(step_entry_name)}' does not correspond to\n` +
-            '\n' +
-            `  tool output (expected '${this.embedded_tool.tool['outputs']
-              .map((tool_entry: any) => shortname(tool_entry['id']))
-              .join("', '")}`,
-        );
-      }
-
-      param.id = inputid;
-      outputs.push(param);
-    });
-    return outputs;
-  }
   id: string;
   embedded_tool: Process;
   pos: number;
@@ -331,8 +389,8 @@ export class WorkflowStep extends Process {
       }
       this.tool.requirements.push(this.embedded_tool.getRequirement(cwlTsAuto.SchemaDefRequirement)[0]);
     }
-    this.tool.inputs = this.handleInput(this.tool.in_, bound, validation_errors, debug);
-    this.tool.outputs = this.handleOutput(this.tool.out, bound, validation_errors, debug);
+    this.tool.inputs = handleInput(this.embedded_tool, this.tool.in_, bound, validation_errors, debug);
+    this.tool.outputs = handleOutput(this.embedded_tool, this.tool.out, bound, validation_errors, debug);
 
     const missing_values = [];
     for (const tool_entry of this.embedded_tool.tool.inputs) {

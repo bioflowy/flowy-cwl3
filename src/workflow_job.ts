@@ -67,227 +67,6 @@ class WorkflowJobStep {
     return jobs;
   }
 }
-
-// class ReceiveScatterOutput {
-//   dest: ScatterDestinationsType;
-//   completed: number;
-//   processStatus: string;
-//   total: number;
-//   output_callback: ScatterOutputCallbackType;
-//   steps?: (JobsGeneratorType | undefined)[];
-
-//   constructor(output_callback: ScatterOutputCallbackType, dest: ScatterDestinationsType, total: number) {
-//     this.dest = dest;
-//     this.completed = 0;
-//     this.processStatus = 'success';
-//     this.total = total;
-//     this.output_callback = output_callback;
-//   }
-
-//   receive_scatter_output(index: number, jobout: CWLObjectType, processStatus: string) {
-//     for (const [key, val] of Object.entries(jobout)) {
-//       this.dest[key][index] = val;
-//     }
-
-//     if (this.steps) {
-//       this.steps[index] = undefined;
-//     }
-
-//     if (processStatus !== 'success') {
-//       if (this.processStatus !== 'permanentFail') {
-//         this.processStatus = processStatus;
-//       }
-//     }
-
-//     this.completed += 1;
-
-//     if (this.completed === this.total) {
-//       this.output_callback(this.dest, this.processStatus);
-//     }
-//   }
-
-//   setTotal(total: number, steps: (JobsGeneratorType | undefined)[]) {
-//     this.total = total;
-//     this.steps = [];
-//     if (this.completed === this.total) {
-//       this.output_callback(this.dest, this.processStatus);
-//     }
-//   }
-// }
-// function* parallel_steps(
-//   steps: (JobsGeneratorType | null)[],
-//   rc: ReceiveScatterOutput,
-//   runtimeContext: RuntimeContext,
-// ): IterableIterator<JobsGeneratorType> {
-//   while (rc.completed < rc.total) {
-//     let made_progress = false;
-//     for (const [index, step] of steps.entries()) {
-//       if (
-//         getdefault(runtimeContext.on_error, 'stop') === 'stop' &&
-//         !['success', 'skipped'].includes(rc.processStatus)
-//       ) {
-//         break;
-//       }
-//       if (step === null) {
-//         continue;
-//       }
-//       try {
-//         for (const j of step) {
-//           if (
-//             getdefault(runtimeContext.on_error, 'stop') === 'stop' &&
-//             !['success', 'skipped'].includes(rc.processStatus)
-//           ) {
-//             break;
-//           }
-//           if (j !== null) {
-//             made_progress = true;
-//             yield j;
-//           } else {
-//             break;
-//           }
-//         }
-//         if (made_progress) {
-//           break;
-//         }
-//       } catch (exc) {
-//         if (exc instanceof WorkflowException) {
-//           _logger.error(`Cannot make scatter job: ${exc.toString()}`);
-//           _logger.debug('', { exc_info: true });
-//           rc.receive_scatter_output(index, {}, 'permanentFail');
-//         }
-//       }
-//     }
-//     if (!made_progress && rc.completed < rc.total) {
-//       yield null;
-//     }
-//   }
-// }
-
-// function* nested_crossproduct_scatter(
-//   process: WorkflowJobStep,
-//   joborder: CWLObjectType,
-//   scatter_keys: string[],
-//   output_callback: ScatterOutputCallbackType,
-//   runtimeContext: RuntimeContext,
-// ): IterableIterator<JobsGeneratorType> {
-//   const scatter_key = scatter_keys[0];
-//   const jobl = (joborder[scatter_key] as any).length;
-//   const output: ScatterDestinationsType = {};
-//   for (const i of process.tool['outputs']) {
-//     output[i['id']] = new Array(jobl).fill(null);
-//   }
-
-//   const rc = new ReceiveScatterOutput(output_callback, output, jobl);
-//   const steps: (JobsGeneratorType | null)[] = [];
-//   for (let index = 0; index < jobl; index++) {
-//     let sjob: CWLObjectType = { ...joborder };
-//     sjob[scatter_key] = (joborder[scatter_key] as any)[index];
-
-//     if (scatter_keys.length === 1) {
-//       if (runtimeContext.postScatterEval !== undefined) {
-//         sjob = runtimeContext.postScatterEval(sjob);
-//       }
-//       const curriedcallback = rc.receive_scatter_output.bind(rc, index);
-//       if (sjob !== null) {
-//         steps.push(process.job(sjob, curriedcallback, runtimeContext));
-//       } else {
-//         curriedcallback({}, 'skipped');
-//         steps.push(null);
-//       }
-//     } else {
-//       steps.push(
-//         nested_crossproduct_scatter(
-//           process,
-//           sjob,
-//           scatter_keys.slice(1),
-//           rc.receive_scatter_output.bind(rc, index),
-//           runtimeContext,
-//         ),
-//       );
-//     }
-//   }
-
-//   rc.setTotal(jobl, steps);
-//   yield* parallel_steps(steps, rc, runtimeContext);
-// }
-// function crossproduct_size(joborder: CWLObjectType, scatter_keys: string[]): number {
-//   const scatter_key = scatter_keys[0];
-//   let ssum;
-
-//   if (scatter_keys.length == 1) {
-//     ssum = joborder[scatter_key].length;
-//   } else {
-//     ssum = 0;
-//     for (let _ = 0; _ < joborder[scatter_key].length; _++) {
-//       ssum += this.crossproduct_size(joborder, scatter_keys.slice(1));
-//     }
-//   }
-//   return ssum;
-// }
-
-// function flat_crossproduct_scatter(
-//   process: WorkflowJobStep,
-//   joborder: CWLObjectType,
-//   scatter_keys: string[],
-//   output_callback: ScatterOutputCallbackType,
-//   runtimeContext: RuntimeContext,
-// ): JobsGeneratorType {
-//   const output: ScatterDestinationsType = {};
-
-//   for (const i of process.tool['outputs']) {
-//     output[i['id']] = Array(this.crossproduct_size(joborder, scatter_keys)).fill(null);
-//   }
-//   const callback = new ReceiveScatterOutput(output_callback, output, 0);
-//   const [steps, total] = this._flat_crossproduct_scatter(process, joborder, scatter_keys, callback, 0, runtimeContext);
-//   callback.setTotal(total, steps);
-//   return parallel_steps(steps, callback, runtimeContext);
-// }
-
-// function _flat_crossproduct_scatter(
-//   process: WorkflowJobStep,
-//   joborder: CWLObjectType,
-//   scatter_keys: string[],
-//   callback: ReceiveScatterOutput,
-//   startindex: number,
-//   runtimeContext: RuntimeContext,
-// ): [Optional<JobsGeneratorType>[], number] {
-//   const scatter_key = scatter_keys[0];
-//   const jobl = joborder[scatter_key].length;
-//   let steps: Optional<JobsGeneratorType>[] = [];
-//   let put = startindex;
-
-//   for (let index = 0; index < jobl; index++) {
-//     let sjob: Optional<CWLObjectType> = JSON.parse(JSON.stringify(joborder));
-//     sjob[scatter_key] = joborder[scatter_key][index];
-
-//     if (scatter_keys.length == 1) {
-//       if (runtimeContext.postScatterEval !== null) {
-//         sjob = runtimeContext.postScatterEval(sjob);
-//       }
-//       const curriedcallback = callback.receive_scatter_output.bind(null, put);
-//       if (sjob !== null) {
-//         steps.push(process.job(sjob, curriedcallback, runtimeContext));
-//       } else {
-//         curriedcallback({}, 'skipped');
-//         steps.push(null);
-//       }
-//       put += 1;
-//     } else {
-//       const [add, _] = this._flat_crossproduct_scatter(
-//         process,
-//         sjob,
-//         scatter_keys.slice(1),
-//         callback,
-//         put,
-//         runtimeContext,
-//       );
-//       put += add.length;
-//       steps = steps.concat(add);
-//     }
-//   }
-
-//   return [steps, put];
-// }
 class ReceiveScatterOutput {
   dest: ScatterDestinationsType;
   completed: number;
@@ -305,7 +84,7 @@ class ReceiveScatterOutput {
     this.steps = [];
   }
 
-  receive_scatter_output(index: number, jobout: CWLObjectType, processStatus: string): void {
+  receive_scatter_output = (index: number, jobout: CWLObjectType, processStatus: string): void => {
     for (const key in jobout) {
       this.dest[key][index] = jobout[key];
     }
@@ -326,7 +105,7 @@ class ReceiveScatterOutput {
     if (this.completed === this.total) {
       this.output_callback(this.dest, this.processStatus);
     }
-  }
+  };
 
   setTotal(total: number, steps: (JobsGeneratorType | null)[]): void {
     this.total = total;
@@ -335,6 +114,132 @@ class ReceiveScatterOutput {
       this.output_callback(this.dest, this.processStatus);
     }
   }
+}
+
+async function* nested_crossproduct_scatter(
+  process: WorkflowJobStep,
+  joborder: CWLObjectType,
+  scatter_keys: string[],
+  output_callback: ScatterOutputCallbackType,
+  runtimeContext: RuntimeContext,
+): JobsGeneratorType {
+  const scatter_key = scatter_keys[0];
+  const jobl = (joborder[scatter_key] as any).length;
+  const output: ScatterDestinationsType = {};
+  for (const i of process.tool['outputs']) {
+    output[i['id']] = new Array(jobl).fill(null);
+  }
+
+  const rc = new ReceiveScatterOutput(output_callback, output, jobl);
+  const steps: (JobsGeneratorType | null)[] = [];
+  for (let index = 0; index < jobl; index++) {
+    let sjob: CWLObjectType = { ...joborder };
+    sjob[scatter_key] = (joborder[scatter_key] as any)[index];
+
+    if (scatter_keys.length === 1) {
+      if (runtimeContext.postScatterEval !== undefined) {
+        sjob = await runtimeContext.postScatterEval(sjob);
+      }
+      const curriedcallback = rc.receive_scatter_output.bind(rc, index);
+      if (sjob !== null) {
+        steps.push(process.job(sjob, curriedcallback, runtimeContext));
+      } else {
+        curriedcallback({}, 'skipped');
+        steps.push(null);
+      }
+    } else {
+      steps.push(
+        nested_crossproduct_scatter(
+          process,
+          sjob,
+          scatter_keys.slice(1),
+          rc.receive_scatter_output.bind(rc, index),
+          runtimeContext,
+        ),
+      );
+    }
+  }
+
+  rc.setTotal(jobl, steps);
+  yield* parallel_steps(steps, rc, runtimeContext);
+}
+function crossproduct_size(joborder: CWLObjectType, scatter_keys: string[]): number {
+  const scatter_key = scatter_keys[0];
+  let ssum;
+
+  if (scatter_keys.length == 1) {
+    ssum = (joborder[scatter_key] as any[]).length;
+  } else {
+    ssum = 0;
+    for (let _ = 0; _ < (joborder[scatter_key] as any[]).length; _++) {
+      ssum += crossproduct_size(joborder, scatter_keys.slice(1));
+    }
+  }
+  return ssum;
+}
+
+async function flat_crossproduct_scatter(
+  process: WorkflowJobStep,
+  joborder: CWLObjectType,
+  scatter_keys: string[],
+  output_callback: ScatterOutputCallbackType,
+  runtimeContext: RuntimeContext,
+): Promise<JobsGeneratorType> {
+  const output: ScatterDestinationsType = {};
+
+  for (const i of process.tool['outputs']) {
+    output[i['id']] = Array(crossproduct_size(joborder, scatter_keys)).fill(null);
+  }
+  const callback = new ReceiveScatterOutput(output_callback, output, 0);
+  const [steps, total] = await _flat_crossproduct_scatter(process, joborder, scatter_keys, callback, 0, runtimeContext);
+  callback.setTotal(total, steps);
+  return parallel_steps(steps, callback, runtimeContext);
+}
+
+async function _flat_crossproduct_scatter(
+  process: WorkflowJobStep,
+  joborder: CWLObjectType,
+  scatter_keys: string[],
+  callback: ReceiveScatterOutput,
+  startindex: number,
+  runtimeContext: RuntimeContext,
+): Promise<[(JobsGeneratorType | undefined)[], number]> {
+  const scatter_key = scatter_keys[0];
+  const jobl = (joborder[scatter_key] as any[]).length;
+  let steps: (JobsGeneratorType | undefined)[] = [];
+  let put = startindex;
+
+  for (let index = 0; index < jobl; index++) {
+    let sjob: CWLObjectType = JSON.parse(JSON.stringify(joborder));
+    sjob[scatter_key] = joborder[scatter_key][index];
+
+    if (scatter_keys.length == 1) {
+      if (runtimeContext.postScatterEval !== null) {
+        sjob = await runtimeContext.postScatterEval(sjob);
+      }
+      const curriedcallback = callback.receive_scatter_output.bind(null, put);
+      if (sjob !== null) {
+        steps.push(process.job(sjob, curriedcallback, runtimeContext));
+      } else {
+        curriedcallback({}, 'skipped');
+        steps.push(null);
+      }
+      put += 1;
+    } else {
+      const [add, _] = await _flat_crossproduct_scatter(
+        process,
+        sjob,
+        scatter_keys.slice(1),
+        callback,
+        put,
+        runtimeContext,
+      );
+      put += add.length;
+      steps = steps.concat(add);
+    }
+  }
+
+  return [steps, put];
 }
 async function* parallel_steps(
   steps: (JobsGeneratorType | null)[],
@@ -879,16 +784,11 @@ export class WorkflowJob {
         }
         if (!method || method === 'dotproduct') {
           jobs = await dotproduct_scatter(step, inputObj, scatter, callback, runtimeContext);
+        } else if (method == 'nested_crossproduct') {
+          jobs = await nested_crossproduct_scatter(step, inputObj, scatter, callback, runtimeContext);
+        } else if (method == 'flat_crossproduct') {
+          jobs = await flat_crossproduct_scatter(step, inputObj, scatter, callback, runtimeContext);
         }
-        // else if( method == "nested_crossproduct"){
-        //     jobs = nested_crossproduct_scatter(
-        //         step, inputobj, scatter, callback, runtimeContext
-        //     )
-        //     }else if( method == "flat_crossproduct"){
-        //     jobs = flat_crossproduct_scatter(
-        //         step, inputobj, scatter, callback, runtimeContext
-        //     )
-        //     }
       } else {
         const inputobj = await postScatterEval(inputObj);
         if (inputobj) {

@@ -846,7 +846,7 @@ export class CommandLineTool extends Process {
       j.networkaccess = networkaccess_eval;
     }
   }
-  handle_env_var(builder: Builder, debug: boolean): any {
+  async handle_env_var(builder: Builder, debug: boolean): Promise<any> {
     const [evr, _] = getRequirement(this.tool, cwlTsAuto.EnvVarRequirement);
     if (evr === undefined) {
       return {};
@@ -858,7 +858,7 @@ export class CommandLineTool extends Process {
       const env_value_field = t3.envValue;
       let env_value: string = t3.envValue;
       if (isString(env_value_field) && (env_value_field.includes('${') || env_value_field.includes('$('))) {
-        const env_value_eval = builder.do_eval(env_value_field);
+        const env_value_eval = await builder.do_eval(env_value_field);
         if (typeof env_value_eval !== 'string') {
           throw new WorkflowException(
             "'envValue expression must evaluate to a str. " +
@@ -1083,7 +1083,7 @@ export class CommandLineTool extends Process {
 
     this.handle_network_access(builder, j, debug);
 
-    const required_env = this.handle_env_var(builder, debug);
+    const required_env = await this.handle_env_var(builder, debug);
     j.prepare_environment(runtimeContext, required_env);
 
     await this.setup_command_line(builder, j, debug);
