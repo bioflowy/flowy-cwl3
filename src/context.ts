@@ -158,6 +158,13 @@ export class RuntimeContext extends ContextBase {
 
   constructor(kwargs?: any) {
     super(kwargs);
+    if (kwargs) {
+      for (const [k, v] of Object.entries(kwargs)) {
+        if (this.hasOwnProperty(k)) {
+          (this as any)[k] = v;
+        }
+      }
+    }
     if (this.tmp_outdir_prefix == '') {
       this.tmp_outdir_prefix = this.tmpdir_prefix;
     }

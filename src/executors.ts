@@ -5,7 +5,7 @@ import { RuntimeContext, getDefault } from './context.js';
 import { ValidationException, WorkflowException } from './errors.js';
 import { JobBase } from './job.js';
 import { _logger } from './loghandler.js';
-import { Process, cleanIntermediate } from './process.js';
+import { Process, cleanIntermediate, relocateOutputs } from './process.js';
 import { type CWLObjectType, type MutableSequence } from './utils.js';
 
 class JobExecutor {
@@ -105,16 +105,15 @@ class JobExecutor {
 
     await this.run_jobs(process, job_order_object, logger, runtime_context);
 
-    if (this.final_output && this.final_output[0] !== null && finaloutdir !== null) {
-      // this.final_output[0] = relocateOutputs(
-      //   this.final_output[0],
-      //   finaloutdir,
-      //   this.output_dirs,
-      //   runtime_context.move_outputs,
-      //   runtime_context.make_fs_access,
-      //   getDefault(runtime_context.compute_checksum, true),
-      //   runtime_context.path_mapper,
-      // );
+    if (this.final_output && this.final_output[0] !== undefined && finaloutdir !== null) {
+      this.final_output[0] = relocateOutputs(
+        this.final_output[0],
+        finaloutdir,
+        new Set(this.output_dirs),
+        runtime_context.move_outputs,
+        runtime_context.make_fs_access(''),
+        getDefault(runtime_context.compute_checksum, true),
+      );
     }
 
     if (runtime_context.rm_tmpdir) {

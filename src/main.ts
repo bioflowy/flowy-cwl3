@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import * as cwlTsAuto from 'cwl-ts-auto';
 import ivm from 'isolated-vm';
 import yaml from 'js-yaml';
+import { createLogger, format, transports } from 'winston';
 import { CommandLineTool } from './command_line_tool.js';
 import { LoadingContext, RuntimeContext } from './context.js';
 import { SingleJobExecutor } from './executors.js';
@@ -212,6 +213,11 @@ function equals(expected: any, actual: any): boolean {
   return true;
 }
 export async function main(): Promise<number> {
+  const _logger = createLogger({
+    level: 'debug', // Set the minimum log level to 'info'
+    transports: [new transports.Console()],
+  });
+  _logger.info('hello');
   const test_path = path.join(process.cwd(), 'conformance_tests.yaml');
   const content = fs.readFileSync(test_path, 'utf-8');
   const data = yaml.load(content) as { [key: string]: any }[];
@@ -260,7 +266,9 @@ export async function exec(tool_path: string, job_path: string): Promise<[CWLOut
     (basedir) => new StdFsAccess(basedir),
     input_basedir,
   );
-  const runtimeContext = new RuntimeContext();
+  const runtimeContext = new RuntimeContext({
+    outdir: process.cwd(),
+  });
   runtimeContext.basedir = input_basedir;
   const process_executor = new SingleJobExecutor();
   const [out, status] = await process_executor.execute(tool, initialized_job_order, runtimeContext);

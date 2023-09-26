@@ -259,7 +259,7 @@ export abstract class JobBase {
     const command_line = runtime
       .concat(this.command_line)
       .map((arg) => (shouldquote(arg.toString()) ? arg.toString() : arg.toString())) // TODO
-      .join(' ');
+      .join(' \\\n');
     const tmp2 = [
       this.stdin ? ` < ${this.stdin}` : '',
       this.stdout ? ` > ${path.join(this.base_path_logs, this.stdout)}` : '',

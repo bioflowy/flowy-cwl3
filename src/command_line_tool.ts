@@ -556,13 +556,14 @@ export class CommandLineTool extends Process {
       if (t2['entryname'] || t2['writable']) {
         const t3 = JSON.parse(JSON.stringify(t2));
         const t2entry = t3['entry'] as CWLObjectType;
-        if (t3.get('entryname')) {
+        if (t3['entryname']) {
           t2entry['basename'] = t3['entryname'];
         }
-        t2entry['writable'] = t3.get('writable');
+        t2entry['writable'] = t3['writable'];
+        ls[i] = t3['entry'] as CWLObjectType;
+      } else {
+        ls[i] = t2['entry'] as CWLObjectType;
       }
-
-      ls[i] = t2['entry'] as CWLObjectType;
     }
   }
   check_output_items2(
@@ -603,6 +604,7 @@ export class CommandLineTool extends Process {
       // }
     }
   }
+
   setup_output_items(initialWorkdir: cwlTsAuto.InitialWorkDirRequirement, builder: Builder, ls: CWLObjectType[]): void {
     for (const entry of ls) {
       if ('basename' in entry) {
@@ -1227,14 +1229,17 @@ export class CommandLineTool extends Process {
           const sorted_glob_result = fs_access.glob(fs_access.join(outdir, gb)).sort();
 
           r.push(
-            ...sorted_glob_result.map((g) => ({
-              location: g,
-              path: fs_access.join(builder.outdir, decodeURIComponent(g.substring(prefix[0].length + 1))),
-              basename: g,
-              nameroot: splitext(g)[0],
-              nameext: splitext(g)[1],
-              class: fs_access.isfile(g) ? 'File' : 'Directory',
-            })),
+            ...sorted_glob_result.map((g) => {
+              const decoded_basename = path.basename(g);
+              return {
+                location: g,
+                path: fs_access.join(builder.outdir, decodeURIComponent(g.substring(prefix[0].length + 1))),
+                basename: decoded_basename,
+                nameroot: splitext(decoded_basename)[0],
+                nameext: splitext(decoded_basename)[1],
+                class: fs_access.isfile(g) ? 'File' : 'Directory',
+              };
+            }),
           );
         } catch (e) {
           console.error('Unexpected error from fs_access');
@@ -1292,8 +1297,8 @@ export class CommandLineTool extends Process {
         const pathprefix = primary['path'].substring(0, primary['path'].lastIndexOf(path.sep) + 1);
         for (const sf of aslist(schema.secondaryFiles)) {
           let sf_required: boolean;
-          if ('required' in sf) {
-            const sf_required_eval = await builder.do_eval(sf['required'], primary);
+          if (sf.required) {
+            const sf_required_eval = await builder.do_eval(sf.required, primary);
             if (!(typeof sf_required_eval === 'boolean' || sf_required_eval === null)) {
               throw new WorkflowException(
                 `Expressions in the field 'required' must evaluate to a Boolean (true or false) or None. Got ${sf_required_eval} for ${sf['required']}.`,
@@ -1306,7 +1311,7 @@ export class CommandLineTool extends Process {
 
           let sfpath;
           if (sf['pattern'].includes('$(') || sf['pattern'].includes('${')) {
-            sfpath = builder.do_eval(sf['pattern'], primary);
+            sfpath = await builder.do_eval(sf['pattern'], primary);
           } else {
             sfpath = substitute(primary['basename'], sf['pattern']);
           }

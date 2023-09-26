@@ -52,15 +52,34 @@ export class StdFsAccess {
   isfile(fn: string): boolean {
     return fs.statSync(this._abs(fn)).isFile();
   }
-
+  _statSync(path: string) {
+    if (fs.existsSync(path)) {
+      return undefined;
+    }
+    return fs.statSync(path);
+  }
   isdir(fn: string): boolean {
-    return fs.statSync(this._abs(fn)).isDirectory();
+    const p = this._statSync(this._abs(fn));
+    return p ? p.isDirectory() : false;
   }
 
   listdir(fn: string): string[] {
     const entries = fs.readdirSync(this._abs(fn));
     // Assuming abspath is supposed to convert to a URI format.
-    return entries.map((entry) => `file://${path.join(fn, entry)}`); // Placeholder implementation
+    return entries.map((entry) => {
+      if (fn.startsWith('file://')) {
+        let ret = '';
+        if (fn.endsWith('/')) {
+          ret = `${fn}${entry}`;
+        } else {
+          ret = `${fn}/${entry}`;
+        }
+        return ret;
+      } else {
+        const ret = `file://${path.join(fn, entry)}`;
+        return ret;
+      }
+    });
   }
 
   join(...paths: string[]): string {

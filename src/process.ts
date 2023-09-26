@@ -19,6 +19,7 @@ import { needs_parsing } from './expression.js';
 import { _logger } from './loghandler.js';
 
 import { convertFileDirectoryToDict } from './main.js';
+import { MapperEnt, PathMapper } from './pathmapper.js';
 import { make_valid_avro } from './schema.js';
 import { StdFsAccess } from './stdfsaccess.js';
 
@@ -48,6 +49,10 @@ import {
   visit_class,
   getRequirement,
   type RequirementParam,
+  adjustDirObjs,
+  uriFilePath,
+  fileUri,
+  ensureWritable,
 } from './utils.js';
 
 const _logger_validation_warnings = _logger;
@@ -149,110 +154,213 @@ export function shortname(inputid: string): string {
   }
   return parsedUrl.pathname.split('/').pop() || '';
 }
-// function relocateOutputs(
-//     outputObj: CWLObjectType,
-//     destination_path: string,
-//     source_directories: Set<string>,
-//     action: string,
-//     fs_access: StdFsAccess,
-//     compute_checksum: boolean = true,
-//     path_mapper: PathMapper
-// ): CWLObjectType {
-//     adjustDirObjs(outputObj, ((get_listing) => fs_access.get_listing(recursive=true)));
+function stage_files(
+  pathmapper: PathMapper,
+  stage_func?: (src: string, dest: string) => void,
+  ignore_writable = false,
+  symlink = true,
+  fix_conflicts = false,
+): void {
+  let items: [string, MapperEnt][] = symlink ? pathmapper.items_exclude_children() : pathmapper.items();
+  const targets: { [key: string]: MapperEnt } = {};
 
-//     if (!["move", "copy"].includes(action)) {
-//         return outputObj;
-//     }
+  for (const [key, entry] of items) {
+    if (!entry.type.includes('File')) continue;
+    if (!targets[entry.target]) {
+      targets[entry.target] = entry;
+    } else if (targets[entry.target].resolved !== entry.resolved) {
+      if (fix_conflicts) {
+        let i = 2;
+        let tgt = `${entry.target}_${i}`;
+        while (targets[tgt]) {
+          i++;
+          tgt = `${entry.target}_${i}`;
+        }
+        targets[tgt] = pathmapper.update(key, entry.resolved, tgt, entry.type, entry.staged);
+      } else {
+        throw new Error(
+          `File staging conflict, trying to stage both ${targets[entry.target].resolved} and ${
+            entry.resolved
+          } to the same target ${entry.target}`,
+        );
+      }
+    }
+  }
 
-//     function *_collectDirEntries(
-//         obj: CWLObjectType | Array<CWLObjectType> | null
-//     ): Generator<CWLObjectType> {
-//         if (obj instanceof Object) {
-//             if (["File", "Directory"].includes(obj["class"])) {
-//                 yield obj as CWLObjectType;
-//             } else {
-//                 for (let sub_obj of Object.values(obj)) {
-//                     if(sub_obj){
-//                         yield* _collectDirEntries(sub_obj as any );
-//                     }
-//                 }
-//             }
-//         } else if (Array.isArray(obj)) {
-//             for (let sub_obj of obj as any[]) {
-//                 yield* _collectDirEntries(sub_obj);
-//             }
-//         }
-//     }
+  items = symlink ? pathmapper.items_exclude_children() : pathmapper.items();
 
-//     function _relocate(src: string, dst: string): void {
-//         src = fs_access.realpath(src);
-//         dst = fs_access.realpath(dst);
+  for (const [key, entry] of items) {
+    if (!entry.staged) continue;
 
-//         if (src === dst) {
-//             return;
-//         }
+    const targetDir = path.dirname(entry.target);
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    if ((entry.type === 'File' || entry.type === 'Directory') && fs.existsSync(entry.resolved)) {
+      if (symlink) {
+        fs.symlinkSync(entry.resolved, entry.target);
+      } else if (stage_func) {
+        stage_func(entry.resolved, entry.target);
+      }
+    } else if (entry.type === 'Directory' && !fs.existsSync(entry.target) && entry.resolved.startsWith('_:')) {
+      fs.mkdirSync(entry.target, { recursive: true });
+    } else if (entry.type === 'WritableFile' && !ignore_writable) {
+      fs.copyFileSync(entry.resolved, entry.target);
+      ensureWritable(entry.target);
+    } else if (entry.type === 'WritableDirectory' && !ignore_writable) {
+      if (entry.resolved.startsWith('_:')) {
+        fs.mkdirSync(entry.target, { recursive: true });
+      } else {
+        fsExtra.copySync(entry.resolved, entry.target);
+        ensureWritable(entry.target, true);
+      }
+    } else if (entry.type === 'CreateFile' || entry.type === 'CreateWritableFile') {
+      const content = entry.resolved;
+      fs.writeFileSync(entry.target, content, { mode: entry.type === 'CreateFile' ? 0o400 : 0o600 });
+      if (entry.type === 'CreateWritableFile') {
+        ensureWritable(entry.target);
+      }
+      pathmapper.update(key, entry.target, entry.target, entry.type, entry.staged);
+    }
+  }
+}
+function commonPrefix(paths: string[]): string {
+  if (paths.length === 0) return '';
 
-//         let src_can_deleted = source_directories.some(p => os.path.commonprefix([p, src]) === p);
+  const sortedPaths = paths.slice().sort();
+  const firstPath = sortedPaths[0];
+  const lastPath = sortedPaths[sortedPaths.length - 1];
 
-//         let _action = action === "move" && src_can_deleted ? "move" : "copy";
+  for (let i = 0; i < firstPath.length; i++) {
+    if (firstPath[i] !== lastPath[i]) {
+      return firstPath.substring(0, i);
+    }
+  }
 
-//         if (_action === "move") {
-//             _logger.debug(`Moving ${src} to ${dst}`);
-//             if (fs_access.isdir(src) && fs_access.isdir(dst)) {
+  return firstPath;
+}
+class DirEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  constructor(name: string, path: string, isDir: boolean) {
+    this.name = name;
+    this.path = path;
+    this.isDir = isDir;
+  }
+}
+function scandir(dir: string): DirEntry[] {
+  const entries = fs.readdirSync(dir);
+  return entries.map((entry) => {
+    const entryPath = path.join(dir, entry);
+    const stat = fs.statSync(entryPath);
+    return new DirEntry(entry, entryPath, stat.isDirectory());
+  });
+}
+export function relocateOutputs(
+  outputObj: CWLObjectType,
+  destination_path: string,
+  source_directories: Set<string>,
+  action: string,
+  fs_access: StdFsAccess,
+  compute_checksum = true,
+): CWLObjectType {
+  adjustDirObjs(outputObj, (val) => get_listing(fs_access, val, true));
 
-//                 for (let dir_entry of scandir(src)) {
-//                     _relocate(dir_entry.path, fs_access.join(dst, dir_entry.name));
-//                 }
-//             } else {
-//                 shutil.move(src, dst);
-//             }
+  if (!['move', 'copy'].includes(action)) {
+    return outputObj;
+  }
 
-//         } else if (_action === "copy") {
-//             _logger.debug(`Copying ${src} to ${dst}`);
-//             if (fs_access.isdir(src)) {
-//                 if (os.path.isdir(dst)) {
-//                     shutil.rmtree(dst);
-//                 } else if (os.path.isfile(dst)) {
-//                     os.unlink(dst);
-//                 }
-//                 shutil.copytree(src, dst);
-//             } else {
-//                 shutil.copy2(src, dst);
-//             }
-//         }
-//     }
+  function* _collectDirEntries(obj: CWLObjectType | CWLObjectType[] | null): Generator<CWLObjectType> {
+    if (obj instanceof Object) {
+      if (['File', 'Directory'].includes(obj['class'])) {
+        yield obj as CWLObjectType;
+      } else {
+        for (const sub_obj of Object.values(obj)) {
+          if (sub_obj) {
+            yield* _collectDirEntries(sub_obj as any);
+          }
+        }
+      }
+    } else if (Array.isArray(obj)) {
+      for (const sub_obj of obj as any[]) {
+        yield* _collectDirEntries(sub_obj);
+      }
+    }
+  }
 
-//     function _realpath(ob: CWLObjectType): void {
-//         const location = ob["location"] as string;
-//         if (location.startsWith("file:")) {
-//             ob["location"] = fileUri(path.resolve(uriFilePath(location)));
-//         } else if (location.startsWith("/")) {
-//             ob["location"] = path.resolve(location);
-//         } else if (!location.startsWith("_:") && location.includes(":")) {
-//             ob["location"] = fileUri(fs_access.realpath(location));
-//         }
-//     }
+  function _relocate(src: string, dst: string): void {
+    src = fs_access.realpath(src);
+    dst = fs_access.realpath(dst);
 
-//     let outfiles = Array.from(_collectDirEntries(outputObj));
-//     visit_class(outfiles, ["File", "Directory"], _realpath);
-//     let pm = path_mapper(outfiles, "", destination_path, {separateDirs: false});
-//     stage_files(pm, {stage_func: _relocate, symlink: false, fix_conflicts: true});
+    if (src === dst) {
+      return;
+    }
 
-//     function _check_adjust(a_file: CWLObjectType): CWLObjectType {
-//         a_file["location"] = fileUri(pm.mapper(a_file["location"])[1]);
-//         if (a_file["contents"]) {
-//             delete a_file["contents"];
-//         }
-//         return a_file;
-//     }
+    let src_can_deleted = false;
+    for (const p of source_directories) {
+      if (commonPrefix([p, src]) === p) {
+        src_can_deleted = true;
+      }
+    }
 
-//     visit_class(outputObj, ["File", "Directory"], _check_adjust);
+    const _action = action === 'move' && src_can_deleted ? 'move' : 'copy';
+    if (_action === 'move') {
+      _logger.debug(`Moving ${src} to ${dst}`);
+      if (fs_access.isdir(src) && fs_access.isdir(dst)) {
+        for (const dir_entry of scandir(src)) {
+          _relocate(dir_entry.path, fs_access.join(dst, dir_entry.name));
+        }
+      } else {
+        fsExtra.moveSync(src, dst);
+      }
+    } else if (_action === 'copy') {
+      _logger.debug(`Copying ${src} to ${dst}`);
+      if (fs_access.isdir(src)) {
+        const dstStat = fs.statSync(dst);
+        if (dstStat.isDirectory()) {
+          fsExtra.removeSync(dst);
+        } else if (dstStat.isFile()) {
+          fs.unlinkSync(dst);
+        }
+        fsExtra.copySync(src, dst);
+      } else {
+        fsExtra.copySync(src, dst, { preserveTimestamps: true });
+      }
+    }
+  }
 
-//     if (compute_checksum) {
-//         visit_class(outputObj, ["File"], (compute_checksums) => fs_access.compute_checksums);
-//     }
-//     return outputObj;
-// }
+  function _realpath(ob: CWLObjectType): void {
+    const location = ob['location'] as string;
+    if (location.startsWith('file:')) {
+      ob['location'] = fileUri(path.resolve(uriFilePath(location)));
+    } else if (location.startsWith('/')) {
+      ob['location'] = path.resolve(location);
+    } else if (!location.startsWith('_:') && location.includes(':')) {
+      ob['location'] = fileUri(fs_access.realpath(location));
+    }
+  }
+
+  const outfiles = Array.from(_collectDirEntries(outputObj));
+  visit_class(outfiles, ['File', 'Directory'], _realpath);
+  const pm = new PathMapper(outfiles, '', destination_path, false);
+  stage_files(pm, _relocate, false, false, true);
+
+  function _check_adjust(a_file: CWLObjectType): CWLObjectType {
+    a_file['location'] = fileUri(pm.mapper(a_file['location'] as string)?.target ?? '');
+    if (a_file['contents']) {
+      delete a_file['contents'];
+    }
+    return a_file;
+  }
+
+  visit_class(outputObj, ['File', 'Directory'], _check_adjust);
+
+  if (compute_checksum) {
+    visit_class(outputObj, ['File'], async (vals) => compute_checksums(fs_access, vals));
+  }
+  return outputObj;
+}
 export function cleanIntermediate(output_dirs: Iterable<string>): void {
   for (const a of output_dirs) {
     if (fs.existsSync(a)) {
@@ -282,7 +390,8 @@ function fill_in_defaults(inputs: CommandInputParameter[], job: CWLObjectType, f
     if (job[fieldname] != null) {
       continue;
     } else if (job[fieldname] == null && inp.default_) {
-      job[fieldname] = JSON.parse(JSON.stringify(inp.default_));
+      const converted = convertFileDirectoryToDict(inp.default_);
+      job[fieldname] = structuredClone(converted);
     } else if (job[fieldname] == null && aslist(inp['type']).includes('null')) {
       job[fieldname] = undefined;
     } else {
