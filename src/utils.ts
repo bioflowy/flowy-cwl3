@@ -616,13 +616,13 @@ export interface RequirementParam {
 
 export function getRequirement<T>(reqs: RequirementParam, cls: new (any) => T): [T | undefined, boolean] {
   if (reqs.requirements) {
-    const req = reqs.requirements.find((item) => item instanceof cls);
+    const req = reversed(reqs.requirements).find((item) => item instanceof cls);
     if (req) {
       return [req as T, true];
     }
   }
   if (reqs.hints) {
-    const req = reqs.hints.find((item) => item instanceof cls);
+    const req = reversed(reqs.hints).find((item) => item instanceof cls);
 
     if (req) {
       return [req as T, false];

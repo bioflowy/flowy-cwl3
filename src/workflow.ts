@@ -514,9 +514,9 @@ export class WorkflowStep extends Process {
 
     const step_input: { [key: string]: any } = {};
     for (const inp of this.tool.inputs) {
-      const field = shortname(inp['id']);
-      if (!inp['not_connected']) {
-        step_input[field] = job_order[inp['id']];
+      const field = shortname(inp.id);
+      if (!inp.not_connected) {
+        step_input[field] = job_order[inp.id];
       }
     }
 

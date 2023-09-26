@@ -256,19 +256,16 @@ export abstract class JobBase {
     //   menv.pass_through_env_vars(env);
     //   menv.set_env_vars(env);
     // }
-
-    _logger.info(
-      '[job %s] %s$ %s%s%s%s',
-      this.name,
-      this.outdir,
-      ` \\\n    ${runtime
-        .concat(this.command_line)
-        .map((arg) => (shouldquote(arg.toString()) ? arg.toString() : arg.toString())) // TODO
-        .join(' ')}`,
+    const command_line = runtime
+      .concat(this.command_line)
+      .map((arg) => (shouldquote(arg.toString()) ? arg.toString() : arg.toString())) // TODO
+      .join(' ');
+    const tmp2 = [
       this.stdin ? ` < ${this.stdin}` : '',
       this.stdout ? ` > ${path.join(this.base_path_logs, this.stdout)}` : '',
       this.stderr ? ` 2> ${path.join(this.base_path_logs, this.stderr)}` : '',
-    );
+    ];
+    _logger.info(`[job ${this.name}] %${this.outdir}$ ${command_line} ${tmp2[0]} ${tmp2[1]} ${tmp2[2]}`);
     if (this.joborder !== null && runtimeContext.research_obj !== undefined) {
       const job_order = this.joborder;
       if (

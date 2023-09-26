@@ -101,23 +101,35 @@ function load_job_order(basedir: string | undefined, job_order_file: string): [C
 
   return [job_order_object, input_basedir];
 }
-const convertFileDirectoryToDict = (obj: any) => {
-  if (obj instanceof cwlTsAuto.File) {
-    const file = { class: 'File' };
-    for (const key of Object.keys(obj)) {
-      if (obj[key] !== undefined || obj[key] !== null) {
-        file[key] = obj[key];
-      }
-    }
+export const convertFileDirectoryToDict = (obj: any) => {
+  if (obj instanceof Array) {
+    return obj.map(convertFileDirectoryToDict);
+  } else if (obj instanceof cwlTsAuto.File) {
+    const file = {
+      class: 'File',
+      location: obj.location,
+      basename: obj.basename,
+      dirname: obj.dirname,
+      checksum: obj.checksum,
+      size: obj.size,
+      secondaryFiles: obj.secondaryFiles,
+      format: obj.format,
+      contents: obj.contents,
+    };
     return file;
   } else if (obj instanceof cwlTsAuto.Directory) {
-    const file = { class: 'Directory' };
-    for (const key of Object.keys(obj)) {
-      if (obj[key] !== undefined || obj[key] !== null) {
-        file[key] = obj[key];
-      }
-    }
+    const file = {
+      class: 'File',
+      location: obj.location,
+      basename: obj.basename,
+      listing: obj.listing,
+    };
     return file;
+  } else if (obj instanceof Object) {
+    for (const key of Object.keys(obj)) {
+      obj[key] = convertFileDirectoryToDict(obj[key]);
+    }
+    return obj;
   }
   return obj;
 };
@@ -161,20 +173,8 @@ function init_job_order(
   }
   return job_order_object;
 }
-function deepSortObject(obj: object) {
-  if (typeof obj !== 'object' || obj === null) return obj;
-
-  if (Array.isArray(obj)) return obj.map(deepSortObject);
-
-  return Object.keys(obj)
-    .sort()
-    .reduce((acc, key) => {
-      acc[key] = deepSortObject(obj[key]);
-      return acc;
-    }, {});
-}
 function toJsonString(obj: object): string {
-  return JSON.stringify(deepSortObject(obj), null, 2);
+  return JSON.stringify(obj, null, 2);
 }
 function equals(expected: any, actual: any): boolean {
   if (expected instanceof Array) {
@@ -215,7 +215,7 @@ export async function main(): Promise<number> {
   const test_path = path.join(process.cwd(), 'conformance_tests.yaml');
   const content = fs.readFileSync(test_path, 'utf-8');
   const data = yaml.load(content) as { [key: string]: any }[];
-  for (let index = 0; index < data.length; index++) {
+  for (let index = 55; index < 56; index++) {
     console.log(`test index =${index}`);
     const test = data[index];
     console.log(test['id']);

@@ -29,7 +29,7 @@ export async function loadDocument(
   if (tool_file_path.startsWith('file://')) {
     tool_file_path = fileURLToPath(tool_file_path);
   }
-  const doc = await cwlTsAuto.loadDocument(tool_file_path, loadingContext.baseuri);
+  const doc = await cwlTsAuto.loadDocument(tool_file_path);
   if (doc instanceof Array) {
     let tool_id = tool_path;
     if (!tool_id.startsWith('file://')) {

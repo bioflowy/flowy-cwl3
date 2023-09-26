@@ -847,7 +847,7 @@ export class CommandLineTool extends Process {
     }
   }
   async handle_env_var(builder: Builder, debug: boolean): Promise<any> {
-    const [evr, _] = getRequirement(this.tool, cwlTsAuto.EnvVarRequirement);
+    const [evr, _] = getRequirement(this, cwlTsAuto.EnvVarRequirement);
     if (evr === undefined) {
       return {};
     }
@@ -1264,6 +1264,7 @@ export class CommandLineTool extends Process {
 
           if (compute_checksum) {
             await compute_checksums(fs_access, rfile);
+            files['checksum'] = rfile['checksum'];
           }
 
           files['size'] = fs_access.size(rfile['location'] as string);

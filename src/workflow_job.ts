@@ -439,7 +439,7 @@ function matchTypes(
     can_assign_src_to_sink(src.parameter['type'] as SinkType, sinktype as SinkType) ||
     sinktype === 'Any'
   ) {
-    inputobj[iid] = JSON.parse(JSON.stringify(src.value));
+    inputobj[iid] = structuredClone(src.value);
     return true;
   }
   return false;
@@ -851,10 +851,10 @@ export class WorkflowJob {
       const inp_id = shortname(inp.id);
       if (inp_id in joborder) {
         this.state[inp.id] = new WorkflowStateItem(inp, joborder[inp_id], 'success');
-      } else if ('default' in inp) {
+      } else if (inp.default_) {
         this.state[inp.id] = new WorkflowStateItem(inp, inp.default_, 'success');
       } else {
-        throw new WorkflowException(`Input '${inp['id']}' not in input object and does not have a default value.`);
+        throw new WorkflowException(`Input '${inp.id}' not in input object and does not have a default value.`);
       }
     });
 

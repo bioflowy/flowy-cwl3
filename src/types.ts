@@ -50,7 +50,7 @@ export class CommandLineBinded {
   shellQuote?: undefined | boolean;
   static fromBinding(binding: CommandLineBinding) {
     const t = new CommandLineBinded();
-    transferProperties(binding, t);
+    transferClassProperties(binding, t);
     return t;
   }
 }
@@ -166,8 +166,23 @@ export interface WorkflowStepOutput extends CommandOutputParameter {
 }
 export function transferProperties(source: any, target: any, exclude: string[] = []): void {
   for (const key of Object.keys(source)) {
-    if (!(key in exclude)) {
-      target[key] = source[key];
+    if (key in exclude) {
+      continue;
+    }
+    const value = source[key];
+    if (value !== undefined && value !== null) {
+      target[key] = value;
+    }
+  }
+}
+export function transferClassProperties(source: any, target: any): void {
+  for (const key of Object.keys(target)) {
+    if (!(key in source)) {
+      continue;
+    }
+    const value = source[key];
+    if (value !== undefined && value !== null) {
+      target[key] = value;
     }
   }
 }

@@ -18,6 +18,7 @@ import { ValidationException, WorkflowException } from './errors.js';
 import { needs_parsing } from './expression.js';
 import { _logger } from './loghandler.js';
 
+import { convertFileDirectoryToDict } from './main.js';
 import { make_valid_avro } from './schema.js';
 import { StdFsAccess } from './stdfsaccess.js';
 
@@ -594,7 +595,7 @@ export abstract class Process {
     // Validate job order
     try {
       fill_in_defaults(this.tool.inputs, job, fs_access);
-
+      convertFileDirectoryToDict(job);
       normalizeFilesDirs(job);
       // const schema = this.names.get_name('input_record_schema', null);
       // if (schema == null) {
