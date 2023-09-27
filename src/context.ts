@@ -2,6 +2,7 @@ import * as cwlTsAuto from 'cwl-ts-auto';
 import * as lodash from 'lodash';
 import { PathMapper } from './pathmapper.js';
 import { Process } from './process.js';
+import { SecretStore } from './secrets.js';
 import { StdFsAccess } from './stdfsaccess.js';
 import type { ToolRequirement } from './types.js';
 import { DEFAULT_TMP_PREFIX, type CWLObjectType, mkdtemp, type CommentedMap, splitPath } from './utils.js';
@@ -98,7 +99,7 @@ export class RuntimeContext extends ContextBase {
   stagedir = '';
   make_fs_access: (basedir: string) => StdFsAccess;
   user_space_docker_cmd?: string = undefined;
-  secret_store?: any = undefined;
+  secret_store?: SecretStore = undefined;
   no_read_only = false;
   custom_net?: string = undefined;
   no_match_user = false;

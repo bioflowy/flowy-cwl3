@@ -603,9 +603,9 @@ export abstract class ContainerCommandLineJob extends JobBase {
     secret_store: any,
     tmpdir_prefix: string,
   ): string {
-    const new_file = '';
+    let new_file = '';
     if (!host_outdir_tgt) {
-      host_outdir_tgt = path.join(createTmpDir(tmpdir_prefix), path.basename(volume.target));
+      new_file = path.join(createTmpDir(tmpdir_prefix), path.basename(volume.target));
     }
     const writable = volume.type === 'CreateWritableFile';
     let contents = volume.resolved;

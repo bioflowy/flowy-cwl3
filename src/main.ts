@@ -11,6 +11,7 @@ import { SingleJobExecutor } from './executors.js';
 import { loadDocument } from './loader.js';
 import { _logger } from './loghandler.js';
 import { shortname, type Process, add_sizes } from './process.js';
+import { SecretStore } from './secrets.js';
 import { StdFsAccess } from './stdfsaccess.js';
 import {
   visit_class,
@@ -226,7 +227,7 @@ export async function main(): Promise<number> {
   const test_path = path.join(process.cwd(), 'conformance_tests.yaml');
   const content = fs.readFileSync(test_path, 'utf-8');
   const data = yaml.load(content) as { [key: string]: any }[];
-  for (let index = 92; index < 93; index++) {
+  for (let index = 92; index < data.length; index++) {
     console.log(`test index =${index}`);
     const test = data[index];
     console.log(test['id']);
@@ -273,6 +274,7 @@ export async function exec(tool_path: string, job_path: string): Promise<[CWLOut
   );
   const runtimeContext = new RuntimeContext({
     outdir: process.cwd(),
+    secret_store: new SecretStore(),
   });
   runtimeContext.basedir = input_basedir;
   const process_executor = new SingleJobExecutor();
