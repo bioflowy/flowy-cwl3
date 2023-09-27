@@ -439,7 +439,7 @@ export class CommandLineTool extends Process {
     for (const t of initialWorkdir['listing'] as (string | CWLObjectType)[]) {
       if (t instanceof Object && 'entry' in t) {
         const entry_field: string = t['entry'] as string;
-        const entry = await builder.do_eval(entry_field, false);
+        const entry = await builder.do_eval(entry_field, undefined, false, false);
         if (entry === null) {
           continue;
         }
@@ -1041,7 +1041,7 @@ export class CommandLineTool extends Process {
 
     visit_class([builder.files, builder.bindings], ['File', 'Directory'], _check_adjust);
 
-    this._initialworkdir(j, builder);
+    await this._initialworkdir(j, builder);
 
     if (debug) {
       _logger.debug(
@@ -1342,12 +1342,14 @@ export class CommandLineTool extends Process {
       }
     }
   }
-  handle_output_format(schema: CommandOutputParameter, builder: Builder, result: CWLOutputType, debug: boolean): void {
+  async handle_output_format(schema: CommandOutputParameter, builder: Builder, result: CWLOutputType): Promise<void> {
     if (schema.format) {
       const format_field: string = schema.format;
       if (format_field.includes('$(') || format_field.includes('${')) {
-        aslist(result).forEach((primary, index) => {
-          const format_eval: any = builder.do_eval(format_field, primary);
+        const results = aslist(result);
+        for (let index = 0; index < results.length; index++) {
+          const primary = results[index];
+          const format_eval: any = await builder.do_eval(format_field, primary);
           if (typeof format_eval !== 'string') {
             let message = `'format' expression must evaluate to a string. Got ${format_eval} from ${format_field}.`;
             if (Array.isArray(result)) {
@@ -1356,7 +1358,7 @@ export class CommandLineTool extends Process {
             throw new WorkflowException(message);
           }
           primary['format'] = format_eval;
-        });
+        }
       } else {
         aslist(result).forEach((primary) => {
           primary['format'] = format_field;
@@ -1427,16 +1429,16 @@ export class CommandLineTool extends Process {
       if (schema.secondaryFiles) {
         await this.collect_secondary_files(schema, builder, result, debug, fs_access, revmap);
       }
-      this.handle_output_format(schema, builder, result, debug);
+      await this.handle_output_format(schema, builder, result);
       adjustFileObjs(result, revmap);
-      if (!result && optional && ![0, ''].includes(result as string | number)) {
+      if (optional && (!result || (result instanceof Array && result.length === 0))) {
         return undefined;
       }
     }
     if (!result && !empty_and_optional && typeof schema.type === 'object' && schema.type['type'] === 'record') {
       const out = {};
       for (const field of schema['type']['fields'] as CWLObjectType[]) {
-        out[shortname(field['name'] as string)] = this.collect_output(
+        out[shortname(field['name'] as string)] = await this.collect_output(
           // todo
           field as unknown as CommandOutputParameter,
           builder,

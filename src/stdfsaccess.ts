@@ -50,10 +50,11 @@ export class StdFsAccess {
   }
 
   isfile(fn: string): boolean {
-    return fs.statSync(this._abs(fn)).isFile();
+    const p = this._statSync(this._abs(fn));
+    return p ? p.isFile() : false;
   }
   _statSync(path: string) {
-    if (fs.existsSync(path)) {
+    if (!fs.existsSync(path)) {
       return undefined;
     }
     return fs.statSync(path);

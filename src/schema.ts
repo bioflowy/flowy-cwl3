@@ -2,11 +2,16 @@ import { InputArraySchema, type InputEnumSchema, type InputRecordSchema } from '
 import { isString } from './utils.js';
 
 function avro_field_name(url: string): string {
-  const d = new URL(url);
-  if (d.hash) {
-    return d.hash.split('/').pop();
+  try {
+    const d = new URL(url);
+    if (d.hash) {
+      return d.hash.split('/').pop();
+    }
+    return d.pathname.split('/').pop();
+  } catch (e) {
+    console.log(e);
+    throw e;
   }
-  return d.pathname.split('/').pop();
 }
 const saladp = 'https://w3id.org/cwl/salad#';
 const primitives = (function createPrimitives() {

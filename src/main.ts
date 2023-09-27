@@ -69,13 +69,15 @@ function load_job_order(basedir: string | undefined, job_order_file: string): [C
   function _normalizeFileDir(val) {
     if (val['class'] === 'File') {
       let location = val['location'];
-      if (!location.startsWith('/')) {
-        location = path.join(input_basedir, location);
+      if (location) {
+        if (!location.startsWith('/')) {
+          location = path.join(input_basedir, location);
+        }
+        if (!location.startsWith('file://')) {
+          location = pathToFileURL(location).toString();
+        }
+        val['location'] = location;
       }
-      if (!location.startsWith('file://')) {
-        location = pathToFileURL(location).toString();
-      }
-      val['location'] = location;
     } else if (val['class'] === 'Directory') {
       let location = val['location'];
       if (!location.startsWith('/')) {
@@ -155,7 +157,7 @@ function init_job_order(
       delete p['path'];
     }
     const location = p['location'] as string;
-    if (!location.startsWith('file://')) {
+    if (location && !location.startsWith('file://')) {
       p['location'] = urlJoin(basedir, location);
     }
   };
@@ -208,6 +210,9 @@ function equals(expected: any, actual: any): boolean {
       }
     }
   } else {
+    if (expected == undefined || expected == null) {
+      return actual == undefined || actual == null;
+    }
     return expected === actual;
   }
   return true;
@@ -221,7 +226,7 @@ export async function main(): Promise<number> {
   const test_path = path.join(process.cwd(), 'conformance_tests.yaml');
   const content = fs.readFileSync(test_path, 'utf-8');
   const data = yaml.load(content) as { [key: string]: any }[];
-  for (let index = 55; index < 56; index++) {
+  for (let index = 92; index < 93; index++) {
     console.log(`test index =${index}`);
     const test = data[index];
     console.log(test['id']);

@@ -53,6 +53,7 @@ import {
   uriFilePath,
   fileUri,
   ensureWritable,
+  visit_class_promise,
 } from './utils.js';
 
 const _logger_validation_warnings = _logger;
@@ -257,14 +258,14 @@ function scandir(dir: string): DirEntry[] {
     return new DirEntry(entry, entryPath, stat.isDirectory());
   });
 }
-export function relocateOutputs(
+export async function relocateOutputs(
   outputObj: CWLObjectType,
   destination_path: string,
   source_directories: Set<string>,
   action: string,
   fs_access: StdFsAccess,
   compute_checksum = true,
-): CWLObjectType {
+): Promise<CWLObjectType> {
   adjustDirObjs(outputObj, (val) => get_listing(fs_access, val, true));
 
   if (!['move', 'copy'].includes(action)) {
@@ -312,7 +313,7 @@ export function relocateOutputs(
           _relocate(dir_entry.path, fs_access.join(dst, dir_entry.name));
         }
       } else {
-        fsExtra.moveSync(src, dst);
+        fsExtra.moveSync(src, dst, { overwrite: true });
       }
     } else if (_action === 'copy') {
       _logger.debug(`Copying ${src} to ${dst}`);
@@ -323,9 +324,9 @@ export function relocateOutputs(
         } else if (dstStat.isFile()) {
           fs.unlinkSync(dst);
         }
-        fsExtra.copySync(src, dst);
+        fsExtra.copySync(src, dst, { overwrite: true });
       } else {
-        fsExtra.copySync(src, dst, { preserveTimestamps: true });
+        fsExtra.copySync(src, dst, { preserveTimestamps: true, overwrite: true });
       }
     }
   }
@@ -357,7 +358,8 @@ export function relocateOutputs(
   visit_class(outputObj, ['File', 'Directory'], _check_adjust);
 
   if (compute_checksum) {
-    visit_class(outputObj, ['File'], async (vals) => compute_checksums(fs_access, vals));
+    const promises = visit_class_promise(outputObj, ['File'], async (vals) => compute_checksums(fs_access, vals));
+    await Promise.all(promises);
   }
   return outputObj;
 }
@@ -611,7 +613,7 @@ export abstract class Process {
       this.inputs_record_schema.fields.push(c);
     }
     for (const i of this.tool.outputs) {
-      const c = { ...i };
+      const c = structuredClone(i);
       if (!c.type) {
         throw new Error(`Missing 'type' in parameter '${c.name}'`);
       }

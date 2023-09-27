@@ -6,9 +6,9 @@
       "type": "node",
       "request": "launch",
       "cwd": "${workspaceFolder}",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "console": "integratedTerminal"
+      "runtimeExecutable": "/home/uehara/.nodenv/shims/npm",
+      "runtimeArgs": ["run", "dev"]
+      // "console": "integratedTerminal"
     },
     {
       "name": "test",

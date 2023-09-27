@@ -428,13 +428,13 @@ export class Builder {
     }
 
     if (schema['format']) {
-      this.handleFileFormat(schema, datum, debug);
+      await this.handleFileFormat(schema, datum, debug);
     }
 
     visit_class(datum['secondaryFiles'] || [], ['File', 'Directory'], _captureFiles);
   }
-  handleFileFormat(schema: CommandInputParameter, datum: CWLObjectType | CWLObjectType[], debug: boolean) {
-    const eval_format: any = this.do_eval(schema.format);
+  async handleFileFormat(schema: CommandInputParameter, datum: CWLObjectType | CWLObjectType[], debug: boolean) {
+    const eval_format: any = await this.do_eval(schema.format);
     let evaluated_format: string | string[];
 
     if (typeof eval_format === 'string') {
@@ -448,11 +448,11 @@ export class Builder {
             schema.format
           } and its fully evaluated result is ${eval_format}.`;
         }
-        // TODO
-        // if (expression.needs_parsing(entry)) {
-        //     message = "For inputs, 'format' field can either contain a single CWL Expression or CWL Parameter Reference, a single format string, or a list of format strings. But the list cannot contain CWL Expressions or CWL Parameter References. List entry number "
-        //         + (index + 1) + " contains the following unallowed CWL Parameter Reference or Expression: " + entry + ".";
-        // }
+        if (expression.needs_parsing(entry)) {
+          message = `For inputs, 'format' field can either contain a single CWL Expression or CWL Parameter Reference, a single format string, or a list of format strings. But the list cannot contain CWL Expressions or CWL Parameter References. List entry number ${
+            index + 1
+          } contains the following unallowed CWL Parameter Reference or Expression: ${entry}.`;
+        }
         if (message) {
           throw new WorkflowException(message);
         }
@@ -629,7 +629,7 @@ export class Builder {
   ): Promise<any> {
     for (const f of schema.fields) {
       const name = f.name;
-      if (name in datum && datum[name] !== null) {
+      if (name in datum && datum[name] !== undefined) {
         const bs = await this.bind_input(f, datum[name], discover_secondaryFiles, lead_pos, name);
         bindings.push(...bs);
       } else {

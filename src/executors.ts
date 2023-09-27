@@ -106,7 +106,7 @@ class JobExecutor {
     await this.run_jobs(process, job_order_object, logger, runtime_context);
 
     if (this.final_output && this.final_output[0] !== undefined && finaloutdir !== null) {
-      this.final_output[0] = relocateOutputs(
+      this.final_output[0] = await relocateOutputs(
         this.final_output[0],
         finaloutdir,
         new Set(this.output_dirs),

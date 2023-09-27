@@ -197,15 +197,26 @@ export function aslist(thing: any): any[] {
   }
   return [thing];
 }
+// equivalent to  os.path.split in python
+function osPathSplit(path_str: string): [string, string] {
+  if (path_str.endsWith('/')) {
+    return [path_str.substring(0, path_str.length - 1), ''];
+  } else {
+    return [path.dirname(path_str), path.basename(path_str)];
+  }
+}
 export function createTmpDir(tmpdirPrefix: string): string {
-  const tmpDir = path.dirname(tmpdirPrefix);
-  const tmpPrefix = path.basename(tmpdirPrefix);
+  const [tmpDir, tmpPrefix] = osPathSplit(tmpdirPrefix);
 
   // デフォルトのtmpディレクトリを使用する場合
   const finalTmpDir = tmpDir || os.tmpdir();
 
   // 一時ディレクトリを作成する
-  const fullTmpDir = fs.mkdtempSync(path.join(finalTmpDir, tmpPrefix));
+  let p = path.join(finalTmpDir, tmpPrefix);
+  if (!p.endsWith('/')) {
+    p = `${p}/`;
+  }
+  const fullTmpDir = fs.mkdtempSync(p);
 
   return fullTmpDir;
 }
@@ -236,6 +247,19 @@ export function visit_class(rec: any, cls: any[], op: (...args: any[]) => any): 
       visit_class(rec[key], cls, op);
     }
   }
+}
+export function visit_class_promise<T>(rec: any, cls: any[], op: (...args: any[]) => Promise<T>): Promise<T>[] {
+  const promises: Promise<T>[] = [];
+  if (typeof rec === 'object' && rec !== null) {
+    if ('class' in rec && cls.includes(rec['class'])) {
+      promises.push(op(rec));
+    }
+    for (const key in rec) {
+      const promises2 = visit_class_promise(rec[key], cls, op);
+      promises.push(...promises2);
+    }
+  }
+  return promises;
 }
 
 function visit_field(rec: any, field: string, op: (...args: any[]) => any): void {

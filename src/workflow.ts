@@ -224,6 +224,7 @@ function used_by_step(step: IWorkflowStep, shortinputid: string): boolean {
   return false;
 }
 function handleInput(
+  tool: IWorkflowStep,
   embedded_tool: Process,
   toolpath_object: cwlTsAuto.WorkflowStepInput[],
   bound: Set<any>,
@@ -231,7 +232,7 @@ function handleInput(
   debug: boolean,
 ): WorkflowStepInput[] {
   const inputs: WorkflowStepInput[] = [];
-  toolpath_object.forEach((step_entry: cwlTsAuto.WorkflowStepInput) => {
+  for (const step_entry of toolpath_object) {
     const inputid = step_entry.id;
     const param: WorkflowStepInput = step_entry;
     const shortinputid = shortname(inputid);
@@ -256,13 +257,13 @@ function handleInput(
     }
     if (!found) {
       param.type = 'Any';
-      param.used_by_step = used_by_step(this.tool, shortinputid);
+      param.used_by_step = used_by_step(tool, shortinputid);
       param.not_connected = true;
     }
 
     param.id = inputid;
     inputs.push(param);
-  });
+  }
   return inputs;
 }
 function handleOutput(
@@ -389,7 +390,7 @@ export class WorkflowStep extends Process {
       }
       this.tool.requirements.push(this.embedded_tool.getRequirement(cwlTsAuto.SchemaDefRequirement)[0]);
     }
-    this.tool.inputs = handleInput(this.embedded_tool, this.tool.in_, bound, validation_errors, debug);
+    this.tool.inputs = handleInput(this.tool, this.embedded_tool, this.tool.in_, bound, validation_errors, debug);
     this.tool.outputs = handleOutput(this.embedded_tool, this.tool.out, bound, validation_errors, debug);
 
     const missing_values = [];

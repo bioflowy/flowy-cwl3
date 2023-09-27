@@ -716,13 +716,14 @@ export class WorkflowJob {
           }
         }
 
-        async function valueFromFunc(k: string, v: CWLOutputType | null): Promise<CWLOutputType | null> {
+        const valueFromFunc = async (k: string, v: CWLOutputType | null): Promise<CWLOutputType | null> => {
           if (k in valueFrom) {
-            adjustDirObjs(v, get_listing.bind(null, fs_access, true));
-            return do_eval(valueFrom[k], shortio, this.workflow.requirements, null, null, {}, v, runtimeContext.debug);
+            adjustDirObjs(v, (val) => get_listing(val, fs_access, true));
+            const [inline] = getRequirement(this.workflow, cwlTsAuto.InlineJavascriptRequirement);
+            return do_eval(valueFrom[k], shortio, inline, null, null, {}, v, runtimeContext.debug);
           }
           return v;
-        }
+        };
 
         const psio: { [key: string]: CWLOutputType | null } = {};
         for (const k in io) {
