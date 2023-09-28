@@ -32,6 +32,7 @@ import {
   type ScatterOutputCallbackType,
   type ScatterDestinationsType,
   type SinkType,
+  isMissingOrNull,
 } from './utils.js';
 import { Workflow, WorkflowStep } from './workflow.js';
 
@@ -527,7 +528,7 @@ function objectFromState(
         inputobj[iid] = seq.filter((v) => v !== null);
       }
     }
-    if (inputobj[iid] === undefined && inp.default_) {
+    if (isMissingOrNull(inputobj, iid) && inp.default_ !== undefined) {
       inputobj[iid] = inp.default_;
     }
     if (!(iid in inputobj) && ('valueFrom' in inp || incomplete)) {

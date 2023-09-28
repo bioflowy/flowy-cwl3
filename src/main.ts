@@ -1,7 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as cwlTsAuto from 'cwl-ts-auto';
+import fsExtra from 'fs-extra/esm';
 import ivm from 'isolated-vm';
 import yaml from 'js-yaml';
 import { createLogger, format, transports } from 'winston';
@@ -199,24 +200,29 @@ function equals(expected: any, actual: any): boolean {
     }
     for (const key of Object.keys(expected)) {
       const expectedValue = expected[key];
-      let actualValue = actual[key];
+      const actualValue = actual[key];
       if (expectedValue === 'Any') {
         continue;
       }
       if (key === 'location') {
-        actualValue = path.basename(actualValue);
+        return actualValue.endsWith(expectedValue);
       }
       if (!equals(expectedValue, actualValue)) {
         return false;
       }
     }
   } else {
-    if (expected == undefined || expected == null) {
-      return actual == undefined || actual == null;
-    }
     return expected === actual;
   }
   return true;
+}
+function cleanWorkdir(directory: string, expect: string[]) {
+  const items = fs.readdirSync(directory);
+  for (const item of items) {
+    if (!expect.includes(item)) {
+      fsExtra.removeSync(item);
+    }
+  }
 }
 export async function main(): Promise<number> {
   const _logger = createLogger({
@@ -227,7 +233,8 @@ export async function main(): Promise<number> {
   const test_path = path.join(process.cwd(), 'conformance_tests.yaml');
   const content = fs.readFileSync(test_path, 'utf-8');
   const data = yaml.load(content) as { [key: string]: any }[];
-  for (let index = 92; index < data.length; index++) {
+  for (let index = 116; index < 117; index++) {
+    cleanWorkdir(process.cwd(), ['tests', 'conformance_tests.yaml']);
     console.log(`test index =${index}`);
     const test = data[index];
     console.log(test['id']);

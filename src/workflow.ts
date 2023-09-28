@@ -396,7 +396,7 @@ export class WorkflowStep extends Process {
     const missing_values = [];
     for (const tool_entry of this.embedded_tool.tool.inputs) {
       if (!bound.has(shortname(tool_entry.id))) {
-        if (!('null' in aslist(tool_entry.type)) && !tool_entry.default_) {
+        if (!aslist(tool_entry.type).includes('null') && !tool_entry.default_) {
           missing_values.push(shortname(tool_entry['id']));
         }
       }

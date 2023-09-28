@@ -5,11 +5,13 @@ import * as path from 'node:path';
 import * as url from 'node:url';
 
 import type { WorkflowInputParameter } from 'cwl-ts-auto';
+import fsExtra from 'fs-extra/esm';
 import { v4 as uuidv4 } from 'uuid';
 import { CallbackJob, ExpressionJob } from './command_line_tool.js';
 import { ValidationException, WorkflowException } from './errors.js';
 import { CommandLineJob, JobBase } from './job.js';
 import { MapperEnt, PathMapper } from './pathmapper.js';
+import { SecretStore } from './secrets.js';
 import { StdFsAccess } from './stdfsaccess.js';
 import type { Tool, ToolRequirement } from './types.js';
 import type { WorkflowJob } from './workflow_job.js';
@@ -188,7 +190,7 @@ export function versionstring(): string {
   return `flowy-cwl v1.0`;
 }
 
-export function aslist(thing: any): any[] {
+export function aslist<T>(thing: T | T[]): T[] {
   if (Array.isArray(thing)) {
     return thing;
   }
@@ -409,12 +411,15 @@ export function get_listing(fs_access: StdFsAccess, rec: any, recursive = true) 
   }
   rec['listing'] = listing;
 }
+export function isMissingOrNull(obj: object, key: string) {
+  return !(key in obj) || obj[key] === null;
+}
 export function stage_files(
   pathmapper: PathMapper,
   stage_func: ((str: string, str2: string) => void) | null = null,
   ignore_writable = false,
   symlink = true,
-  secret_store: any = null, // TODO SecretStore | null = null,
+  secret_store: SecretStore = null, // TODO SecretStore | null = null,
   fix_conflicts = false,
 ): void {
   let items = !symlink ? pathmapper.items() : pathmapper.items_exclude_children();
@@ -469,7 +474,7 @@ export function stage_files(
       if (entry.resolved.startsWith('_:')) {
         fs.mkdirSync(entry.target);
       } else {
-        fs.cpSync(entry.resolved, entry.target);
+        fsExtra.copySync(entry.resolved, entry.target);
         ensure_writable_callback();
       }
     } else if ('CreateFile' === entry.type || 'CreateWritableFile' === entry.type) {

@@ -221,7 +221,7 @@ export async function evaluator(
     const first_symbol = match[1];
     const first_symbol_end = match.index + first_symbol.length;
 
-    if (first_symbol_end + 1 === ex.length && first_symbol === 'null') {
+    if (first_symbol_end + 2 === ex.length && first_symbol === 'null') {
       return null;
     }
     try {

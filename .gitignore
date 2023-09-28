@@ -135,3 +135,5 @@ dist
 
 # User
 /dist
+
+work/tests/

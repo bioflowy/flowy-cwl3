@@ -10,6 +10,7 @@ import { RuntimeContext } from './context.js';
 import { UnsupportedRequirement, ValueError, WorkflowException } from './errors.js';
 import { _logger } from './loghandler.js';
 import { MapperEnt, PathMapper } from './pathmapper.js';
+import { SecretStore } from './secrets.js';
 import type { Tool, ToolRequirement } from './types.js';
 import {
   type CWLObjectType,
@@ -631,11 +632,11 @@ export abstract class ContainerCommandLineJob extends JobBase {
     pathmapper: PathMapper,
     runtime: string[],
     tmpdir_prefix: string,
-    secret_store: any, // TODO SecretStore | null = null,
+    secret_store: SecretStore, // TODO SecretStore | null = null,
     any_path_okay = false,
   ): void {
     const container_outdir = this.builder.outdir;
-    for (const [key, vol] of [...pathmapper.items().filter((itm: any) => itm[1].staged)]) {
+    for (const [key, vol] of [...pathmapper.items().filter((itm) => itm[1].staged)]) {
       let host_outdir_tgt: string | undefined = undefined;
       if (vol.target.startsWith(`${container_outdir}/`)) {
         host_outdir_tgt = path.join(this.outdir, vol.target.slice(container_outdir.length + 1));
@@ -644,7 +645,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
         throw new WorkflowException(
           `No mandatory DockerRequirement, yet path is outside ` +
             `the designated output directory, also know as ` +
-            `$(runtime.outdir): ${vol}`,
+            `${runtime.join(', ')}: ${vol}`,
         );
       }
       if (vol.type === 'File' || vol.type === 'Directory') {

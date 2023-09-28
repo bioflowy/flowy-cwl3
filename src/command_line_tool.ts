@@ -1129,8 +1129,8 @@ export class CommandLineTool extends Process {
         }
       } else if (Array.isArray(ports)) {
         for (let i = 0; i < ports.length; i++) {
-          const port = ports[i] as any;
-          const fragment = shortname(port['id']);
+          const port = ports[i];
+          const fragment = shortname(port.id);
           ret[fragment] = await this.collect_output(port, builder, outdir, fs_access, compute_checksum);
         }
       }
@@ -1404,6 +1404,7 @@ export class CommandLineTool extends Process {
         try {
           result = await builder.do_eval(binding.outputEval, r);
         } catch (error) {
+          _logger.warn(error);
           // Log the error here
         }
       } else {

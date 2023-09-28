@@ -7,7 +7,6 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import cwlTsAuto from 'cwl-ts-auto';
 import fsExtra from 'fs-extra';
-import type { initial } from 'lodash';
 import { v4 } from 'uuid';
 import { Builder, INPUT_OBJ_VOCAB } from './builder.js';
 import { LoadingContext, RuntimeContext, getDefault } from './context.js';
@@ -54,6 +53,7 @@ import {
   fileUri,
   ensureWritable,
   visit_class_promise,
+  isString,
 } from './utils.js';
 
 const _logger_validation_warnings = _logger;
@@ -143,17 +143,20 @@ let SCHEMA_ANY;
 // }
 
 export function shortname(inputid: string): string {
-  const parsedUrl = new URL(inputid);
-  cwlTsAuto.CommandLineTool;
-  if (parsedUrl.hash) {
-    const sn = parsedUrl.hash.split('/').pop();
-    if (sn.startsWith('#')) {
-      return sn.substring(1);
-    } else {
-      return sn;
+  try {
+    const parsedUrl = new URL(inputid);
+    if (parsedUrl.hash) {
+      const sn = parsedUrl.hash.split('/').pop();
+      if (sn.startsWith('#')) {
+        return sn.substring(1);
+      } else {
+        return sn;
+      }
     }
+    return parsedUrl.pathname.split('/').pop() || '';
+  } catch {
+    return inputid.split('/').pop();
   }
-  return parsedUrl.pathname.split('/').pop() || '';
 }
 function stage_files(
   pathmapper: PathMapper,
@@ -395,7 +398,7 @@ function fill_in_defaults(inputs: CommandInputParameter[], job: CWLObjectType, f
       const converted = convertFileDirectoryToDict(inp.default_);
       job[fieldname] = structuredClone(converted);
     } else if (job[fieldname] == null && aslist(inp['type']).includes('null')) {
-      job[fieldname] = undefined;
+      job[fieldname] = null;
     } else {
       throw new WorkflowException(`Missing required input parameter '${shortname(String(inp['id']))}'`);
     }
@@ -454,7 +457,7 @@ function var_spool_cwl_detector(obj: unknown, item: any = null, obj_key: any = n
   let r = false;
   if (typeof obj === 'string') {
     if (obj.includes('var/spool/cwl') && obj_key != 'dockerOutputDirectory') {
-      _logger.warning(new Error(_VAR_SPOOL_ERROR.replace('{}', obj)));
+      _logger.warn(new Error(_VAR_SPOOL_ERROR.replace('{}', obj)));
       r = true;
     }
   } else if (obj instanceof Object) {
@@ -556,7 +559,7 @@ export abstract class Process {
       throw new ValidationException("If 'hints' is present then it must be a list or map/dictionary, not empty.");
     }
 
-    this.hints.concat(tool_hints);
+    this.hints.push(...tool_hints);
     this.original_requirements = this.requirements;
     this.original_hints = this.hints;
     // this.doc_loader = loadingContext.loader;
@@ -603,7 +606,7 @@ export abstract class Process {
       }
 
       if (c.default_ && !aslist(c.type).includes('null')) {
-        const nullable = ['null'];
+        const nullable: ToolType = ['null'];
         nullable.push(...aslist(c.type));
         c.type = nullable;
       }
@@ -661,7 +664,7 @@ export abstract class Process {
     const [dockerReq, is_req] = getRequirement(this, cwlTsAuto.DockerRequirement);
 
     if (dockerReq && dockerReq.dockerOutputDirectory && is_req) {
-      _logger.warning(
+      _logger.warn(
         "When 'dockerOutputDirectory' is declared, DockerRequirement should go in the 'requirements' section, not 'hints'.",
       );
     }
@@ -746,7 +749,7 @@ export abstract class Process {
           const filecount = [0];
           visit_class(v, ['File'], (x: any): void => inc(filecount));
           if (filecount[0] > FILE_COUNT_WARNING) {
-            _logger.warning(`Recursive directory listing has resulted in a large number of File objects (${filecount[0]}) passed to the input parameter '${k}'.  This may negatively affect workflow performance and memory use.
+            _logger.warn(`Recursive directory listing has resulted in a large number of File objects (${filecount[0]}) passed to the input parameter '${k}'.  This may negatively affect workflow performance and memory use.
 
 If this is a problem, use the hint 'cwltool:LoadListingRequirement' with "shallow_listing" or "no_listing" to change the directory listing behavior:
 
@@ -1140,7 +1143,8 @@ function scandeps_item(
     for (const u2 of aslist(v)) {
       if (u2 instanceof Map) {
         r.push(...scandeps(base, u2 as unknown as CWLObjectType, reffields, urlfields, loadref, urljoin, nestdirs));
-      } else {
+      }
+      if (isString(u2)) {
         const subid = urljoin(base, u2);
         const basedf = new URL(base).hash;
         const subiddf = new URL(subid).hash;
@@ -1169,10 +1173,15 @@ function scandeps_item(
           deps2 = nestdir(base, deps2);
         }
         r.push(deps2);
+      } else {
+        throw new Error('Unexpected');
       }
     }
   } else if (urlfields.has(key) && key != 'location') {
     for (const u3 of aslist(v)) {
+      if (!isString(u3)) {
+        throw new Error(`u3 must be string but ${typeof u3}`);
+      }
       let deps: CWLObjectType = { class: 'File', location: urljoin(base, u3) };
       if (nestdirs) {
         deps = nestdir(base, deps);

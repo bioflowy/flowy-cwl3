@@ -217,6 +217,18 @@ export class Builder {
           return true;
         }
       }
+    } else if (t instanceof cwlTsAuto.InputArraySchema) {
+      if (!Array.isArray(datum)) {
+        return false;
+      }
+      for (const d of datum) {
+        for (const item of aslist(t.items)) {
+          if (!this.validate(item, d, raise_ex)) {
+            return false;
+          }
+        }
+      }
+      return true;
     }
     return false;
   }
@@ -255,7 +267,9 @@ export class Builder {
     }
     if (!bound_input) {
       // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-      throw new ValidationException(`'${datum}' is not a valid union ${schema['type']}`);
+      throw new ValidationException(
+        `'${JSON.stringify(datum)}' is not a valid union ${JSON.stringify(schema['type'])}`,
+      );
     }
     return undefined;
   }
@@ -423,11 +437,11 @@ export class Builder {
       }
     }
 
-    if (schema['secondaryFiles']) {
+    if (schema.secondaryFiles) {
       return this.handleSecondaryFile(schema, datum, discoverSecondaryFiles, debug);
     }
 
-    if (schema['format']) {
+    if (schema.format) {
       await this.handleFileFormat(schema, datum, debug);
     }
 
@@ -507,7 +521,7 @@ export class Builder {
       const pattern = sf_entry.pattern;
       if (typeof pattern === 'string') {
         if (pattern.includes('$(') || pattern.includes('${')) {
-          sfpath = this.do_eval(sf_entry.pattern, { context: datum });
+          sfpath = await this.do_eval(sf_entry.pattern, { context: datum });
         } else {
           sfpath = substitute(datum['basename'] as string, pattern);
         }
@@ -559,7 +573,7 @@ export class Builder {
     }
 
     for (const d of aslist(datum['secondaryFiles'])) {
-      if (!d.get('basename')) {
+      if (!d['basename']) {
         d['basename'] = d['location'].slice(d['location'].lastIndexOf('/') + 1);
       }
       if (d['basename'] == sfbasename) {
@@ -610,10 +624,11 @@ export class Builder {
       }
       const itemschema: CommandInputParameter = {
         type: schema.items,
+        inputBinding: b2,
         format: schema.format,
         streamable: schema.streamable,
+        secondaryFiles: schema.secondaryFiles,
       };
-      itemschema.inputBinding = b2;
       const bs = await this.bind_input(itemschema, item, discover_secondaryFiles, n, tail_pos);
       bindeds.push(...bs);
     }
@@ -629,11 +644,11 @@ export class Builder {
   ): Promise<any> {
     for (const f of schema.fields) {
       const name = f.name;
-      if (name in datum && datum[name] !== undefined) {
+      if (name in datum && datum[name] !== null) {
         const bs = await this.bind_input(f, datum[name], discover_secondaryFiles, lead_pos, name);
         bindings.push(...bs);
       } else {
-        datum[name] = f.default_;
+        datum[name] = f.default_ ?? null;
       }
     }
     return datum;
@@ -677,7 +692,7 @@ export class Builder {
     const binding = schema.inputBinding;
     const binded = CommandLineBinded.fromBinding(binding);
 
-    const bp = [...aslist(lead_pos)];
+    const bp: (number | string)[] = [...aslist(lead_pos)];
     if (binding.position) {
       const position = binding.position;
       if (typeof position === 'string') {
@@ -697,7 +712,7 @@ export class Builder {
     } else {
       bp.push(0);
     }
-    bp.push(...aslist(tail_pos));
+    bp.push(...aslist<string | number>(tail_pos));
     binded.positions = bp;
 
     binded.datum = datum;
@@ -759,7 +774,7 @@ export class Builder {
       return prefix ? [prefix] : [];
     } else if (value === true && prefix) {
       return [prefix];
-    } else if (value === false || value === undefined || (value === true && !prefix)) {
+    } else if (value === false || value === null || (value === true && !prefix)) {
       return [];
     } else {
       argl = [value];
