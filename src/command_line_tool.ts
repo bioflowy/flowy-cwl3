@@ -1429,7 +1429,7 @@ export class CommandLineTool extends Process {
       await this.handle_output_format(schema, builder, result);
       adjustFileObjs(result, revmap);
       if (optional && (!result || (result instanceof Array && result.length === 0))) {
-        return null;
+        return result === 0 || result === '' ? result : null;
       }
     }
     if (!result && !empty_and_optional && typeof schema.type === 'object' && schema.type['type'] === 'record') {

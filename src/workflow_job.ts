@@ -805,9 +805,13 @@ export class WorkflowJob {
           jobs = step.job(inputobj, callback, runtimeContext);
         } else {
           _logger.info('[%s] will be skipped', step.name);
-          // callback({k["id"]: None for k in outputparms}, "skipped")
-          // step.completed = True
-          // jobs = (_ for _ in ())
+          const result = {};
+          outputParms.forEach((e) => {
+            result[e.id] = null;
+          });
+          callback(result, 'skipped');
+          step.completed = true;
+          return undefined;
         }
       }
       step.submitted = true;

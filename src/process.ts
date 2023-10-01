@@ -392,16 +392,16 @@ export function add_sizes(fsaccess: StdFsAccess, obj: CWLObjectType): void {
 function fill_in_defaults(inputs: CommandInputParameter[], job: CWLObjectType, fsaccess: StdFsAccess): void {
   for (let e = 0; e < inputs.length; e++) {
     const inp = inputs[e];
-    const fieldname = shortname(String(inp['id']));
+    const fieldname = shortname(inp.id);
     if (job[fieldname] != null) {
       continue;
-    } else if (job[fieldname] == null && inp.default_) {
+    } else if (job[fieldname] == null && inp.default_ !== undefined) {
       const converted = convertFileDirectoryToDict(inp.default_);
       job[fieldname] = structuredClone(converted);
-    } else if (job[fieldname] == null && aslist(inp['type']).includes('null')) {
+    } else if (job[fieldname] == null && aslist(inp.type).includes('null')) {
       job[fieldname] = null;
     } else {
-      throw new WorkflowException(`Missing required input parameter '${shortname(String(inp['id']))}'`);
+      throw new WorkflowException(`Missing required input parameter '${fieldname}'`);
     }
   }
 }

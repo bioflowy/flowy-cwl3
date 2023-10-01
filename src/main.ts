@@ -152,10 +152,10 @@ function init_job_order(
   if (!job_order_object) {
     job_order_object = { id: tool_file_path };
   }
-  for (const inp of process.tool['inputs']) {
-    if ('default_' in inp && (!job_order_object || !job_order_object[shortname(inp['id'])])) {
+  for (const inp of process.tool.inputs) {
+    if (inp.default_ && (!job_order_object || !job_order_object[shortname(inp.id)])) {
       if (!job_order_object) job_order_object = {};
-      job_order_object[shortname(inp['id'])] = convertFileDirectoryToDict(inp['default_']);
+      job_order_object[shortname(inp.id)] = convertFileDirectoryToDict(inp.default_);
     }
   }
 
@@ -235,47 +235,62 @@ function cleanWorkdir(directory: string, expect: string[]) {
   }
 }
 export async function main(): Promise<number> {
-  const test_path = path.join(process.cwd(), 'conformance_tests.yaml');
+  // return do_test(path.join(process.cwd(), 'tests/secondaryfiles/test-index.yaml'), 0, -1);
+  return do_test(path.join(process.cwd(), 'conformance_tests.yaml'), 263, -1);
+}
+export async function do_test(test_path: string, start = 0, end = -1): Promise<number> {
+  const test_dir = path.dirname(test_path);
   const content = fs.readFileSync(test_path, 'utf-8');
   const data = yaml.load(content) as { [key: string]: any }[];
-  for (let index = 252; index < 253; index++) {
+  for (let index = start; index < (end < 0 ? data.length : end); index++) {
     cleanWorkdir(process.cwd(), ['tests', 'conformance_tests.yaml']);
     const test = data[index];
-    _logger.info(`test index =${index}`);
-    console.log(`index =${index}`);
-    _logger.info(test['doc']);
-    const job_path = test['job'] as string;
-    const tool_path = test['tool'] as string;
-    _logger.info(tool_path);
-    _logger.info(job_path);
-    const expected_outputs = test['output'];
-    try {
-      const [output, status] = await exec(tool_path, job_path);
-      console.log(status);
-      if (status !== 'success' && test['should_fail']) {
-        console.log('OK expected error has occurred');
-        continue;
+    if (test['$import']) {
+      const t = path.join(test_dir, test['$import']);
+      await do_test(t);
+    } else {
+      _logger.info(`test index =${index}`);
+      console.log(`index =${index}`);
+      _logger.info(test['doc']);
+      let job_path = test['job'] as string;
+      if (job_path && !path.isAbsolute(job_path)) {
+        job_path = path.join(test_dir, job_path);
       }
-      if (test['should_fail']) {
-        console.log('should_failed flag is true, but no error occurred.');
-        continue;
+      let tool_path = test['tool'] as string;
+      if (tool_path && !path.isAbsolute(tool_path)) {
+        tool_path = path.join(test_dir, tool_path);
       }
+      _logger.info(tool_path);
+      _logger.info(job_path);
+      const expected_outputs = test['output'];
+      try {
+        const [output, status] = await exec(tool_path, job_path);
+        console.log(status);
+        if (status !== 'success' && test['should_fail']) {
+          console.log('OK expected error has occurred');
+          continue;
+        }
+        if (test['should_fail']) {
+          console.log('should_failed flag is true, but no error occurred.');
+          continue;
+        }
 
-      if (!equals(expected_outputs, output)) {
-        const expected_str = toJsonString(expected_outputs);
-        const output_str = toJsonString(output as object);
-        console.log(`index=${index}`);
-        console.log(test['id']);
-        console.log(`expected: ${expected_str}`);
-        console.log(`output: ${output_str}`);
-      }
-    } catch (e: any) {
-      if (!test['should_fail']) {
-        console.log(`index=${index}`);
-        console.log(test['id']);
-        console.log(e);
-      } else {
-        console.log('OK expected error has occurred');
+        if (!equals(expected_outputs, output)) {
+          const expected_str = toJsonString(expected_outputs);
+          const output_str = toJsonString(output as object);
+          console.log(`index=${index}`);
+          console.log(test['id']);
+          console.log(`expected: ${expected_str}`);
+          console.log(`output: ${output_str}`);
+        }
+      } catch (e: any) {
+        if (!test['should_fail']) {
+          console.log(`index=${index}`);
+          console.log(test['id']);
+          console.log(e);
+        } else {
+          console.log('OK expected error has occurred');
+        }
       }
     }
   }

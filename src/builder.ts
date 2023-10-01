@@ -453,7 +453,7 @@ export class Builder {
       const pattern = sf_entry.pattern;
       if (typeof pattern === 'string') {
         if (pattern.includes('$(') || pattern.includes('${')) {
-          sfpath = await this.do_eval(sf_entry.pattern, { context: datum });
+          sfpath = await this.do_eval(sf_entry.pattern, datum);
         } else {
           sfpath = substitute(datum['basename'] as string, pattern);
         }
