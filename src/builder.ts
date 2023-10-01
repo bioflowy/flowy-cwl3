@@ -36,7 +36,9 @@ import {
   visit_class,
   isString,
   getRequirement,
+  get_filed_name,
 } from './utils.js';
+import { validate } from './validate.js';
 
 export const INPUT_OBJ_VOCAB: { [key: string]: string } = {
   Any: 'https://w3id.org/cwl/salad#Any',
@@ -162,76 +164,6 @@ export class Builder {
     }
     return null;
   }
-  validate(t, datum, raise_ex: boolean) {
-    if (t === 'null' && !datum) {
-      if (raise_ex) {
-        throw new ValidationException(`${datum} is not null`);
-      }
-      return true;
-    } else if (t === 'string' && isString(datum)) {
-      return true;
-    } else if (t === 'boolean' && typeof datum === 'boolean') {
-      return true;
-    } else if (['org.w3id.cwl.salad.Any', 'Any'].includes(t)) {
-      if (datum) {
-        return true;
-      }
-      if (raise_ex) {
-        throw new ValidationException("'Any' type must be non-null");
-      }
-      return false;
-    } else if (t === 'org.w3id.cwl.cwl.File' && datum instanceof Object && datum['class'] === 'File') {
-      return true;
-    } else if (t === 'int' || t === 'long') {
-      if (typeof datum === 'number' && Number.MIN_SAFE_INTEGER <= datum && datum <= Number.MAX_SAFE_INTEGER) {
-        return true;
-      }
-      if (raise_ex) {
-        throw new ValidationException(`${datum} is not int`);
-      }
-      return false;
-    } else if (typeof t === 'number') {
-      if (typeof datum === 'number') {
-        return true;
-      }
-      if (raise_ex) {
-        throw new ValidationException(`the value ${datum} is not long`);
-      }
-      return false;
-    } else if (t instanceof CommandInputEnumSchema) {
-      return t.symbols.includes(datum);
-    } else if (t instanceof CommandInputRecordSchema) {
-      if (!(datum instanceof Object)) {
-        return false;
-      }
-      for (const ft of t.fields) {
-        const val = datum[ft.name];
-        if (!this.validate(ft.type, val, false)) {
-          return false;
-        }
-      }
-      return true;
-    } else if (Array.isArray(t)) {
-      for (let index = 0; index < t.length; index++) {
-        if (this.validate(t[index], datum, raise_ex)) {
-          return true;
-        }
-      }
-    } else if (t instanceof cwlTsAuto.InputArraySchema) {
-      if (!Array.isArray(datum)) {
-        return false;
-      }
-      for (const d of datum) {
-        for (const item of aslist(t.items)) {
-          if (!this.validate(item, d, raise_ex)) {
-            return false;
-          }
-        }
-      }
-      return true;
-    }
-    return false;
-  }
   async handle_union(
     schema: CommandInputParameter,
     datum: CWLObjectType | CWLObjectType[],
@@ -254,7 +186,7 @@ export class Builder {
         t = this.schemaDefs[t.name];
       }
 
-      if (this.validate(t, datum, false)) {
+      if (validate(t, datum, false)) {
         schema = JSON.parse(JSON.stringify(schema));
         schema['type'] = t;
         if (!value_from_expression) {
@@ -295,7 +227,7 @@ export class Builder {
     let value_from_expression = false;
 
     if ('inputBinding' in schema && typeof schema['inputBinding'] === 'object') {
-      [binding, value_from_expression] = this.handle_binding(schema, datum, lead_pos, tail_pos, debug);
+      [binding, value_from_expression] = await this.handle_binding(schema, datum, lead_pos, tail_pos, debug);
     }
 
     if (Array.isArray(schema['type'])) {
@@ -355,11 +287,11 @@ export class Builder {
         return f;
       };
 
-      if (schema['type'] == 'org.w3id.cwl.cwl.File') {
+      if (schema['type'] == 'File') {
         await this.handleFile(schema, datum, discover_secondaryFiles, debug, binding);
       }
 
-      if (schema['type'] == 'org.w3id.cwl.cwl.Directory') {
+      if (schema['type'] == 'Directory') {
         datum = this.handle_directory(schema, datum);
       }
 
@@ -383,9 +315,9 @@ export class Builder {
       schema['items'] = 'Any';
     } else if (datum instanceof Object) {
       if (datum['class'] === 'File') {
-        schema.type = 'org.w3id.cwl.cwl.File';
+        schema.type = 'File';
       } else if (datum['class'] === 'Directory') {
-        schema.type = 'org.w3id.cwl.cwl.Directory';
+        schema.type = 'Directory';
       } else {
         schema.type = 'record';
         const fields = Object.keys(datum).map((field_name) => {
@@ -643,7 +575,7 @@ export class Builder {
     bindings: CommandLineBinding[],
   ): Promise<any> {
     for (const f of schema.fields) {
-      const name = f.name;
+      const name = get_filed_name(f.name);
       if (name in datum && datum[name] !== null) {
         const bs = await this.bind_input(f, datum[name], discover_secondaryFiles, lead_pos, name);
         bindings.push(...bs);
@@ -666,7 +598,7 @@ export class Builder {
     if (isString(schema.type) || Array.isArray(schema.type)) {
       throw new Error('Error');
     }
-    const st = deepcopy(schema.type);
+    const st = schema.type;
     if (binding && !st.inputBinding && st.type == 'array' && binding.itemSeparator === undefined) {
       st.inputBinding = new cwlTsAuto.InputBinding({});
     }
@@ -682,13 +614,13 @@ export class Builder {
       bindings.push(...bs);
     }
   }
-  handle_binding(
+  async handle_binding(
     schema: CommandInputParameter,
     datum: any,
     lead_pos: number | number[] | undefined,
     tail_pos: string | number[] | undefined,
     debug: any,
-  ): [CommandLineBinded, boolean] {
+  ): Promise<[CommandLineBinded, boolean]> {
     const binding = schema.inputBinding;
     const binded = CommandLineBinded.fromBinding(binding);
 
@@ -696,7 +628,7 @@ export class Builder {
     if (binding.position) {
       const position = binding.position;
       if (typeof position === 'string') {
-        const result = this.do_eval(position, datum);
+        const result = await this.do_eval(position, datum);
         if (typeof result !== 'number') {
           throw new WorkflowException(
             "'position' expressions must evaluate to an int, " +

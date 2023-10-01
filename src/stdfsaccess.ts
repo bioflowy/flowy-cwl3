@@ -92,6 +92,6 @@ export class StdFsAccess {
   }
 
   realpath(p: string): string {
-    return path.resolve(p);
+    return fs.realpathSync(p);
   }
 }

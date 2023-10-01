@@ -380,7 +380,7 @@ function url2pathname(url: string): string {
 export function get_listing(fs_access: StdFsAccess, rec: any, recursive = true) {
   if (rec['class'] != 'Directory') {
     const finddirs: CWLObjectType[] = [];
-    visit_class(rec, ['Directory'], finddirs.push);
+    visit_class(rec, ['Directory'], (val) => finddirs.push(val));
     for (let _i = 0, finddirs_1 = finddirs; _i < finddirs_1.length; _i++) {
       const f = finddirs_1[_i];
       get_listing(fs_access, f, recursive);
@@ -556,6 +556,29 @@ export function ensureWritable(targetPath: string, includeRoot = false): void {
   } else {
     addWritableFlag(targetPath);
   }
+}
+export function trim_listing(obj: object) {
+  //
+  // Remove 'listing' field from Directory objects that are file references.
+  //
+  // It redundant and potentially expensive to pass fully enumerated Directory
+  // objects around if not explicitly needed, so delete the 'listing' field when
+  // it is safe to do so.
+  //
+  const location = obj['location'];
+  if (isString(location) && location.startsWith('file://') && 'listing' in obj) {
+    delete obj['listing'];
+  }
+}
+
+/**
+ * parse id(file:///home/foo/bar.cwl#step1/name1) and return name(name1)
+ * @param id
+ * @returns
+ */
+export function get_filed_name(id: string): string {
+  const name = id.substring(id.indexOf('#'), id.length).split('/').pop();
+  return name;
 }
 
 export function ensure_non_writable(targetPath: string): void {

@@ -708,7 +708,7 @@ export class WorkflowJob {
 
         const fs_access = getDefault(runtimeContext.make_fs_access, make_default_fs_access)('');
         for (const k in io) {
-          if (k in loadContents) {
+          if (loadContents.has(k)) {
             const val: CWLObjectType = io[k] as CWLObjectType;
             if (!val['contents']) {
               // Assuming fs_access.open() returns something that can be used within a TypeScript async context
@@ -721,7 +721,7 @@ export class WorkflowJob {
           if (k in valueFrom) {
             adjustDirObjs(v, (val) => get_listing(val, fs_access, true));
             const [inline] = getRequirement(this.workflow, cwlTsAuto.InlineJavascriptRequirement);
-            return do_eval(valueFrom[k], shortio, inline, null, null, {}, v, runtimeContext.debug);
+            return do_eval(valueFrom[k], shortio, inline, null, null, {}, v);
           }
           return v;
         };

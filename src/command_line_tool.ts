@@ -29,6 +29,7 @@ import {
   getRequirement,
   type JobsType,
 } from './utils.js';
+import { validate } from './validate.js';
 export class ExpressionJob {
   builder: Builder;
   script: string;
@@ -460,7 +461,7 @@ export class CommandLineTool extends Process {
             }
           }
           if (filelist) {
-            if ('entryname' in t) {
+            if (t['entryname']) {
               throw new WorkflowException("'entryname' is invalid when 'entry' returns list of File or Directory");
             }
             for (const e of entry) {
@@ -488,7 +489,7 @@ export class CommandLineTool extends Process {
           }
         }
 
-        if (t.hasOwnProperty('entryname')) {
+        if (t['entryname']) {
           const entryname_field = t['entryname'] as string;
           if (entryname_field.includes('${') || entryname_field.includes('$(')) {
             const en = await builder.do_eval(t['entryname'] as string);
@@ -1117,7 +1118,8 @@ export class CommandLineTool extends Process {
   ): Promise<OutputPortsType> {
     let ret: OutputPortsType = {};
     const debug = _logger.isDebugEnabled();
-    const cwl_version = 'v1.2';
+    builder.resources['exitCode'] = rcode;
+
     try {
       const fs_access = new builder.make_fs_access(outdir);
       const custom_output = fs_access.join(outdir, 'cwl.output.json');
@@ -1146,13 +1148,7 @@ export class CommandLineTool extends Process {
           adjustFileObjs(ret, async (val) => compute_checksums(fs_access, val));
         }
         // const expected_schema = ((this.names.get_name("outputs_record_schema", null)) as Schema);
-        // validate_ex(
-        //     expected_schema,
-        //     ret,
-        //     false,
-        //     _logger_validation_warnings,
-        //     INPUT_OBJ_VOCAB,
-        // );
+        validate(this.outputs_record_schema, ret, false);
         if (ret && builder.mutation_manager) {
           adjustFileObjs(ret, builder.mutation_manager.set_generation);
         }
@@ -1433,7 +1429,7 @@ export class CommandLineTool extends Process {
       await this.handle_output_format(schema, builder, result);
       adjustFileObjs(result, revmap);
       if (optional && (!result || (result instanceof Array && result.length === 0))) {
-        return undefined;
+        return null;
       }
     }
     if (!result && !empty_and_optional && typeof schema.type === 'object' && schema.type['type'] === 'record') {

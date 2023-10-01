@@ -61,7 +61,7 @@ function _convert_stdstreams_to_files(tool: cwlTsAuto.CommandLineTool) {
       if (tool.stdin) {
         throw new ValidationException('Not allowed to specify stdin path when using stdin type shortcut.');
       } else {
-        tool.stdin = inp.id.split('#').pop()?.split('/').pop();
+        tool.stdin = `$(inputs.${inp.id.split('#').pop()?.split('/').pop()}.path)`;
         inp.type = 'File';
       }
     }
@@ -353,7 +353,7 @@ export class WorkflowStep extends Process {
     for (const parent_req of parent_requirements) {
       let found_in_step = false;
       for (const step_req of loadingContext.requirements) {
-        if (parent_req['class'] === step_req['class']) {
+        if (parent_req.class_ === step_req.class_) {
           found_in_step = true;
           break;
         }

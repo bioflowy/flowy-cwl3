@@ -1,8 +1,7 @@
 import cwlTsAuto from 'cwl-ts-auto';
 import type { Dictionary } from 'cwl-ts-auto/dist/util/Dict.js';
 import type { CWLOutputType } from './utils.js';
-
-export type ToolRequirement = (
+export type ToolRequirementEntity =
   | cwlTsAuto.InlineJavascriptRequirement
   | cwlTsAuto.SchemaDefRequirement
   | cwlTsAuto.LoadListingRequirement
@@ -19,8 +18,9 @@ export type ToolRequirement = (
   | cwlTsAuto.SubworkflowFeatureRequirement
   | cwlTsAuto.ScatterFeatureRequirement
   | cwlTsAuto.MultipleInputFeatureRequirement
-  | cwlTsAuto.StepInputExpressionRequirement
-)[];
+  | cwlTsAuto.StepInputExpressionRequirement;
+
+export type ToolRequirement = ToolRequirementEntity[];
 export type ToolType =
   | cwlTsAuto.CWLType
   | cwlTsAuto.stdin
@@ -53,6 +53,41 @@ export class CommandLineBinded {
     transferClassProperties(binding, t);
     return t;
   }
+}
+export function createRequirements(element: any): ToolRequirementEntity {
+  const clazz = element['class'];
+  if (clazz === 'EnvVarRequirement') {
+    return new cwlTsAuto.EnvVarRequirement(element);
+  } else if (clazz === 'InlineJavascriptRequirement') {
+    return new cwlTsAuto.InlineJavascriptRequirement(element);
+  } else if (clazz === 'SchemaDefRequirement') {
+    return new cwlTsAuto.SchemaDefRequirement(element);
+  } else if (clazz === 'LoadListingRequirement') {
+    return new cwlTsAuto.LoadListingRequirement(element);
+  } else if (clazz === 'DockerRequirement') {
+    return new cwlTsAuto.DockerRequirement(element);
+  } else if (clazz === 'SoftwareRequirement') {
+    return new cwlTsAuto.SoftwareRequirement(element);
+  } else if (clazz === 'InitialWorkDirRequirement') {
+    return new cwlTsAuto.InitialWorkDirRequirement(element);
+  } else if (clazz === 'ResourceRequirement') {
+    return new cwlTsAuto.ResourceRequirement(element);
+  } else if (clazz === 'WorkReuse') {
+    return new cwlTsAuto.WorkReuse(element);
+  } else if (clazz === 'NetworkAccess') {
+    return new cwlTsAuto.NetworkAccess(element);
+  } else if (clazz === 'ToolTimeLimit') {
+    return new cwlTsAuto.ToolTimeLimit(element);
+  } else if (clazz === 'SubworkflowFeatureRequirement') {
+    return new cwlTsAuto.SubworkflowFeatureRequirement(element);
+  } else if (clazz === 'ScatterFeatureRequirement') {
+    return new cwlTsAuto.ScatterFeatureRequirement(element);
+  } else if (clazz === 'MultipleInputFeatureRequirement') {
+    return new cwlTsAuto.MultipleInputFeatureRequirement(element);
+  } else if (clazz === 'StepInputExpressionRequirement') {
+    return new cwlTsAuto.StepInputExpressionRequirement(element);
+  }
+  return undefined;
 }
 export function compareInputBinding(a: CommandLineBinded, b: CommandLineBinded): number {
   if (!a.positions) {

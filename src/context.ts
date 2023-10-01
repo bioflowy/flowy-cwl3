@@ -55,7 +55,14 @@ function set_log_dir(outdir: string, log_dir: string, subdir_name: string): stri
 export class LoadingContext extends ContextBase {
   debug = false;
   metadata: CWLObjectType = {};
-  requirements: ToolRequirement = [];
+  _requirements: ToolRequirement = [];
+  get requirements(): ToolRequirement {
+    return this._requirements;
+  }
+
+  set requirements(value: ToolRequirement) {
+    this._requirements = value;
+  }
   hints: ToolRequirement = [];
   disable_js_validation = false;
   js_hint_options_file: string | null = null;

@@ -44,6 +44,11 @@ export async function loadDocument(
         return [await default_make_tool(doc[index], loadingContext), 'success'];
       }
     }
+    for (let index = 0; index < doc.length; index++) {
+      if (doc[index].id.endsWith('#main')) {
+        return [await default_make_tool(doc[index], loadingContext), 'success'];
+      }
+    }
   } else {
     return [await default_make_tool(doc, loadingContext), 'success'];
   }

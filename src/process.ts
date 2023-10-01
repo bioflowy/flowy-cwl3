@@ -19,7 +19,6 @@ import { _logger } from './loghandler.js';
 
 import { convertFileDirectoryToDict } from './main.js';
 import { MapperEnt, PathMapper } from './pathmapper.js';
-import { make_valid_avro } from './schema.js';
 import { StdFsAccess } from './stdfsaccess.js';
 
 import {
@@ -55,6 +54,7 @@ import {
   visit_class_promise,
   isString,
 } from './utils.js';
+import { validate } from './validate.js';
 
 const _logger_validation_warnings = _logger;
 
@@ -303,7 +303,8 @@ export async function relocateOutputs(
 
     let src_can_deleted = false;
     for (const p of source_directories) {
-      if (commonPrefix([p, src]) === p) {
+      const common = commonPrefix([p, src]);
+      if (common === p) {
         src_can_deleted = true;
       }
     }
@@ -337,9 +338,9 @@ export async function relocateOutputs(
   function _realpath(ob: CWLObjectType): void {
     const location = ob['location'] as string;
     if (location.startsWith('file:')) {
-      ob['location'] = fileUri(path.resolve(uriFilePath(location)));
+      ob['location'] = fileUri(fs.realpathSync(uriFilePath(location)));
     } else if (location.startsWith('/')) {
-      ob['location'] = path.resolve(location);
+      ob['location'] = fs.realpathSync(location);
     } else if (!location.startsWith('_:') && location.includes(':')) {
       ob['location'] = fileUri(fs_access.realpath(location));
     }
@@ -348,7 +349,7 @@ export async function relocateOutputs(
   const outfiles = Array.from(_collectDirEntries(outputObj));
   visit_class(outfiles, ['File', 'Directory'], _realpath);
   const pm = new PathMapper(outfiles, '', destination_path, false);
-  stage_files(pm, _relocate, false, false, true);
+  stage_files(pm, _relocate, true, true, false);
 
   function _check_adjust(a_file: CWLObjectType): CWLObjectType {
     a_file['location'] = fileUri(pm.mapper(a_file['location'] as string)?.target ?? '');
@@ -376,13 +377,13 @@ export function cleanIntermediate(output_dirs: Iterable<string>): void {
 }
 
 export function add_sizes(fsaccess: StdFsAccess, obj: CWLObjectType): void {
-  if ('location' in obj) {
+  if (obj['location']) {
     try {
-      if (!('size' in obj)) {
+      if (!obj['size']) {
         obj['size'] = fsaccess.size(String(obj['location']));
       }
     } catch (e) {}
-  } else if ('contents' in obj) {
+  } else if (obj['contents']) {
     obj['size'] = (obj['contents'] as string).length;
   }
   // best effort
@@ -419,17 +420,17 @@ function avroizeType(fieldType: ToolType | null, namePrefix = ''): ToolType {
         fieldType['name'] = namePrefix + r;
       }
     }
+
     if (fieldType instanceof cwlTsAuto.CommandInputRecordSchema) {
       fieldType.fields = avroizeType(fieldType.fields as any, namePrefix) as any;
-    } else if (fieldType instanceof cwlTsAuto.CommandInputArraySchema) {
+    } else if (
+      fieldType instanceof cwlTsAuto.CommandInputArraySchema ||
+      fieldType instanceof cwlTsAuto.InputArraySchema
+    ) {
       fieldType.items = avroizeType(fieldType.items, namePrefix);
     } else {
       fieldType.type = avroizeType(fieldType.type, namePrefix) as any;
     }
-  } else if (fieldType === 'File') {
-    return 'org.w3id.cwl.cwl.File';
-  } else if (fieldType === 'Directory') {
-    return 'org.w3id.cwl.cwl.Directory';
   }
   return fieldType;
 }
@@ -475,7 +476,7 @@ function var_spool_cwl_detector(obj: unknown, item: any = null, obj_key: any = n
 async function eval_resource(builder: Builder, resource_req: string | number): Promise<string | number | null> {
   if (typeof resource_req === 'string' && needs_parsing(resource_req)) {
     const result = await builder.do_eval(resource_req);
-    if (typeof result === 'number') {
+    if (typeof result === 'number' && !Number.isInteger(result)) {
       throw new WorkflowException(
         `Floats are not valid in resource requirement expressions prior 
                  to CWL v1.2: ${resource_req} returned ${result}.`,
@@ -581,26 +582,24 @@ export abstract class Process {
       const sdtypes = sd.types;
       avroizeType(sdtypes);
       const alltypes = {};
-      make_valid_avro(sdtypes, alltypes, new Set(), false, false, INPUT_OBJ_VOCAB);
       for (const t of sdtypes) {
         this.schemaDefs[t.name] = t;
       }
     }
     // Build record schema from inputs
 
-    this.inputs_record_schema = {
-      name: 'input_record_schema',
-      type: 'record',
+    this.inputs_record_schema = new cwlTsAuto.CommandInputRecordSchema({
+      name: 'inputs_record_schema',
+      type: 'record' as any,
       fields: [],
-    };
+    });
     this.outputs_record_schema = {
       name: 'outputs_record_schema',
       type: 'record',
       fields: [],
     };
 
-    for (const i of this.tool.inputs) {
-      const c = { ...i };
+    for (const c of this.tool.inputs) {
       if (!c.type) {
         throw new Error(`Missing 'type' in parameter '${c.name}'`);
       }
@@ -612,7 +611,6 @@ export abstract class Process {
       }
 
       c.type = avroizeType(c.type, c.name);
-      make_valid_avro(c.type, {}, new Set(), false, false, {});
       this.inputs_record_schema.fields.push(c);
     }
     for (const i of this.tool.outputs) {
@@ -622,7 +620,6 @@ export abstract class Process {
       }
 
       c.type = avroizeType(c.type, c.name);
-      make_valid_avro(c.type, {}, new Set(), false, false, {});
 
       (this.outputs_record_schema['fields'] as any).push(c);
     }
@@ -711,17 +708,11 @@ export abstract class Process {
       fill_in_defaults(this.tool.inputs, job, fs_access);
       convertFileDirectoryToDict(job);
       normalizeFilesDirs(job);
-      // const schema = this.names.get_name('input_record_schema', null);
-      // if (schema == null) {
-      //   throw new WorkflowException(`Missing input record schema: ${this.names}`);
-      // }
-      // validate_ex(
-      //     schema,
-      //     job,
-      //     false,
-      //     _logger_validation_warnings,
-      //     INPUT_OBJ_VOCAB,
-      // );
+      const schema = this.inputs_record_schema;
+      if (schema == null) {
+        throw new WorkflowException(`Missing input record schema`);
+      }
+      validate(schema, job, false);
 
       if (load_listing != 'no_listing') {
         get_listing(fs_access, job, load_listing == 'deep_listing');

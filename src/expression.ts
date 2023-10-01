@@ -384,6 +384,7 @@ export async function do_eval(
     } catch (e: any) {
       _logger.error(e);
       if (e instanceof Error) {
+        _logger.error(`${e.stack}`);
         throw new WorkflowException(`Expression evaluation error:\n${e.message}`);
       } else {
         throw e;

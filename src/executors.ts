@@ -6,6 +6,7 @@ import { ValidationException, WorkflowException } from './errors.js';
 import { JobBase } from './job.js';
 import { _logger } from './loghandler.js';
 import { Process, cleanIntermediate, relocateOutputs } from './process.js';
+import { createRequirements } from './types.js';
 import { type CWLObjectType, type MutableSequence } from './utils.js';
 
 class JobExecutor {
@@ -74,34 +75,18 @@ class JobExecutor {
     //    runtime_context.mutation_manager = new MutationManager();
     runtime_context.toplevel = true;
 
-    // let job_reqs: CWLObjectType[] | null = null;
-    // if ('https://w3id.org/cwl/cwl#requirements' in job_order_object) {
-    //   if (process.metadata.get(ORIGINAL_CWLVERSION) === 'v1.0') {
-    //     throw new WorkflowException(
-    //       '`cwl:requirements` in the input object is not part of CWL ' +
-    //         'v1.0. You can adjust to use `cwltool:overrides` instead; or you ' +
-    //         'can set the cwlVersion to v1.1',
-    //     );
-    //   }
-    //   job_reqs = job_order_object['https://w3id.org/cwl/cwl#requirements'] as CWLObjectType[];
-    // } else if (
-    //   'cwl:defaults' in process.metadata &&
-    //   'https://w3id.org/cwl/cwl#requirements' in process.metadata['cwl:defaults']
-    // ) {
-    //   if (process.metadata.get(ORIGINAL_CWLVERSION) === 'v1.0') {
-    //     throw new WorkflowException(
-    //       '`cwl:requirements` in the input object is not part of CWL ' +
-    //         'v1.0. You can adjust to use `cwltool:overrides` instead; or you ' +
-    //         'can set the cwlVersion to v1.1',
-    //     );
-    //   }
-    //   job_reqs = process.metadata['cwl:defaults']['https://w3id.org/cwl/cwl#requirements'];
-    // }
-    // if (job_reqs !== null) {
-    //   for (const req of job_reqs) {
-    //     process.requirements.push(req);
-    //   }
-    // }
+    let job_reqs: CWLObjectType[] | null = null;
+    if ('cwl:requirements' in job_order_object) {
+      job_reqs = job_order_object['cwl:requirements'] as CWLObjectType[];
+    }
+    if (job_reqs !== null) {
+      for (const req of job_reqs) {
+        const r = createRequirements(req);
+        if (r) {
+          process.requirements.push(r);
+        }
+      }
+    }
 
     await this.run_jobs(process, job_order_object, logger, runtime_context);
 
