@@ -569,8 +569,9 @@ export class WorkflowJob {
     this.made_progress = null;
     this.outdir = runtimeContext.getOutdir();
 
-    this.name = uniquename(`workflow ${getDefault(runtimeContext.name, shortname(this.workflow.tool.id || 'embedded'))}
-        `);
+    this.name = uniquename(
+      `workflow ${getDefault(runtimeContext.name, shortname(this.workflow.tool.id || 'embedded'))}`,
+    );
 
     _logger.debug(
       '[%s] initialized from %s',

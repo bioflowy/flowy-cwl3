@@ -226,7 +226,7 @@ export class Builder {
     let binding: CommandLineBinded | undefined;
     let value_from_expression = false;
 
-    if ('inputBinding' in schema && typeof schema['inputBinding'] === 'object') {
+    if (schema.inputBinding && typeof schema.inputBinding === 'object') {
       [binding, value_from_expression] = await this.handle_binding(schema, datum, lead_pos, tail_pos, debug);
     }
 
@@ -426,7 +426,7 @@ export class Builder {
     debug: boolean,
   ): Promise<void> {
     let sf_schema: SecondaryFileSchema[] = [];
-    if (!('secondaryFiles' in datum)) {
+    if (!datum['secondaryFiles']) {
       datum['secondaryFiles'] = [];
       sf_schema = aslist(schema.secondaryFiles);
     } else if (!discover_secondaryFiles) {
@@ -603,7 +603,7 @@ export class Builder {
       st.inputBinding = new cwlTsAuto.InputBinding({});
     }
     for (const k of ['secondaryFiles', 'format', 'streamable']) {
-      if (k in schema) {
+      if (schema[k]) {
         st[k] = schema[k];
       }
     }
@@ -748,7 +748,7 @@ export class Builder {
     }
 
     let resources = this.resources;
-    if (this.resources && 'cores' in this.resources) {
+    if (this.resources && this.resources['cores']) {
       const cores = resources['cores'];
       resources = { ...resources };
       resources['cores'] = Math.ceil(cores);

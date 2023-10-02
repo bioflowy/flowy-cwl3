@@ -108,7 +108,7 @@ class JobExecutor {
       } else {
         output_dirs = this.output_dirs.filter((x) => !x.startsWith(runtime_context.cachedir));
       }
-      cleanIntermediate(output_dirs);
+      await cleanIntermediate(output_dirs);
     }
 
     if (this.final_output && this.final_status) {

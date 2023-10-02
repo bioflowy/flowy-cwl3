@@ -1,11 +1,20 @@
 import * as path from 'node:path';
-import cwlTsAuto, { DockerRequirement, InplaceUpdateRequirement, WorkReuse } from 'cwl-ts-auto';
+import cwlTsAuto, {
+  Directory,
+  Dirent,
+  DockerRequirement,
+  File,
+  InitialWorkDirRequirement,
+  InplaceUpdateRequirement,
+  WorkReuse,
+} from 'cwl-ts-auto';
 import { Builder, contentLimitRespectedReadBytes, substitute } from './builder.js';
 import { LoadingContext, RuntimeContext, getDefault } from './context.js';
 import { DockerCommandLineJob, PodmanCommandLineJob } from './docker.js';
 import { UnsupportedRequirement, ValidationException, WorkflowException } from './errors.js';
 import { CommandLineJob, JobBase } from './job.js';
 import { _logger } from './loghandler.js';
+import { convertFileDirectoryToDict } from './main.js';
 import { PathMapper } from './pathmapper.js';
 import { Process, compute_checksums, shortname, uniquename } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
@@ -429,30 +438,28 @@ export class CommandLineTool extends Process {
     return ls_evaluated as CWLObjectType[];
   }
   async evaluate_listing_expr_or_dirent(
-    initialWorkdir: any,
+    initialWorkdir: InitialWorkDirRequirement,
     builder: Builder,
-    classic_dirent: any,
-    classic_listing: any,
-    debug: any,
+    classic_dirent: boolean,
   ): Promise<CWLObjectType[]> {
     const ls: CWLObjectType[] = [];
 
-    for (const t of initialWorkdir['listing'] as (string | CWLObjectType)[]) {
-      if (t instanceof Object && 'entry' in t) {
-        const entry_field: string = t['entry'] as string;
+    for (const t of aslist(initialWorkdir.listing)) {
+      if (t instanceof Dirent) {
+        if (!t.entry) {
+          /**
+           * * If the value is an expression that evaluates to `null`,
+           * nothing is added to the designated output directory, the entry
+           * has no effect.
+           */
+          continue;
+        }
+        const entry_field: string = t.entry;
         const entry = await builder.do_eval(entry_field, undefined, false, false);
         if (entry === null) {
           continue;
         }
         if (entry instanceof Array) {
-          if (classic_listing) {
-            throw new WorkflowException(
-              "'entry' expressions are not allowed to evaluate " +
-                'to an array of Files or Directories until CWL ' +
-                "v1.2. Consider using 'cwl-upgrader' to upgrade " +
-                'your document to CWL version 1.2.',
-            );
-          }
           let filelist = true;
           for (const e of entry) {
             if (!(e instanceof Object) || !['File', 'Directory'].includes(e['class'])) {
@@ -461,7 +468,7 @@ export class CommandLineTool extends Process {
             }
           }
           if (filelist) {
-            if (t['entryname']) {
+            if (t.entryname) {
               throw new WorkflowException("'entryname' is invalid when 'entry' returns list of File or Directory");
             }
             for (const e of entry) {
@@ -474,8 +481,8 @@ export class CommandLineTool extends Process {
         }
         const et: CWLObjectType = {} as CWLObjectType;
 
-        if (entry instanceof Object && ['File', 'Directory'].includes(entry['class'])) {
-          et['entry'] = entry as CWLOutputType;
+        if (['File', 'Directory'].includes(entry['class'])) {
+          et['entry'] = entry;
         } else {
           if (typeof entry === 'string') {
             et['entry'] = entry;
@@ -489,10 +496,10 @@ export class CommandLineTool extends Process {
           }
         }
 
-        if (t['entryname']) {
-          const entryname_field = t['entryname'] as string;
+        if (t.entryname) {
+          const entryname_field = t.entryname;
           if (entryname_field.includes('${') || entryname_field.includes('$(')) {
-            const en = await builder.do_eval(t['entryname'] as string);
+            const en = await builder.do_eval(t.entryname);
             if (typeof en !== 'string') {
               throw new WorkflowException(
                 `'entryname' expression must result a string. Got ${en} from ${entryname_field}`,
@@ -507,7 +514,7 @@ export class CommandLineTool extends Process {
         }
         et['writable'] = t['writable'] || false;
         ls.push(et);
-      } else {
+      } else if (isString(t)) {
         const initwd_item = await builder.do_eval(t);
         if (!initwd_item) {
           continue;
@@ -516,6 +523,14 @@ export class CommandLineTool extends Process {
           ls.push(...(initwd_item as CWLObjectType[]));
         } else {
           ls.push(initwd_item as CWLObjectType);
+        }
+      } else {
+        if (Array.isArray(t)) {
+          for (const f of t) {
+            ls.push(convertFileDirectoryToDict(f));
+          }
+        } else {
+          ls.push(convertFileDirectoryToDict(t));
         }
       }
     }
@@ -580,7 +595,7 @@ export class CommandLineTool extends Process {
           `Entry at index ${i} of listing is not a Dirent, File or ` + `Directory object, was ${t3}.`,
         );
       }
-      if (!('basename' in t3)) continue;
+      if (!t3['basename']) continue;
       const basename = path.normalize(t3['basename'] as string);
       t3['basename'] = basename;
       if (basename.startsWith('../')) {
@@ -608,7 +623,7 @@ export class CommandLineTool extends Process {
 
   setup_output_items(initialWorkdir: cwlTsAuto.InitialWorkDirRequirement, builder: Builder, ls: CWLObjectType[]): void {
     for (const entry of ls) {
-      if ('basename' in entry) {
+      if (entry['basename']) {
         const basename = entry['basename'] as string;
         entry['dirname'] = path.join(builder.outdir, path.dirname(basename));
         entry['basename'] = path.basename(basename);
@@ -644,7 +659,7 @@ export class CommandLineTool extends Process {
     if (typeof initialWorkdir.listing === 'string') {
       ls = await this.evaluate_listing_string(initialWorkdir, builder, classic_dirent, classic_listing, debug);
     } else {
-      ls = await this.evaluate_listing_expr_or_dirent(initialWorkdir, builder, classic_dirent, classic_listing, debug);
+      ls = await this.evaluate_listing_expr_or_dirent(initialWorkdir, builder, classic_dirent);
     }
 
     this.check_output_items(initialWorkdir, ls);

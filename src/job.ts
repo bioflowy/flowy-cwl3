@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { DockerRequirement, ShellCommandRequirement } from 'cwl-ts-auto';
 import fsExtra from 'fs-extra';
+import { remove } from 'lodash';
 import { v4 as uuidv4 } from 'uuid';
 import { Builder } from './builder.js';
 import { RuntimeContext } from './context.js';
@@ -21,35 +22,40 @@ import {
   ensure_non_writable,
   stage_files,
   getRequirement,
+  removeIgnorePermissionError,
 } from './utils.js';
 // ... and so on for other modules
 const needsShellQuotingRe = /(^$|[\s|&;()<>\'"$@])/;
 
-function relink_initialworkdir(
+async function relink_initialworkdir(
   pathmapper: PathMapper,
   host_outdir: string,
   container_outdir: string,
   inplace_update = false,
-): void {
+): Promise<void> {
   for (const [key, vol] of pathmapper.items_exclude_children()) {
     if (!vol.staged) {
       continue;
     }
-    if (vol.type in ['File', 'Directory'] || (inplace_update && vol.type in ['WritableFile', 'WritableDirectory'])) {
+    if (
+      ['File', 'Directory'].includes(vol.type) ||
+      (inplace_update && ['WritableFile', 'WritableDirectory'].includes(vol.type))
+    ) {
       if (!vol.target.startsWith(container_outdir)) {
         continue;
       }
       const host_outdir_tgt = path.join(host_outdir, vol.target.substr(container_outdir.length + 1));
-      if (fs.lstatSync(host_outdir_tgt).isSymbolicLink() || fs.lstatSync(host_outdir_tgt).isFile()) {
+      const stat = fs.existsSync(host_outdir_tgt) ? fs.lstatSync(host_outdir_tgt) : undefined;
+      if (stat && (stat.isSymbolicLink() || stat.isFile())) {
         // eslint-disable-next-line no-useless-catch
         try {
-          fs.unlinkSync(host_outdir_tgt);
+          await fs.promises.unlink(host_outdir_tgt);
         } catch (e) {
           throw e;
           // if (e.code !== 'EPERM') throw e;
         }
-      } else if (fs.lstatSync(host_outdir_tgt).isDirectory() && !vol.resolved.startsWith('_:')) {
-        fs.rmdirSync(host_outdir_tgt, { recursive: true });
+      } else if (stat && stat.isDirectory() && !vol.resolved.startsWith('_:')) {
+        await removeIgnorePermissionError(host_outdir_tgt);
       }
       if (!vol.resolved.startsWith('_:')) {
         try {
@@ -361,7 +367,7 @@ export abstract class JobBase {
 
       if (this.generatefiles.listing) {
         if (this.generatemapper) {
-          relink_initialworkdir(this.generatemapper, this.outdir, this.builder.outdir, this.inplace_update);
+          await relink_initialworkdir(this.generatemapper, this.outdir, this.builder.outdir, this.inplace_update);
         } else {
           throw new ValueError(`'listing' in self.generatefiles but no generatemapper was setup.`);
         }
@@ -384,7 +390,6 @@ export abstract class JobBase {
     } catch (err) {
       if (err instanceof Error) {
         _logger.error(`[job ${this.name}] Job error${err.message}\n${err.stack}`);
-        console.log(err);
       }
       processStatus = 'permanentFail';
     }
@@ -440,12 +445,12 @@ export abstract class JobBase {
 
     if (runtimeContext.rm_tmpdir && this.stagedir !== undefined && fs.existsSync(this.stagedir)) {
       _logger.debug(`[job ${this.name}] Removing input staging directory ${this.stagedir}`);
-      await fsExtra.remove(this.stagedir);
+      await removeIgnorePermissionError(this.stagedir);
     }
 
     if (runtimeContext.rm_tmpdir) {
       _logger.debug(`[job ${this.name}] Removing temporary directory ${this.tmpdir}`);
-      await fsExtra.remove(this.tmpdir);
+      await removeIgnorePermissionError(this.tmpdir);
     }
   }
   abstract _required_env(): Record<string, string>;

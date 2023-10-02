@@ -5,6 +5,7 @@ import * as cwlTsAuto from 'cwl-ts-auto';
 import fsExtra from 'fs-extra/esm';
 import ivm from 'isolated-vm';
 import yaml from 'js-yaml';
+import jsYaml from 'js-yaml';
 import { createLogger, format, transports } from 'winston';
 import { CommandLineTool } from './command_line_tool.js';
 import { LoadingContext, RuntimeContext } from './context.js';
@@ -49,8 +50,12 @@ function convertToAbsPath(filePath: string, inputBaseDir: string): string {
   if (!filePath) {
     return filePath;
   }
+  let inputBaseDirUrl = filePathToURI(inputBaseDir);
+  if (!inputBaseDirUrl.endsWith('/')) {
+    inputBaseDirUrl = `${inputBaseDirUrl}/`;
+  }
   if (!filePath.startsWith('/')) {
-    filePath = path.join(inputBaseDir, filePath);
+    return `${inputBaseDirUrl}${filePath}`;
   }
   if (!filePath.startsWith('file://')) {
     filePath = pathToFileURL(filePath).toString();
@@ -126,7 +131,7 @@ export const convertFileDirectoryToDict = (obj: any) => {
     return file;
   } else if (obj instanceof cwlTsAuto.Directory) {
     const file = {
-      class: 'File',
+      class: 'Directory',
       location: obj.location,
       path: obj.path,
       basename: obj.basename,
@@ -134,10 +139,33 @@ export const convertFileDirectoryToDict = (obj: any) => {
     };
     return file;
   } else if (obj instanceof Object) {
-    for (const key of Object.keys(obj)) {
-      obj[key] = convertFileDirectoryToDict(obj[key]);
+    if (obj['class'] === 'File') {
+      return {
+        class: 'File',
+        location: obj.location,
+        basename: obj.basename,
+        dirname: obj.dirname,
+        checksum: obj.checksum,
+        size: obj.size,
+        secondaryFiles: obj.secondaryFiles,
+        format: obj.format,
+        path: obj.path,
+        contents: obj.contents,
+      };
+    } else if (obj['class'] === 'Directory') {
+      return {
+        class: 'Directory',
+        location: obj.location,
+        path: obj.path,
+        basename: obj.basename,
+        listing: obj.listing,
+      };
+    } else {
+      for (const key of Object.keys(obj)) {
+        obj[key] = convertFileDirectoryToDict(obj[key]);
+      }
+      return obj;
     }
-    return obj;
   }
   return obj;
 };
@@ -190,7 +218,23 @@ function init_job_order(
 function toJsonString(obj: object): string {
   return JSON.stringify(obj, null, 2);
 }
-function equals(expected: any, actual: any): boolean {
+function loadData(filePath: string): any {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`${filePath} dosen't exists`);
+  }
+  const fileContent = fs.readFileSync(filePath, 'utf-8');
+  const fileExtention = path.extname(filePath);
+  switch (fileExtention) {
+    case '.json':
+      return JSON.parse(fileContent);
+    case '.yaml':
+    case '.yml':
+      return yaml.load(fileContent);
+    default:
+      throw new Error(`Unexpected file extention ${fileExtention}`);
+  }
+}
+function equals(expected: any, actual: any, basedir: string): boolean {
   if (expected instanceof Array) {
     if (!(actual instanceof Array)) {
       return false;
@@ -199,11 +243,15 @@ function equals(expected: any, actual: any): boolean {
       return false;
     }
     for (let index = 0; index < expected.length; index++) {
-      if (!equals(expected[index], actual[index])) {
+      if (!equals(expected[index], actual[index], basedir)) {
         return false;
       }
     }
   } else if (expected instanceof Object) {
+    if (expected['$import']) {
+      const data_path = path.join(basedir, expected['$import']);
+      expected = loadData(data_path);
+    }
     if (!(actual instanceof Object)) {
       return false;
     }
@@ -216,7 +264,7 @@ function equals(expected: any, actual: any): boolean {
       if (key === 'location') {
         return actualValue.endsWith(expectedValue);
       }
-      if (!equals(expectedValue, actualValue)) {
+      if (!equals(expectedValue, actualValue, basedir)) {
         return false;
       }
     }
@@ -229,19 +277,17 @@ function cleanWorkdir(directory: string, expect: string[]) {
   const items = fs.readdirSync(directory);
   for (const item of items) {
     if (!expect.includes(item)) {
-      console.log(`remove ${item}`);
       fsExtra.removeSync(item);
     }
   }
 }
 export async function main(): Promise<number> {
-  // return do_test(path.join(process.cwd(), 'tests/secondaryfiles/test-index.yaml'), 0, -1);
-  return do_test(path.join(process.cwd(), 'conformance_tests.yaml'), 263, -1);
+  // return do_test(path.join(process.cwd(), 'tests/iwd/test-index.yaml'), 0, -1);
+  return do_test(path.join(process.cwd(), 'conformance_tests.yaml'), 236, -1);
 }
 export async function do_test(test_path: string, start = 0, end = -1): Promise<number> {
   const test_dir = path.dirname(test_path);
-  const content = fs.readFileSync(test_path, 'utf-8');
-  const data = yaml.load(content) as { [key: string]: any }[];
+  const data = loadData(test_path) as { [key: string]: any }[];
   for (let index = start; index < (end < 0 ? data.length : end); index++) {
     cleanWorkdir(process.cwd(), ['tests', 'conformance_tests.yaml']);
     const test = data[index];
@@ -275,7 +321,7 @@ export async function do_test(test_path: string, start = 0, end = -1): Promise<n
           continue;
         }
 
-        if (!equals(expected_outputs, output)) {
+        if (!equals(expected_outputs, output, test_dir)) {
           const expected_str = toJsonString(expected_outputs);
           const output_str = toJsonString(output as object);
           console.log(`index=${index}`);
@@ -303,7 +349,12 @@ export async function exec(tool_path: string, job_path: string): Promise<[CWLOut
     tool_path = path.join(process.cwd(), tool_path);
   }
   const [tool] = await loadDocument(tool_path, loadingContext);
-  const [job_order_object, input_basedir] = load_job_order(undefined, job_path);
+  const jo = load_job_order(undefined, job_path);
+  const job_order_object = jo[0];
+  let input_basedir = jo[1];
+  if (job_order_object == null) {
+    input_basedir = path.dirname(tool_path);
+  }
   const runtimeContext = new RuntimeContext({
     outdir: process.cwd(),
     secret_store: new SecretStore(),

@@ -53,6 +53,8 @@ import {
   ensureWritable,
   visit_class_promise,
   isString,
+  removeIgnorePermissionError,
+  removeSyncIgnorePermissionError,
 } from './utils.js';
 import { validate } from './validate.js';
 
@@ -161,9 +163,7 @@ export function shortname(inputid: string): string {
 function stage_files(
   pathmapper: PathMapper,
   stage_func?: (src: string, dest: string) => void,
-  ignore_writable = false,
-  symlink = true,
-  fix_conflicts = false,
+  { ignore_writable = false, symlink = true, fix_conflicts = false } = {},
 ): void {
   let items: [string, MapperEnt][] = symlink ? pathmapper.items_exclude_children() : pathmapper.items();
   const targets: { [key: string]: MapperEnt } = {};
@@ -324,7 +324,7 @@ export async function relocateOutputs(
       if (fs_access.isdir(src)) {
         const dstStat = fs.statSync(dst);
         if (dstStat.isDirectory()) {
-          fsExtra.removeSync(dst);
+          removeSyncIgnorePermissionError(dst);
         } else if (dstStat.isFile()) {
           fs.unlinkSync(dst);
         }
@@ -349,7 +349,7 @@ export async function relocateOutputs(
   const outfiles = Array.from(_collectDirEntries(outputObj));
   visit_class(outfiles, ['File', 'Directory'], _realpath);
   const pm = new PathMapper(outfiles, '', destination_path, false);
-  stage_files(pm, _relocate, true, true, false);
+  stage_files(pm, _relocate, { symlink: false, fix_conflicts: true });
 
   function _check_adjust(a_file: CWLObjectType): CWLObjectType {
     a_file['location'] = fileUri(pm.mapper(a_file['location'] as string)?.target ?? '');
@@ -367,11 +367,11 @@ export async function relocateOutputs(
   }
   return outputObj;
 }
-export function cleanIntermediate(output_dirs: Iterable<string>): void {
+export async function cleanIntermediate(output_dirs: Iterable<string>): Promise<void> {
   for (const a of output_dirs) {
     if (fs.existsSync(a)) {
       _logger.debug(`Removing intermediate output directory ${a}`);
-      fsExtra.removeSync(a);
+      await removeIgnorePermissionError(a);
     }
   }
 }

@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { CallbackJob, ExpressionJob } from './command_line_tool.js';
 import { ValidationException, WorkflowException } from './errors.js';
 import { CommandLineJob, JobBase } from './job.js';
+import { _logger } from './loghandler.js';
 import { MapperEnt, PathMapper } from './pathmapper.js';
 import { SecretStore } from './secrets.js';
 import { StdFsAccess } from './stdfsaccess.js';
@@ -387,7 +388,7 @@ export function get_listing(fs_access: StdFsAccess, rec: any, recursive = true) 
     }
     return;
   }
-  if ('listing' in rec) {
+  if (rec['listing']) {
     return;
   }
   const listing: CWLOutputAtomType[] = [];
@@ -413,6 +414,28 @@ export function get_listing(fs_access: StdFsAccess, rec: any, recursive = true) 
 }
 export function isMissingOrNull(obj: object, key: string) {
   return !(key in obj) || obj[key] === null;
+}
+export function removeSyncIgnorePermissionError(file_path: string) {
+  try {
+    fsExtra.removeSync(file_path);
+  } catch (e) {
+    if (e.code === 'EACCES' || e.code === 'EPERM') {
+      _logger.info(`Permission denied when trying remove outdir ${file_path}`);
+    } else {
+      throw e;
+    }
+  }
+}
+export async function removeIgnorePermissionError(file_path: string): Promise<void> {
+  try {
+    await fsExtra.remove(file_path);
+  } catch (e) {
+    if (e.code === 'EACCES' || e.code === 'EPERM') {
+      _logger.info(`Permission denied when trying remove outdir ${file_path}`);
+    } else {
+      throw e;
+    }
+  }
 }
 export function stage_files(
   pathmapper: PathMapper,
@@ -626,7 +649,7 @@ export function normalizeFilesDirs(
 
     let path2 = d['location'];
     try {
-      path2 = new URL(d['location']).pathname;
+      path2 = fileURLToPath(d['location']);
     } catch (e) {}
     // strip trailing slash
     if (path2.endsWith('/')) {

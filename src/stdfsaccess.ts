@@ -10,10 +10,9 @@ export function abspath(src: string, basedir: string): string {
     return src;
   } else {
     if (basedir.startsWith('file://')) {
-      abpath = src || (path.isAbsolute(src) ? `${basedir}/${src}` : path.join(basedir, src));
-    } else {
-      abpath = src || (path.isAbsolute(src) ? `${basedir}/${src}` : path.join(basedir, src));
+      basedir = url.fileURLToPath(basedir);
     }
+    abpath = path.isAbsolute(src) ? src : path.join(basedir, src);
   }
   return abpath;
 }
@@ -92,6 +91,10 @@ export class StdFsAccess {
   }
 
   realpath(p: string): string {
-    return fs.realpathSync(p);
+    if (fs.existsSync(p)) {
+      return fs.realpathSync(p);
+    } else {
+      return p;
+    }
   }
 }
