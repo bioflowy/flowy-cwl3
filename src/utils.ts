@@ -415,28 +415,6 @@ export function get_listing(fs_access: StdFsAccess, rec: any, recursive = true) 
 export function isMissingOrNull(obj: object, key: string) {
   return !(key in obj) || obj[key] === null;
 }
-export function removeSyncIgnorePermissionError(file_path: string) {
-  try {
-    fsExtra.removeSync(file_path);
-  } catch (e) {
-    if (e.code === 'EACCES' || e.code === 'EPERM') {
-      _logger.info(`Permission denied when trying remove outdir ${file_path}`);
-    } else {
-      throw e;
-    }
-  }
-}
-export async function removeIgnorePermissionError(file_path: string): Promise<void> {
-  try {
-    await fsExtra.remove(file_path);
-  } catch (e) {
-    if (e.code === 'EACCES' || e.code === 'EPERM') {
-      _logger.info(`Permission denied when trying remove outdir ${file_path}`);
-    } else {
-      throw e;
-    }
-  }
-}
 export function downloadHttpFile(httpurl: string): [string, Date] {
   // TODO
   // let cache_session = null;
@@ -473,12 +451,6 @@ export function downloadHttpFile(httpurl: string): [string, Date] {
   //     fs.utimesSync(tempFilePath, date_epoch, date_epoch);
   // }
   return ['tempFilePath', new Date()];
-}
-export function isdir(dir_path: string) {
-  return fs.existsSync(dir_path) && fs.lstatSync(dir_path).isDirectory();
-}
-export function isfile(file_path: string) {
-  return fs.existsSync(file_path) && fs.lstatSync(file_path).isFile();
 }
 export function ensureWritable(targetPath: string, includeRoot = false): void {
   //

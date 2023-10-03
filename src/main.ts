@@ -281,9 +281,25 @@ function cleanWorkdir(directory: string, expect: string[]) {
     }
   }
 }
-export async function main(): Promise<number> {
-  // return do_test(path.join(process.cwd(), 'tests/iwd/test-index.yaml'), 1, -1);
-  return do_test(path.join(process.cwd(), 'conformance_tests.yaml'), 0, -1);
+export async function conformance_test(): Promise<number> {
+  // return do_test(path.join(process.cwd(), 'tests/iwd/test-index.yaml'), 13, -1);
+  return do_test(path.join(process.cwd(), 'conformance_tests.yaml'), 207, 208);
+  // return do_test(path.join(process.cwd(), 'conformance_tests.yaml'), 0, -1);
+}
+export interface Args {
+  tool_path: string;
+  job_path?: string;
+  outdir?: string;
+  quiet?: boolean;
+}
+export async function main(args: Args): Promise<number> {
+  const [output, status] = await exec(args.tool_path, args.job_path, args.outdir);
+  if (status === 'success') {
+    console.log(JSON.stringify(output));
+    return 0;
+  } else {
+    return 1;
+  }
 }
 export async function do_test(test_path: string, start = 0, end = -1): Promise<number> {
   const test_dir = path.dirname(test_path);
@@ -291,6 +307,9 @@ export async function do_test(test_path: string, start = 0, end = -1): Promise<n
   for (let index = start; index < (end < 0 ? data.length : end); index++) {
     cleanWorkdir(process.cwd(), ['tests', 'conformance_tests.yaml']);
     const test = data[index];
+    if (test['id'] === 'format_checking') {
+      console.log(test);
+    }
     if (test['$import']) {
       const t = path.join(test_dir, test['$import']);
       await do_test(t);
@@ -342,12 +361,17 @@ export async function do_test(test_path: string, start = 0, end = -1): Promise<n
   }
   return 1;
 }
-export async function exec(tool_path: string, job_path: string): Promise<[CWLOutputType, string]> {
+export async function exec(tool_path: string, job_path?: string, outdir?: string): Promise<[CWLOutputType, string]> {
   const loadingContext = new LoadingContext({});
   loadingContext.construct_tool_object = default_make_tool;
   if (!path.isAbsolute(tool_path)) {
     tool_path = path.join(process.cwd(), tool_path);
   }
+  if (job_path && !path.isAbsolute(job_path)) {
+    job_path = path.join(process.cwd(), job_path);
+  }
+  _logger.info(`tool_path=${tool_path}`);
+  _logger.info(`job_path=${job_path}`);
   const [tool] = await loadDocument(tool_path, loadingContext);
   const jo = load_job_order(undefined, job_path);
   const job_order_object = jo[0];
@@ -356,7 +380,7 @@ export async function exec(tool_path: string, job_path: string): Promise<[CWLOut
     input_basedir = path.dirname(tool_path);
   }
   const runtimeContext = new RuntimeContext({
-    outdir: process.cwd(),
+    outdir: outdir ? outdir : process.cwd(),
     secret_store: new SecretStore(),
   });
   const initialized_job_order = init_job_order(job_order_object, tool, input_basedir, tool_path, runtimeContext);

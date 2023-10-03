@@ -12,6 +12,7 @@ import { Builder, contentLimitRespectedReadBytes, substitute } from './builder.j
 import { LoadingContext, RuntimeContext, getDefault } from './context.js';
 import { DockerCommandLineJob, PodmanCommandLineJob } from './docker.js';
 import { UnsupportedRequirement, ValidationException, WorkflowException } from './errors.js';
+import { pathJoin } from './fileutils.js';
 import { CommandLineJob, JobBase } from './job.js';
 import { _logger } from './loghandler.js';
 import { convertFileDirectoryToDict } from './main.js';
@@ -377,7 +378,7 @@ export class CommandLineTool extends Process {
       this.updatePathmap(outdir, pathmap, sf);
     }
     for (const ls of (fn['listing'] || []) as CWLObjectType[]) {
-      this.updatePathmap(path.join(outdir, fn['basename'] as string), pathmap, ls);
+      this.updatePathmap(pathJoin(outdir, fn['basename'] as string), pathmap, ls);
     }
   }
   async evaluate_listing_string(
@@ -622,7 +623,7 @@ export class CommandLineTool extends Process {
     for (const entry of ls) {
       if (entry['basename']) {
         const basename = entry['basename'] as string;
-        entry['dirname'] = path.join(builder.outdir, path.dirname(basename));
+        entry['dirname'] = pathJoin(builder.outdir, path.dirname(basename));
         entry['basename'] = path.basename(basename);
       }
       normalizeFilesDirs(entry);
@@ -815,7 +816,7 @@ export class CommandLineTool extends Process {
     //     return output_callbacks;
     // }
   }
-  handle_tool_time_limit(builder: Builder, j: JobBase, debug: boolean): void {
+  async handle_tool_time_limit(builder: Builder, j: JobBase, debug: boolean): Promise<void> {
     const [timelimit, _] = getRequirement(this.tool, cwlTsAuto.ToolTimeLimit);
     if (timelimit == undefined) {
       return;
@@ -823,19 +824,21 @@ export class CommandLineTool extends Process {
 
     const limit_field = timelimit.timelimit;
     if (typeof limit_field === 'string') {
-      const timelimit_eval = builder.do_eval(limit_field);
+      let timelimit_eval = await builder.do_eval(limit_field);
       if (timelimit_eval && typeof timelimit_eval !== 'number') {
         throw new WorkflowException(
           `'timelimit' expression must evaluate to a long/int. Got 
                 ${timelimit_eval} for expression ${limit_field}.`,
         );
       } else {
-        const timelimit_eval = limit_field;
+        timelimit_eval = limit_field;
       }
       if (typeof timelimit_eval !== 'number' || timelimit_eval < 0) {
         throw new WorkflowException(`timelimit must be an integer >= 0, got: ${timelimit_eval}`);
       }
       j.timelimit = timelimit_eval;
+    } else {
+      j.timelimit = limit_field;
     }
   }
 
@@ -1094,7 +1097,7 @@ export class CommandLineTool extends Process {
 
     const readers = {}; // this.handle_mutation_manager(builder, j);
 
-    this.handle_tool_time_limit(builder, j, debug);
+    await this.handle_tool_time_limit(builder, j, debug);
 
     this.handle_network_access(builder, j, debug);
 

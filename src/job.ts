@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Builder } from './builder.js';
 import { RuntimeContext } from './context.js';
 import { UnsupportedRequirement, ValueError, WorkflowException } from './errors.js';
+import { removeIgnorePermissionError } from './fileutils.js';
 import { _logger } from './loghandler.js';
 import { MapperEnt, PathMapper } from './pathmapper.js';
 import { stage_files } from './process.js';
@@ -22,7 +23,6 @@ import {
   ensureWritable,
   ensure_non_writable,
   getRequirement,
-  removeIgnorePermissionError,
 } from './utils.js';
 // ... and so on for other modules
 const needsShellQuotingRe = /(^$|[\s|&;()<>\'"$@])/;

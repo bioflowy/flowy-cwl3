@@ -15,6 +15,7 @@ import * as copy from './copy.js';
 import { ValidationException, WorkflowException } from './errors.js';
 
 import { needs_parsing } from './expression.js';
+import { isdir, isfile, removeIgnorePermissionError, removeSyncIgnorePermissionError } from './fileutils.js';
 import { _logger } from './loghandler.js';
 
 import { convertFileDirectoryToDict } from './main.js';
@@ -36,7 +37,6 @@ import {
   type CWLOutputAtomType,
   type CWLOutputType,
   type JobsGeneratorType,
-  type LoadListingType,
   type MutableSequence,
   type OutputCallbackType,
   aslist,
@@ -54,10 +54,6 @@ import {
   ensureWritable,
   visit_class_promise,
   isString,
-  removeIgnorePermissionError,
-  removeSyncIgnorePermissionError,
-  isdir,
-  isfile,
 } from './utils.js';
 import { validate } from './validate.js';
 

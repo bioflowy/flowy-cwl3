@@ -18,7 +18,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "npm run build && cd work && node ../bin/example-command.js",
+    "dev": "npm run build && cd work && node ../bin/conformance_test.js",
     "lint": "run-s -c lint:*",
     "lint:tsc": "tsc",
     "lint:eslint": "eslint .",
@@ -38,6 +38,7 @@
     "@types/lodash": "^4.14.198",
     "@types/node": "^18.15.11",
     "@types/uuid": "^9.0.3",
+    "@types/yargs": "^17.0.26",
     "eslint": "^8.38.0",
     "npm-run-all": "^4.1.5",
     "prettier": "^2.8.7",
@@ -75,6 +76,7 @@
     "js-yaml": "^4.1.0",
     "lodash": "^4.17.21",
     "uuid": "^9.0.0",
-    "winston": "^3.10.0"
+    "winston": "^3.10.0",
+    "yargs": "^17.7.2"
   }
 }

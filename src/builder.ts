@@ -64,6 +64,28 @@ export async function contentLimitRespectedReadBytes(filePath: string): Promise<
     });
   });
 }
+function check_format(
+  actual_file: CWLObjectType | CWLObjectType[],
+  input_formats: string | string[],
+  // ontology: Optional[Graph],
+) {
+  // Confirm that the format present is valid for the allowed formats."""
+  for (const afile of aslist(actual_file)) {
+    if (!afile) {
+      continue;
+    }
+    if (!afile['format']) {
+      throw new ValidationException(`File has no 'format' defined: ${JSON.stringify(afile, null, 4)}`);
+    }
+    for (const inpf of aslist(input_formats)) {
+      if (afile['format'] === inpf) {
+        // TODO subclass fileformat currently is not supported  or formatSubclassOf(afile["format"], inpf, ontology, set()):
+        return;
+      }
+    }
+    throw new ValidationException(`File has an incompatible format: ${JSON.stringify(afile, null, 4)}`);
+  }
+}
 
 export function substitute(value: string, replace: string): string {
   if (replace.startsWith('^')) {
@@ -412,12 +434,11 @@ export class Builder {
       );
     }
     // TODO check_format is not implemented
-    // try {
-    //     check_format(datum, evaluated_format, this.formatgraph);
-    // } catch (ve) {
-    //     throw new WorkflowException(
-    //         "Expected value of " + schema['name'] + " to have format " + schema['format'] + " but\n " + ve);
-    // }
+    try {
+      check_format(datum, evaluated_format);
+    } catch (ve) {
+      throw new WorkflowException(`Expected value of ${schema['name']} to have format ${schema['format']} but\n ${ve}`);
+    }
   }
   async handleSecondaryFile(
     schema: CommandInputParameter,
