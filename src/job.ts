@@ -11,6 +11,7 @@ import { RuntimeContext } from './context.js';
 import { UnsupportedRequirement, ValueError, WorkflowException } from './errors.js';
 import { _logger } from './loghandler.js';
 import { MapperEnt, PathMapper } from './pathmapper.js';
+import { stage_files } from './process.js';
 import { SecretStore } from './secrets.js';
 import type { Tool, ToolRequirement } from './types.js';
 import {
@@ -20,7 +21,6 @@ import {
   createTmpDir,
   ensureWritable,
   ensure_non_writable,
-  stage_files,
   getRequirement,
   removeIgnorePermissionError,
 } from './utils.js';
@@ -51,8 +51,7 @@ async function relink_initialworkdir(
         try {
           await fs.promises.unlink(host_outdir_tgt);
         } catch (e) {
-          throw e;
-          // if (e.code !== 'EPERM') throw e;
+          if (!(e.code !== 'EPERM' || e.code !== 'EACCES')) throw e;
         }
       } else if (stat && stat.isDirectory() && !vol.resolved.startsWith('_:')) {
         await removeIgnorePermissionError(host_outdir_tgt);
@@ -61,8 +60,7 @@ async function relink_initialworkdir(
         try {
           fs.symlinkSync(vol.resolved, host_outdir_tgt);
         } catch (e) {
-          throw e;
-          // if (e.code !== 'EEXIST') throw e;
+          if (e.code !== 'EEXIST') throw e;
         }
       }
     }
@@ -538,10 +536,18 @@ export class CommandLineJob extends JobBase {
 
     this._setup(runtimeContext);
 
-    stage_files(this.pathmapper, null, true, true, runtimeContext.secret_store);
+    stage_files(this.pathmapper, null, {
+      ignore_writable: true,
+      symlink: true,
+      secret_store: runtimeContext.secret_store,
+    });
     if (this.generatemapper) {
-      stage_files(this.generatemapper, null, this.inplace_update, true, runtimeContext.secret_store);
-      relink_initialworkdir(this.generatemapper, this.outdir, this.builder.outdir, this.inplace_update);
+      stage_files(this.generatemapper, null, {
+        ignore_writable: this.inplace_update,
+        symlink: true,
+        secret_store: runtimeContext.secret_store,
+      });
+      await relink_initialworkdir(this.generatemapper, this.outdir, this.builder.outdir, this.inplace_update);
     }
 
     const monitor_function = this.process_monitor.bind(this);

@@ -19,6 +19,7 @@ import { _logger } from './loghandler.js';
 
 import { convertFileDirectoryToDict } from './main.js';
 import { MapperEnt, PathMapper } from './pathmapper.js';
+import { SecretStore } from './secrets.js';
 import { StdFsAccess } from './stdfsaccess.js';
 
 import {
@@ -55,6 +56,8 @@ import {
   isString,
   removeIgnorePermissionError,
   removeSyncIgnorePermissionError,
+  isdir,
+  isfile,
 } from './utils.js';
 import { validate } from './validate.js';
 
@@ -160,10 +163,16 @@ export function shortname(inputid: string): string {
     return inputid.split('/').pop();
   }
 }
-function stage_files(
+interface StageFilesOptions {
+  ignore_writable?: boolean;
+  symlink?: boolean;
+  fix_conflicts?: boolean;
+  secret_store?: SecretStore;
+}
+export function stage_files(
   pathmapper: PathMapper,
   stage_func?: (src: string, dest: string) => void,
-  { ignore_writable = false, symlink = true, fix_conflicts = false } = {},
+  { ignore_writable = false, symlink = true, fix_conflicts = false, secret_store = undefined }: StageFilesOptions = {},
 ): void {
   let items: [string, MapperEnt][] = symlink ? pathmapper.items_exclude_children() : pathmapper.items();
   const targets: { [key: string]: MapperEnt } = {};
@@ -322,10 +331,9 @@ export async function relocateOutputs(
     } else if (_action === 'copy') {
       _logger.debug(`Copying ${src} to ${dst}`);
       if (fs_access.isdir(src)) {
-        const dstStat = fs.statSync(dst);
-        if (dstStat.isDirectory()) {
+        if (isdir(dst)) {
           removeSyncIgnorePermissionError(dst);
-        } else if (dstStat.isFile()) {
+        } else if (isfile(dst)) {
           fs.unlinkSync(dst);
         }
         fsExtra.copySync(src, dst, { overwrite: true });

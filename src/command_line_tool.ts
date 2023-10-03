@@ -446,17 +446,14 @@ export class CommandLineTool extends Process {
 
     for (const t of aslist(initialWorkdir.listing)) {
       if (t instanceof Dirent) {
-        if (!t.entry) {
+        const entry_field: string = t.entry;
+        const entry = await builder.do_eval(entry_field, undefined, false, false);
+        if (entry === null) {
           /**
            * * If the value is an expression that evaluates to `null`,
            * nothing is added to the designated output directory, the entry
            * has no effect.
            */
-          continue;
-        }
-        const entry_field: string = t.entry;
-        const entry = await builder.do_eval(entry_field, undefined, false, false);
-        if (entry === null) {
           continue;
         }
         if (entry instanceof Array) {

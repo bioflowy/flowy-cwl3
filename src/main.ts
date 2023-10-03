@@ -282,8 +282,8 @@ function cleanWorkdir(directory: string, expect: string[]) {
   }
 }
 export async function main(): Promise<number> {
-  // return do_test(path.join(process.cwd(), 'tests/iwd/test-index.yaml'), 0, -1);
-  return do_test(path.join(process.cwd(), 'conformance_tests.yaml'), 236, -1);
+  // return do_test(path.join(process.cwd(), 'tests/iwd/test-index.yaml'), 1, -1);
+  return do_test(path.join(process.cwd(), 'conformance_tests.yaml'), 0, -1);
 }
 export async function do_test(test_path: string, start = 0, end = -1): Promise<number> {
   const test_dir = path.dirname(test_path);

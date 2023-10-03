@@ -824,9 +824,6 @@ export class WorkflowJob {
       //     jobs = (_ for _ in ())
     } catch (err) {
       if (err instanceof WorkflowException) throw err;
-      if (err instanceof Error) {
-        console.log(`${err.message} ${err.stack}`);
-      }
       _logger.error('Unhandled exception', err);
 
       this.processStatus = 'permanentFail';

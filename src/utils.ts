@@ -437,80 +437,6 @@ export async function removeIgnorePermissionError(file_path: string): Promise<vo
     }
   }
 }
-export function stage_files(
-  pathmapper: PathMapper,
-  stage_func: ((str: string, str2: string) => void) | null = null,
-  ignore_writable = false,
-  symlink = true,
-  secret_store: SecretStore = null, // TODO SecretStore | null = null,
-  fix_conflicts = false,
-): void {
-  let items = !symlink ? pathmapper.items() : pathmapper.items_exclude_children();
-  const targets: { [key: string]: MapperEnt } = {};
-  for (const [key, entry] of items) {
-    if (!entry.type.includes('File')) continue;
-    if (!(entry.target in targets)) {
-      targets[entry.target] = entry;
-    } else if (targets[entry.target]?.resolved != entry.resolved) {
-      if (fix_conflicts) {
-        let i = 2;
-        let tgt = `${entry.target}_${i}`;
-        while (tgt in targets) {
-          i += 1;
-          tgt = `${entry.target}_${i}`;
-        }
-        targets[tgt] = pathmapper.update(key, entry.resolved, tgt, entry.type, entry.staged);
-      } else {
-        throw new WorkflowException(
-          `File staging conflict, trying to stage both ${targets[entry.target]?.resolved ?? ''} and ${
-            entry.resolved
-          } to the same target ${entry.target}`,
-        );
-      }
-    }
-  }
-
-  items = !symlink ? pathmapper.items() : pathmapper.items_exclude_children();
-  for (const [key, entry] of items) {
-    if (!entry.staged) continue;
-    if (!fs.existsSync(path.dirname(entry.target))) {
-      fs.mkdirSync(path.dirname(entry.target), { recursive: true });
-    }
-    if (('File' === entry.type || 'Directory' === entry.type) && fs.existsSync(entry.resolved)) {
-      if (symlink) {
-        fs.symlinkSync(entry.resolved, entry.target);
-      } else if (stage_func) {
-        stage_func(entry.resolved, entry.target);
-      }
-    }
-
-    const matched_condition =
-      'Directory' === entry.type && !fs.existsSync(entry.target) && entry.resolved.startsWith('_:');
-    const ensure_writable_callback = () => ensureWritable(entry.target, true);
-
-    if (matched_condition) {
-      fs.mkdirSync(entry.target);
-    } else if ('WritableFile' === entry.type && !ignore_writable) {
-      fs.copyFileSync(entry.resolved, entry.target);
-      ensure_writable_callback();
-    } else if ('WritableDirectory' === entry.type && !ignore_writable) {
-      if (entry.resolved.startsWith('_:')) {
-        fs.mkdirSync(entry.target);
-      } else {
-        fsExtra.copySync(entry.resolved, entry.target);
-        ensure_writable_callback();
-      }
-    } else if ('CreateFile' === entry.type || 'CreateWritableFile' === entry.type) {
-      fs.writeFileSync(entry.target, secret_store ? (secret_store.retrieve(entry.resolved) as string) : entry.resolved);
-      if ('CreateFile' === entry.type) {
-        fs.chmodSync(entry.target, fs.constants.S_IRUSR);
-      } else {
-        ensure_writable_callback();
-      }
-      pathmapper.update(key, entry.target, entry.target, entry.type, entry.staged);
-    }
-  }
-}
 export function downloadHttpFile(httpurl: string): [string, Date] {
   // TODO
   // let cache_session = null;
@@ -547,6 +473,12 @@ export function downloadHttpFile(httpurl: string): [string, Date] {
   //     fs.utimesSync(tempFilePath, date_epoch, date_epoch);
   // }
   return ['tempFilePath', new Date()];
+}
+export function isdir(dir_path: string) {
+  return fs.existsSync(dir_path) && fs.lstatSync(dir_path).isDirectory();
+}
+export function isfile(file_path: string) {
+  return fs.existsSync(file_path) && fs.lstatSync(file_path).isFile();
 }
 export function ensureWritable(targetPath: string, includeRoot = false): void {
   //
