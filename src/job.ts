@@ -739,7 +739,6 @@ export abstract class ContainerCommandLineJob extends JobBase {
           this.prov_obj.document.wasAssociatedWith(runtimeContext.process_run_id, container_agent);
         }
       } catch (err: any) {
-        console.log(err.stack);
         const container = runtimeContext.singularity ? 'Singularity' : 'Docker';
         _logger.debug(`${container} error`, err);
         if (docker_is_req) {

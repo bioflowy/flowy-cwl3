@@ -1,10 +1,13 @@
 import * as crypto from 'node:crypto';
+import path from 'node:path';
 import * as cwlTsAuto from 'cwl-ts-auto';
+import { LoadingOptions } from 'cwl-ts-auto/dist/util/LoadingOptions.js';
 import { circular_dependency_checker, static_checker } from './checker.js';
 import * as command_line_tool from './command_line_tool.js';
 import { LoadingContext, RuntimeContext, getDefault } from './context.js';
 import { deepcopy } from './copy.js';
 import { ValidationException, WorkflowException } from './errors.js';
+import { pathJoin } from './fileutils.js';
 import { loadDocument } from './loader.js';
 import { _logger } from './loghandler.js';
 import { Process, shortname } from './process.js';
@@ -67,11 +70,23 @@ function _convert_stdstreams_to_files(tool: cwlTsAuto.CommandLineTool) {
     }
   }
 }
-
+function validate(
+  toolpath_object: cwlTsAuto.ExpressionTool | cwlTsAuto.CommandLineTool | cwlTsAuto.Workflow | cwlTsAuto.Operation,
+  loadingContext: LoadingContext,
+) {
+  const schemas = toolpath_object.loadingOptions.schemas;
+  if (schemas && Array.isArray(schemas)) {
+    for (const schema of schemas) {
+      const schema_path = pathJoin(loadingContext.baseuri, schema);
+      loadingContext.formatGraph.addOntology(schema_path);
+    }
+  }
+}
 export async function default_make_tool(
   toolpath_object: cwlTsAuto.ExpressionTool | cwlTsAuto.CommandLineTool | cwlTsAuto.Workflow | cwlTsAuto.Operation,
   loadingContext: LoadingContext,
 ): Promise<Process> {
+  validate(toolpath_object, loadingContext);
   if (toolpath_object instanceof cwlTsAuto.CommandLineTool) {
     _convert_stdstreams_to_files(toolpath_object);
     const t = new command_line_tool.CommandLineTool(toolpath_object);
@@ -82,11 +97,6 @@ export async function default_make_tool(
     t.init(loadingContext);
     return t;
   } else if (toolpath_object instanceof cwlTsAuto.Workflow) {
-    // toolpath_object.outputs.forEach((output) => {
-    //   const base = output.id.split('#')[0];
-    //   const id = output.outputSource.slice(output.id.length + 1) as string;
-    //   output.outputSource = `${base}#${id}`;
-    // });
     const t = new Workflow(toolpath_object);
     await t.init(loadingContext);
     return t;

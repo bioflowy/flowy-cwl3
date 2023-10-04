@@ -24,6 +24,7 @@ import {
   type CWLOutputType,
   trim_listing,
   adjustDirObjs,
+  isString,
 } from './utils.js';
 import { default_make_tool } from './workflow.js';
 
@@ -193,21 +194,26 @@ function init_job_order(
       delete p['path'];
     }
   }
+  const namespaces = process.tool.loadingOptions.namespaces;
 
-  // const ns: ContextType = { ...job_order_object['$namespaces'], ...process.metadata['$namespaces'] };
-  // const ld = new Loader(ns);
-
-  // function expand_formats(p: CWLObjectType): void {
-  //   if ('format' in p) {
-  //     p['format'] = ld.expand_url(p['format'], '');
-  //   }
-  // }
+  function expand_formats(p: CWLObjectType): void {
+    if (!namespaces) {
+      return;
+    }
+    const format = p['format'];
+    if (isString(format)) {
+      const [id, rest] = format.split(':');
+      if (namespaces[id]) {
+        p['format'] = namespaces[id] + rest;
+      }
+    }
+  }
 
   visit_class(job_order_object, ['File', 'Directory'], path_to_loc);
   visit_class(job_order_object, ['File'], (obj: CWLObjectType) =>
     add_sizes(runtime_context.make_fs_access(input_basedir), obj),
   );
-  // visit_class(job_order_object, ['File'], expand_formats);
+  visit_class(job_order_object, ['File'], expand_formats);
   adjustDirObjs(job_order_object, trim_listing);
   normalizeFilesDirs(job_order_object);
 
@@ -283,7 +289,7 @@ function cleanWorkdir(directory: string, expect: string[]) {
 }
 export async function conformance_test(): Promise<number> {
   // return do_test(path.join(process.cwd(), 'tests/iwd/test-index.yaml'), 13, -1);
-  return do_test(path.join(process.cwd(), 'conformance_tests.yaml'), 207, 208);
+  return do_test(path.join(process.cwd(), 'conformance_tests.yaml'), 200, -1);
   // return do_test(path.join(process.cwd(), 'conformance_tests.yaml'), 0, -1);
 }
 export interface Args {
@@ -295,7 +301,7 @@ export interface Args {
 export async function main(args: Args): Promise<number> {
   const [output, status] = await exec(args.tool_path, args.job_path, args.outdir);
   if (status === 'success') {
-    console.log(JSON.stringify(output));
+    process.stdout.write(`${JSON.stringify(output)}\n`);
     return 0;
   } else {
     return 1;
@@ -307,8 +313,8 @@ export async function do_test(test_path: string, start = 0, end = -1): Promise<n
   for (let index = start; index < (end < 0 ? data.length : end); index++) {
     cleanWorkdir(process.cwd(), ['tests', 'conformance_tests.yaml']);
     const test = data[index];
-    if (test['id'] === 'format_checking') {
-      console.log(test);
+    if (test['id'] !== 'params_broken_null') {
+      continue;
     }
     if (test['$import']) {
       const t = path.join(test_dir, test['$import']);

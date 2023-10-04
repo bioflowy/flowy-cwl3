@@ -1,7 +1,8 @@
 import * as crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import cwlTsAuto, { CommandOutputBinding } from 'cwl-ts-auto';
+import cwlTsAuto, { CommandOutputBinding, Directory } from 'cwl-ts-auto';
+import { Dictionary } from 'cwl-ts-auto/dist/util/Dict.js';
 import { CommandLineTool, ExpressionTool } from './command_line_tool.js';
 import type { LoadingContext } from './context.js';
 import { ValidationException } from './errors.js';
@@ -29,6 +30,7 @@ export async function loadDocument(
   if (tool_file_path.startsWith('file://')) {
     tool_file_path = fileURLToPath(tool_file_path);
   }
+  loadingContext.baseuri = path.dirname(tool_file_path);
   const doc = await cwlTsAuto.loadDocument(tool_file_path);
   if (doc instanceof Array) {
     let tool_id = tool_path;

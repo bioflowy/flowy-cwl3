@@ -16,6 +16,7 @@ import { ValidationException, WorkflowException } from './errors.js';
 
 import { needs_parsing } from './expression.js';
 import { isdir, isfile, removeIgnorePermissionError, removeSyncIgnorePermissionError } from './fileutils.js';
+import { FormatGraph } from './formatgraph.js';
 import { _logger } from './loghandler.js';
 
 import { convertFileDirectoryToDict } from './main.js';
@@ -119,11 +120,6 @@ const salad_files = [
   'vocab_res_src.yml',
   'vocab_res_proc.yml',
 ];
-
-const SCHEMA_CACHE = {};
-let SCHEMA_FILE;
-let SCHEMA_DIR;
-let SCHEMA_ANY;
 
 // let custom_schemas = {};
 
@@ -509,7 +505,7 @@ export abstract class Process {
   original_hints: any[];
   doc_loader: any;
   doc_schema: any;
-  formatgraph: any | null;
+  formatgraph: FormatGraph;
   schemaDefs: {
     [key: string]:
       | cwlTsAuto.CommandInputArraySchema
@@ -569,10 +565,8 @@ export abstract class Process {
     this.original_hints = this.hints;
     // this.doc_loader = loadingContext.loader;
     // this.doc_schema = loadingContext.avsc_names;
-    this.formatgraph = null;
-
-    if (this.doc_loader !== undefined) {
-      this.formatgraph = this.doc_loader.graph;
+    if (loadingContext.formatGraph) {
+      this.formatgraph = loadingContext.formatGraph;
     }
 
     this.checkRequirements(this.tool as any, supportedProcessRequirements);
@@ -808,7 +802,6 @@ hints:
       files,
       bindings,
       this.schemaDefs,
-      this.names,
       this.requirements,
       this.hints,
       {},

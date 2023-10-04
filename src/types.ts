@@ -1,5 +1,6 @@
 import cwlTsAuto from 'cwl-ts-auto';
 import type { Dictionary } from 'cwl-ts-auto/dist/util/Dict.js';
+import type { LoadingOptions } from 'cwl-ts-auto/dist/util/LoadingOptions.js';
 import type { CWLOutputType } from './utils.js';
 export type ToolRequirementEntity =
   | cwlTsAuto.InlineJavascriptRequirement
@@ -244,6 +245,7 @@ export interface Tool {
   requirements?: undefined | ToolRequirement;
   hints?: undefined | ToolRequirement;
   baseCommand?: undefined | string | string[];
+  loadingOptions?: LoadingOptions;
   /**
    * Command line bindings which are not directly associated with input
    * parameters. If the value is a string, it is used as a string literal

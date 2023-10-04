@@ -452,6 +452,9 @@ export function downloadHttpFile(httpurl: string): [string, Date] {
   // }
   return ['tempFilePath', new Date()];
 }
+export function str<T>(val: T): string {
+  return JSON.stringify(val, null, 4);
+}
 export function ensureWritable(targetPath: string, includeRoot = false): void {
   //
   // Ensure that 'path' is writable.

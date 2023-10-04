@@ -668,9 +668,7 @@ export class CommandLineTool extends Process {
     this.setup_output_items(initialWorkdir, builder, ls);
   }
   cache_context(runtimeContext: RuntimeContext): (arg1: CWLObjectType, arg2: string) => void {
-    return (arg1: CWLObjectType, arg2: string) => {
-      console.log(arg2);
-    };
+    return (arg1: CWLObjectType, arg2: string) => {};
     // TODO cache not implemented
     // let cachecontext = runtimeContext.copy();
     // cachecontext.outdir = "/out";

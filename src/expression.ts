@@ -381,14 +381,8 @@ export async function do_eval(
         get_js_engine(),
       );
       return ret;
-    } catch (e: any) {
-      _logger.error(e);
-      if (e instanceof Error) {
-        _logger.error(`${e.stack}`);
-        throw new WorkflowException(`Expression evaluation error:\n${e.message}`);
-      } else {
-        throw e;
-      }
+    } catch (e) {
+      throw new WorkflowException(`Expression evaluation error:\n${e.message}`);
     }
   } else {
     return ex;

@@ -10,6 +10,26 @@
       "runtimeArgs": ["run", "dev"]
     },
     {
+      "name": "edam_test",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/work",
+      "runtimeExecutable": "/home/uehara/.nodenv/shims/node",
+      "runtimeArgs": ["${workspaceFolder}/bin/edam_test.js"]
+    },
+    {
+      "name": "exec",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/work",
+      "runtimeExecutable": "/home/uehara/.nodenv/shims/node",
+      "runtimeArgs": [
+        "${workspaceFolder}/bin/flowycwl.js",
+        "tests/loadContents/cwloutput-nolimit.cwl",
+        "tests/loadContents/input.yml"
+      ]
+    },
+    {
       "name": "test",
       "type": "node",
       "request": "launch",

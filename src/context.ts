@@ -1,5 +1,7 @@
 import * as cwlTsAuto from 'cwl-ts-auto';
+import { Dictionary } from 'cwl-ts-auto/dist/util/Dict.js';
 import * as lodash from 'lodash';
+import { FormatGraph } from './formatgraph.js';
 import { PathMapper } from './pathmapper.js';
 import { Process } from './process.js';
 import { SecretStore } from './secrets.js';
@@ -56,6 +58,7 @@ export class LoadingContext extends ContextBase {
   debug = false;
   metadata: CWLObjectType = {};
   _requirements: ToolRequirement = [];
+  formatGraph: FormatGraph = new FormatGraph();
   get requirements(): ToolRequirement {
     return this._requirements;
   }
