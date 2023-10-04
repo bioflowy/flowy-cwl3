@@ -302,7 +302,11 @@ export async function main(args: Args): Promise<number> {
   const [output, status] = await exec(args.tool_path, args.job_path, args.outdir);
   if (status === 'success') {
     process.stdout.write(`${JSON.stringify(output)}\n`);
-    return 0;
+    return new Promise((resolve) => {
+      process.stdout.end(() => {
+        resolve(0);
+      });
+    });
   } else {
     return 1;
   }
