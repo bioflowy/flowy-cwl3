@@ -1,6 +1,6 @@
 import * as cwlTsAuto from 'cwl-ts-auto';
 import { contentLimitRespectedReadBytes } from './builder.js';
-import { can_assign_src_to_sink } from './checker.js';
+import { canAssignSrcToSink, canAssignSrcToSinkType } from './checker.js';
 import { RuntimeContext, getDefault, make_default_fs_access } from './context.js';
 import { WorkflowException } from './errors.js';
 import { do_eval } from './expression.js';
@@ -435,11 +435,7 @@ function matchTypes(
       throw new Error(`Unrecognized linkMerge enum '${linkMerge}'`);
     }
     return true;
-  } else if (
-    valueFrom !== null ||
-    can_assign_src_to_sink(src.parameter['type'] as SinkType, sinktype as SinkType) ||
-    sinktype === 'Any'
-  ) {
+  } else if (valueFrom !== null || canAssignSrcToSinkType(src.parameter.type, sinktype) || sinktype === 'Any') {
     inputobj[iid] = structuredClone(src.value);
     return true;
   }
@@ -460,7 +456,7 @@ function objectFromState(
     if (fragOnly) {
       iid = shortname(iid);
     }
-    if (sourceField in inp) {
+    if (inp[sourceField]) {
       const connections = aslist(inp[sourceField]);
       if (connections.length > 1 && !supportsMultipleInput) {
         throw new WorkflowException(
@@ -494,7 +490,7 @@ function objectFromState(
         }
       }
     }
-    if ('pickValue' in inp && Array.isArray(inputobj[iid])) {
+    if (inp['pickValue'] && Array.isArray(inputobj[iid])) {
       const seq = inputobj[iid] as (CWLOutputType | null)[];
       if (inp['pickValue'] === 'first_non_null') {
         let found = false;
@@ -600,9 +596,9 @@ export class WorkflowJob {
     //   this.parent_wf.activity_has_provenance(this.prov_obj.workflow_run_uri, prov_ids);
     // }
 
-    _logger.info('[%s] completed %s', this.name, this.processStatus);
+    _logger.info(`[${this.name}] completed ${this.processStatus}'`);
     if (_logger.isDebugEnabled()) {
-      _logger.debug('[%s] outputs %s', this.name, JSON.stringify(wo, null, 4));
+      _logger.debug(`[${this.name}] outputs ${JSON.stringify(wo, null, 4)}`);
     }
 
     this.did_callback = true;

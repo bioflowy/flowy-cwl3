@@ -1,0 +1,5 @@
+#!/bin/sh
+
+BASE_DIR=$(dirname $0)
+
+node ${BASE_DIR}/../bin/flowycwl.js $* 

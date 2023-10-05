@@ -189,6 +189,7 @@ export interface CommandOutputParameter {
   outputSource?: string | string[];
 }
 export interface WorkflowStepInput extends CommandInputParameter {
+  source?: undefined | string | string[];
   not_connected?: boolean;
   used_by_step?: boolean;
   _tool_entry?: CommandInputParameter;

@@ -2,7 +2,7 @@ import { createLogger, format, transports } from 'winston';
 export const _logger = createLogger({
   level: 'debug', // Set the minimum log level to 'info'
   format: format.combine(format.simple()),
-  transports: [new transports.File({ filename: 'flowcwl.log' })],
+  transports: [new transports.Console({ stderrLevels: ['error', 'warn', 'info', 'debug'] })],
 });
 
 // TODO

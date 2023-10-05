@@ -157,8 +157,8 @@ export class Workflow extends Process {
     const workflow_inputs = this.tool.inputs;
     const workflow_outputs = this.tool.outputs;
 
-    let step_inputs: CommandInputParameter[] = [];
-    let step_outputs: CommandOutputParameter[] = [];
+    let step_inputs: WorkflowStepInput[] = [];
+    let step_outputs: WorkflowStepOutput[] = [];
     const param_to_step: { [key: string]: IWorkflowStep } = {};
 
     for (const step of this.steps) {
@@ -173,8 +173,8 @@ export class Workflow extends Process {
     }
 
     if (loadingContext.do_validate ?? true) {
-      //   static_checker(workflow_inputs, workflow_outputs, step_inputs, step_outputs, param_to_step);
-      //   circular_dependency_checker(step_inputs);
+      static_checker(workflow_inputs, workflow_outputs, step_inputs, step_outputs, param_to_step);
+      circular_dependency_checker(step_inputs);
       //   loop_checker(Array.from(this.steps, (step) => step.tool));
     }
   }

@@ -815,7 +815,7 @@ export class CommandLineTool extends Process {
     // }
   }
   async handle_tool_time_limit(builder: Builder, j: JobBase, debug: boolean): Promise<void> {
-    const [timelimit, _] = getRequirement(this.tool, cwlTsAuto.ToolTimeLimit);
+    const [timelimit, _] = getRequirement(this, cwlTsAuto.ToolTimeLimit);
     if (timelimit == undefined) {
       return;
     }

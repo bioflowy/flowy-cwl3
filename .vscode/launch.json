@@ -23,10 +23,12 @@
       "request": "launch",
       "cwd": "${workspaceFolder}/work",
       "runtimeExecutable": "/home/uehara/.nodenv/shims/node",
+      "console": "integratedTerminal",
+      "preLaunchTask": "npm build",
       "runtimeArgs": [
         "${workspaceFolder}/bin/flowycwl.js",
-        "tests/loadContents/cwloutput-nolimit.cwl",
-        "tests/loadContents/input.yml"
+        "tests/conditionals/cond-wf-005.cwl",
+        "tests/conditionals/val.3.job.yaml"
       ]
     },
     {

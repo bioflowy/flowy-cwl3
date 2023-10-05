@@ -7,6 +7,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import cwlTsAuto from 'cwl-ts-auto';
 import fsExtra from 'fs-extra';
+import { cloneDeep } from 'lodash-es';
 import { v4 } from 'uuid';
 import { Builder, INPUT_OBJ_VOCAB } from './builder.js';
 import { LoadingContext, RuntimeContext, getDefault } from './context.js';
@@ -597,7 +598,8 @@ export abstract class Process {
       fields: [],
     };
 
-    for (const c of this.tool.inputs) {
+    for (const i of this.tool.inputs) {
+      const c = cloneDeep(i);
       if (!c.type) {
         throw new Error(`Missing 'type' in parameter '${c.name}'`);
       }
