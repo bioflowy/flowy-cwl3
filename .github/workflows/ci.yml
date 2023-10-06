@@ -15,7 +15,7 @@ jobs:
           node-version: '18'
           cache: 'npm'
       - uses: actions/checkout@v3
-       with:
+        with:
         repository: common-workflow-lab/cwl-ts-auto.git
       - run: npm install
       - run: npm run build
