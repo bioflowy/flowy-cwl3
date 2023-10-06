@@ -12,6 +12,11 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
+          repository: common-workflow-language/cwltest
+          path: cwltest
+      - run: cd cwltest &&  && python setup.py install
+      - uses: actions/checkout@v3
+        with:
           repository: common-workflow-lab/cwl-ts-auto
           path: cwl-ts-auto
       - uses: actions/setup-node@v3
@@ -23,3 +28,4 @@ jobs:
           path: flowy-cwl3
       - run: cd flowy-cwl3 && npm install
       - run: cd flowy-cwl3 && npm run build
+      - run: cd flowy-cwl3/work/conformance_test.sh
