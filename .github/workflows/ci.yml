@@ -12,12 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          repository: common-workflow-lab/cwl-ts-auto.git
+          repository: common-workflow-lab/cwl-ts-auto
+          path: cwl-ts-auto
       - uses: actions/setup-node@v3
         with:
           node-version: '18'
           cache: 'npm'
       - run: npm install
-      - uses: actions/checkout@v3
-      - run: npm install
       - run: npm run build
+      - uses: actions/checkout@v3
+        with:
+          path: flowy-cwl3
+      - run: cd flowy-cwl3 && npm install
+      - run: cd flowy-cwl3 && npm run build
