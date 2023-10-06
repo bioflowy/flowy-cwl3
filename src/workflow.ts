@@ -460,7 +460,7 @@ export class WorkflowStep extends Process {
           );
         }
 
-        inp_map[inp]['type'] = { type: 'array', items: inp_map[inp]['type'] };
+        inp_map[inp].type = new cwlTsAuto.InputArraySchema({ type: 'array' as any, items: inp_map[inp].type });
       }
 
       let nesting;
@@ -472,7 +472,7 @@ export class WorkflowStep extends Process {
 
       for (const _ of Array(nesting).keys()) {
         for (const oparam of outputparms) {
-          oparam.type = { type: 'array', items: oparam['type'] } as any;
+          oparam.type = new cwlTsAuto.CommandInputArraySchema({ type: 'array' as any, items: oparam.type });
         }
       }
       this.tool['inputs'] = inputparms;

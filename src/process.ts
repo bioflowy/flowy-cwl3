@@ -5,13 +5,12 @@ import * as crypto from 'node:crypto';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import cwlTsAuto from 'cwl-ts-auto';
+import cwlTsAuto, { SecondaryFileSchema } from 'cwl-ts-auto';
 import fsExtra from 'fs-extra';
 import { cloneDeep } from 'lodash-es';
 import { v4 } from 'uuid';
-import { Builder, INPUT_OBJ_VOCAB } from './builder.js';
+import { Builder } from './builder.js';
 import { LoadingContext, RuntimeContext, getDefault } from './context.js';
-import * as copy from './copy.js';
 
 import { ValidationException, WorkflowException } from './errors.js';
 
@@ -31,7 +30,6 @@ import {
   type ToolType,
   type CommandInputParameter,
   CommandLineBinded,
-  type WorkflowStepInput,
   type ToolRequirement,
 } from './types.js';
 import {
@@ -49,7 +47,6 @@ import {
   urldefrag,
   visit_class,
   getRequirement,
-  type RequirementParam,
   adjustDirObjs,
   uriFilePath,
   fileUri,
@@ -85,60 +82,6 @@ const supportedProcessRequirements = [
   'http://commonwl.org/cwltool#InplaceUpdateRequirement',
   'http://commonwl.org/cwltool#CUDARequirement',
 ];
-
-const cwl_files = [
-  'Workflow.yml',
-  'CommandLineTool.yml',
-  'CommonWorkflowLanguage.yml',
-  'Process.yml',
-  'Operation.yml',
-  'concepts.md',
-  'contrib.md',
-  'intro.md',
-  'invocation.md',
-];
-
-const salad_files = [
-  'metaschema.yml',
-  'metaschema_base.yml',
-  'salad.md',
-  'field_name.yml',
-  'import_include.md',
-  'link_res.yml',
-  'ident_res.yml',
-  'vocab_res.yml',
-  'vocab_res.yml',
-  'field_name_schema.yml',
-  'field_name_src.yml',
-  'field_name_proc.yml',
-  'ident_res_schema.yml',
-  'ident_res_src.yml',
-  'ident_res_proc.yml',
-  'link_res_schema.yml',
-  'link_res_src.yml',
-  'link_res_proc.yml',
-  'vocab_res_schema.yml',
-  'vocab_res_src.yml',
-  'vocab_res_proc.yml',
-];
-
-// let custom_schemas = {};
-
-// function use_standard_schema(version) {
-//     if (version in custom_schemas) {
-//         delete custom_schemas[version];
-//     }
-//     if (version in SCHEMA_CACHE) {
-//         delete SCHEMA_CACHE[version];
-//     }
-// }
-
-// function use_custom_schema(version, name, text) {
-//     custom_schemas[version] = (name, text);
-//     if (version in SCHEMA_CACHE) {
-//         delete SCHEMA_CACHE[version];
-//     }
-// }
 
 export function shortname(inputid: string): string {
   try {
@@ -389,7 +332,6 @@ export function add_sizes(fsaccess: StdFsAccess, obj: CWLObjectType): void {
   }
   // best effort
 }
-
 function fill_in_defaults(inputs: CommandInputParameter[], job: CWLObjectType, fsaccess: StdFsAccess): void {
   for (let e = 0; e < inputs.length; e++) {
     const inp = inputs[e];
@@ -514,7 +456,7 @@ export abstract class Process {
       | cwlTsAuto.CommandInputRecordSchema;
   };
   inputs_record_schema: CommandInputParameter;
-  outputs_record_schema: CWLObjectType;
+  outputs_record_schema: CommandInputParameter;
   container_engine: 'docker' | 'podman' | 'singularity';
   constructor(toolpath_object: Tool) {
     this.tool = toolpath_object;
@@ -592,11 +534,11 @@ export abstract class Process {
       type: 'record' as any,
       fields: [],
     });
-    this.outputs_record_schema = {
+    this.outputs_record_schema = new cwlTsAuto.CommandInputRecordSchema({
       name: 'outputs_record_schema',
-      type: 'record',
+      type: 'record' as any,
       fields: [],
-    };
+    });
 
     for (const i of this.tool.inputs) {
       const c = cloneDeep(i);
@@ -614,7 +556,7 @@ export abstract class Process {
       this.inputs_record_schema.fields.push(c);
     }
     for (const i of this.tool.outputs) {
-      const c = structuredClone(i);
+      const c = cloneDeep(i);
       if (!c.type) {
         throw new Error(`Missing 'type' in parameter '${c.name}'`);
       }

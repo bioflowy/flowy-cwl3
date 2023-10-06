@@ -240,7 +240,29 @@ export function copytree_with_merge(src: string, dst: string): void {
     }
   }
 }
-
+/**
+ * Converts an object to a JSON-formatted string.
+ * To pass the conformance_test, it is formatted to match the output of Python's json.dumps.
+ *
+ * @param obj - The object to be converted.
+ * @returns The JSON-formatted string.
+ */
+export function josonStringifyLikePython(obj: any): string {
+  if (obj === undefined) {
+    return 'null';
+  }
+  if (obj instanceof Object) {
+    if (obj instanceof Array) {
+      const str = obj.map((item) => josonStringifyLikePython(item)).join(', ');
+      return `[${str}]`;
+    }
+    const str = Object.keys(obj)
+      .map((key) => `${JSON.stringify(key)}: ${josonStringifyLikePython(obj[key])}`)
+      .join(', ');
+    return `{${str}}`;
+  }
+  return JSON.stringify(obj, null, '');
+}
 export function visit_class(rec: any, cls: any[], op: (...args: any[]) => any): void {
   if (typeof rec === 'object' && rec !== null) {
     if ('class' in rec && cls.includes(rec['class'])) {

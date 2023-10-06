@@ -6,17 +6,33 @@ import {
 } from 'cwl-ts-auto';
 import { ValidationException } from './errors.js';
 import { aslist, get_filed_name, isString } from './utils.js';
+import { isArraySchema, isRecordSchema } from './checker.js';
 
 export function validate(t, datum, raise_ex: boolean) {
-  if (t === 'null' && !datum) {
+  if (t === 'null') {
+    if (datum === null || datum === undefined) {
+      return true;
+    }
     if (raise_ex) {
       throw new ValidationException(`${JSON.stringify(datum)} is not null`);
     }
-    return true;
-  } else if (t === 'string' && isString(datum)) {
-    return true;
+    return false;
+  } else if (t === 'string') {
+    if (isString(datum)) {
+      return true;
+    }
+    if (raise_ex) {
+      throw new ValidationException(`Excepted class is string but ${typeof datum}`);
+    }
+    return false;
   } else if (t === 'boolean' && typeof datum === 'boolean') {
-    return true;
+    if (typeof datum === 'boolean') {
+      return true;
+    }
+    if (raise_ex) {
+      throw new ValidationException(`Excepted class is string but ${typeof datum}`);
+    }
+    return false;
   } else if (['org.w3id.cwl.salad.Any', 'Any'].includes(t)) {
     if (datum) {
       return true;
@@ -25,14 +41,28 @@ export function validate(t, datum, raise_ex: boolean) {
       throw new ValidationException("'Any' type must be non-null");
     }
     return false;
-  } else if (t === 'File' && datum instanceof Object && datum['class'] === 'File') {
-    return true;
+  } else if (t === 'File') {
+    if (datum && datum['class'] === 'File') {
+      return true;
+    }
+    if (raise_ex) {
+      throw new ValidationException(`Excepted class is File but ${JSON.stringify(datum)}`);
+    }
+    return false;
+  } else if (t === 'Directory') {
+    if (datum && datum['class'] === 'Directory') {
+      return true;
+    }
+    if (raise_ex) {
+      throw new ValidationException(`Excepted class is Directory but ${JSON.stringify(datum)}`);
+    }
+    return false;
   } else if (t === 'int' || t === 'long') {
     if (typeof datum === 'number' && Number.MIN_SAFE_INTEGER <= datum && datum <= Number.MAX_SAFE_INTEGER) {
       return true;
     }
     if (raise_ex) {
-      throw new ValidationException(`${JSON.stringify(datum)} is not int`);
+      throw new ValidationException(`Excepted class is string but ${typeof datum}`);
     }
     return false;
   } else if (t === 'float' || t === 'double') {
@@ -53,14 +83,40 @@ export function validate(t, datum, raise_ex: boolean) {
     return false;
   } else if (t instanceof CommandInputEnumSchema) {
     return t.symbols.some((e) => get_filed_name(e) === datum);
-  } else if (t instanceof CommandInputRecordSchema) {
+  } else if (isRecordSchema(t)) {
     if (!(datum instanceof Object)) {
+      if (raise_ex) {
+        throw new ValidationException(`is not a dict. Expected a ${t.name} object.`);
+      }
       return false;
     }
-    for (const ft of t.fields) {
-      const name = get_filed_name(ft.name);
-      const val = datum[name];
-      if (!validate(ft.type, val, false)) {
+
+    const errors: any[] = [];
+    for (const f of t.fields) {
+      if (f.name === 'class') continue;
+
+      let fieldval: any;
+      if (datum[get_filed_name(f.name)]) {
+        fieldval = datum[get_filed_name(f.name)];
+      }
+
+      try {
+        if (!validate(f.type, fieldval, raise_ex)) {
+          return false;
+        }
+      } catch (v) {
+        if (!datum[f.name]) {
+          errors.push(new ValidationException(`missing required field ${f.name}`));
+        } else {
+          errors.push(new ValidationException(`the ${f.name} field is not valid because ${v}`));
+        }
+      }
+    }
+
+    if (errors.length) {
+      if (raise_ex) {
+        throw new ValidationException(errors.join('\n'));
+      } else {
         return false;
       }
     }
@@ -71,7 +127,7 @@ export function validate(t, datum, raise_ex: boolean) {
         return true;
       }
     }
-  } else if (t instanceof InputArraySchema || t instanceof CommandInputArraySchema) {
+  } else if (isArraySchema(t)) {
     if (!Array.isArray(datum)) {
       return false;
     }

@@ -3,7 +3,7 @@ import type { InlineJavascriptRequirement } from 'cwl-ts-auto';
 import IsolatedVM from 'isolated-vm';
 import { JavascriptException, SubstitutionError, WorkflowException } from './errors.js';
 import { _logger } from './loghandler.js';
-import type { CWLObjectType, CWLOutputType } from './utils.js';
+import { josonStringifyLikePython, type CWLObjectType, type CWLOutputType } from './utils.js';
 
 const segmentRe = /(\.\w+|\['([^']|\\')+'\]|\["([^"]|\\")+"\]|\[[0-9]+\])/u;
 const paramRe = /\((\w+)(\.\w+|\['([^']|\\')+'\]|\["([^"]|\\")+"\]|\[[0-9]+\])*\)$/u;
@@ -111,6 +111,7 @@ class JSEngine1 implements JSEngine {
 
     return `"use strict";\n${jslib}\nJSON.stringify((function()${inner_js})())`;
   }
+
   async eval(expr: string, jslib: string, rootvars: { [key: string]: any }): Promise<CWLOutputType> {
     const isolate = new IsolatedVM.Isolate({ memoryLimit: 128 });
 
@@ -294,7 +295,7 @@ async function interpolate(
         if (w[0] == 0 && w[1] == scan.length && parts.length <= 1) {
           return e;
         }
-        let leaf = JSON.stringify(e);
+        let leaf = josonStringifyLikePython(e);
         if (leaf[0] == '"') {
           leaf = JSON.parse(leaf);
         }

@@ -104,7 +104,7 @@ export async function _job_popen(
       cwd,
       env,
       stdio: [stdin, stdout, stderr],
-      timeout: timelimit !== null ? timelimit : undefined,
+      timeout: timelimit !== undefined ? timelimit * 1000 : undefined,
     });
     if (monitor_function) {
       monitor_function(child);

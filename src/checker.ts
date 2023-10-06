@@ -9,7 +9,7 @@ import type {
   WorkflowStepInput,
   WorkflowStepOutput,
 } from './types.js';
-import { aslist, str, type CWLOutputType, type MutableMapping, type SinkType, isString } from './utils.js';
+import { aslist, str, type MutableMapping, isString } from './utils.js';
 
 // const _get_type = (tp: WorkflowStepInput | cwlTsAuto.WorkflowOutputParameter): any => {
 //   if (tp.type instanceof Map) {
@@ -19,7 +19,25 @@ import { aslist, str, type CWLOutputType, type MutableMapping, type SinkType, is
 //   }
 //   return tp;
 // };
-
+export function isArraySchema(
+  type: ToolType,
+): type is
+  | cwlTsAuto.CommandInputArraySchema
+  | cwlTsAuto.InputArraySchema
+  | cwlTsAuto.OutputArraySchema
+  | cwlTsAuto.CommandOutputArraySchema {
+  return (
+    type instanceof cwlTsAuto.CommandInputArraySchema ||
+    type instanceof cwlTsAuto.InputArraySchema ||
+    type instanceof cwlTsAuto.CommandOutputArraySchema ||
+    type instanceof cwlTsAuto.OutputArraySchema
+  );
+}
+export function isRecordSchema(
+  type: ToolType,
+): type is cwlTsAuto.CommandInputRecordSchema | cwlTsAuto.InputRecordSchema {
+  return type instanceof cwlTsAuto.CommandInputRecordSchema || type instanceof cwlTsAuto.InputRecordSchema;
+}
 export function canAssignSrcToSinkType(src: ToolType, sink?: ToolType, strict = false): boolean {
   // Check for identical type specifications, ignoring extra keys like inputBinding.
   //
@@ -58,11 +76,11 @@ export function canAssignSrcToSinkType(src: ToolType, sink?: ToolType, strict = 
   } else if (isString(src) || isString(sink)) {
     return src === sink;
   } else {
-    if (src instanceof cwlTsAuto.CommandInputArraySchema && sink instanceof cwlTsAuto.CommandInputArraySchema) {
+    if (isArraySchema(src) && isArraySchema(sink)) {
       return canAssignSrcToSinkType(src.items, sink.items, strict);
     }
 
-    if (src instanceof cwlTsAuto.CommandInputRecordSchema && sink instanceof cwlTsAuto.CommandInputRecordSchema) {
+    if (isRecordSchema(src) && isRecordSchema(sink)) {
       return _compareRecords(src, sink, strict);
     }
   }
@@ -97,6 +115,17 @@ export function canAssignSrcToSink(
 
   return canAssignSrcToSinkType(src.type, sink.type, strict);
 }
+const merge_flatten_type = (src: ToolType): ToolType => {
+  /* "Return the merge flattened type of the source type."*/
+  if (isArraySchema(src)) {
+    return src;
+  }
+
+  if (src instanceof Array) {
+    return src.map((t) => merge_flatten_type(t)) as ToolType;
+  }
+  return new cwlTsAuto.CommandInputArraySchema({ items: src, type: 'array' as any });
+};
 
 const check_types = (
   srctype: cwlTsAuto.WorkflowInputParameter | CommandOutputParameter,
@@ -121,34 +150,17 @@ const check_types = (
     }
     return 'exception';
   }
-  switch (linkMerge) {
-    case cwlTsAuto.LinkMergeMethod.MERGE_NESTED: {
-      const srcType = new cwlTsAuto.InputArraySchema({ items: srctype.type, type: 'array' as any });
-      if (canAssignSrcToSinkType(srcType, sinktype.type, true)) {
-        return 'pass';
-      } else if (canAssignSrcToSinkType(srcType, sinktype.type, false)) {
-        return 'warning';
-      } else {
-        return 'exception';
-      }
-    }
-    case cwlTsAuto.LinkMergeMethod.MERGE_FLATTENED:
-      //   return check_types(merge_flatten_type(_get_type(srctype)), sinktype, null, null);
-      break;
-    default:
+  const srcType =
+    linkMerge === cwlTsAuto.LinkMergeMethod.MERGE_NESTED
+      ? new cwlTsAuto.InputArraySchema({ items: srctype.type, type: 'array' as any })
+      : merge_flatten_type(srctype.type);
+  if (canAssignSrcToSinkType(srcType, sinktype.type, true)) {
+    return 'pass';
+  } else if (canAssignSrcToSinkType(srcType, sinktype.type, false)) {
+    return 'warning';
+  } else {
+    return 'exception';
   }
-  throw new Error(`Unexpected enum value ${linkMerge}`);
-};
-
-const merge_flatten_type = (src: SinkType): CWLOutputType => {
-  /* "Return the merge flattened type of the source type."*/
-  if (src instanceof Array) {
-    return src.map((t) => merge_flatten_type(t));
-  }
-  if (src instanceof Map && src.get('type') === 'array') {
-    return src;
-  }
-  return { items: src, type: 'array' };
 };
 
 function _compareRecords(src: cwlTsAuto.InputRecordSchema, sink: cwlTsAuto.InputRecordSchema, strict = false): boolean {
@@ -219,7 +231,7 @@ export function static_checker(
     const src = warning.src;
     const sink = warning.sink;
     const linkMerge = warning.linkMerge;
-    const sinksf = aslist(sink.secondaryFiles)
+    const sinksf = [...aslist(sink.secondaryFiles)]
       .filter((p) => p.required ?? true)
       .sort((a, b) => {
         if (a.pattern < b.pattern) {
@@ -229,7 +241,7 @@ export function static_checker(
         }
         return 0;
       });
-    const srcsf = aslist(src.secondaryFiles).sort((a, b) => {
+    const srcsf = [...aslist(src.secondaryFiles)].sort((a, b) => {
       if (a.pattern < b.pattern) {
         return -1;
       } else if (a.pattern > b.pattern) {

@@ -38,6 +38,7 @@ import {
   visit_class,
   getRequirement,
   type JobsType,
+  josonStringifyLikePython,
 } from './utils.js';
 import { validate } from './validate.js';
 export class ExpressionJob {
@@ -490,7 +491,7 @@ export class CommandLineTool extends Process {
                 `'entry' expression resulted in something other than number, object or array besides a single File or Dirent object. In CWL v1.2+ this would be serialized to a JSON object. However this is a document. If that is the desired result then please consider using 'cwl-upgrader' to upgrade your document to CWL version 1.2. Result of ${entry_field} was ${entry}.`,
               );
             }
-            et['entry'] = JSON.stringify(entry, null, '');
+            et['entry'] = josonStringifyLikePython(entry);
           }
         }
 
@@ -601,21 +602,15 @@ export class CommandLineTool extends Process {
           `Name ${basename} at index ${i} of listing is invalid, ` + `cannot start with '../'`,
         );
       }
-      // if (basename.startsWith("/")) {
-      // if (cwl_version && ORDERED_VERSIONS.indexOf(cwl_version) < ORDERED_VERSIONS.indexOf("v1.2.0-dev4")) {
-      // throw new WorkflowException(
-      //     `Name ${basename!r} at index ${i} of listing is invalid, `+
-      //     `paths starting with '/' are only permitted in CWL 1.2 ` +
-      //     `and later. Consider changing the absolute path to a relative ` +
-      //     `path, or upgrade the CWL description to CWL v1.2 using https://pypi.org/project/cwl-upgrader/`);
-      //     }
-      //     const [req, is_req] = this.get_requirement("DockerRequirement");
-      //     if (is_req !== true) {
-      //         throw new WorkflowException(
-      //             `Name ${basename!r} at index ${i} of listing is invalid, ` +
-      //             `name can only start with '/' when DockerRequirement is in 'requirements'.`);
-      //     }
-      // }
+      if (basename.startsWith('/')) {
+        const [req, is_req] = this.getRequirement(DockerRequirement);
+        if (is_req !== true) {
+          throw new WorkflowException(
+            `Name ${basename} at index ${i} of listing is invalid, ` +
+              `name can only start with '/' when DockerRequirement is in 'requirements'.`,
+          );
+        }
+      }
     }
   }
 
@@ -840,27 +835,28 @@ export class CommandLineTool extends Process {
     }
   }
 
-  handle_network_access(builder: Builder, j: JobBase, debug: boolean): void {
+  async handle_network_access(builder: Builder, j: JobBase, debug: boolean): Promise<void> {
     const [networkaccess, _] = getRequirement(this.tool, cwlTsAuto.NetworkAccess);
     if (networkaccess == null) {
       return;
     }
+    let networkaccess_eval: CWLOutputType = undefined;
     const networkaccess_field = networkaccess.networkAccess;
     if (typeof networkaccess_field === 'string') {
-      const networkaccess_eval = builder.do_eval(networkaccess_field);
+      networkaccess_eval = await builder.do_eval(networkaccess_field);
       if (typeof networkaccess_eval !== 'boolean') {
         throw new WorkflowException(
           `'networkAccess' expression must evaluate to a bool. 
                 Got ${networkaccess_eval} for expression ${networkaccess_field}.`,
         );
-      } else {
-        const networkaccess_eval = networkaccess_field;
       }
-      if (typeof networkaccess_eval !== 'boolean') {
-        throw new WorkflowException(`networkAccess must be a boolean, got: ${networkaccess_eval}.`);
-      }
-      j.networkaccess = networkaccess_eval;
+    } else {
+      networkaccess_eval = networkaccess_field;
     }
+    if (typeof networkaccess_eval !== 'boolean') {
+      throw new WorkflowException(`networkAccess must be a boolean, got: ${networkaccess_eval}.`);
+    }
+    j.networkaccess = networkaccess_eval;
   }
   async handle_env_var(builder: Builder, debug: boolean): Promise<any> {
     const [evr, _] = getRequirement(this, cwlTsAuto.EnvVarRequirement);
@@ -1097,7 +1093,7 @@ export class CommandLineTool extends Process {
 
     await this.handle_tool_time_limit(builder, j, debug);
 
-    this.handle_network_access(builder, j, debug);
+    await this.handle_network_access(builder, j, debug);
 
     const required_env = await this.handle_env_var(builder, debug);
     j.prepare_environment(runtimeContext, required_env);
@@ -1161,7 +1157,7 @@ export class CommandLineTool extends Process {
           adjustFileObjs(ret, async (val) => compute_checksums(fs_access, val));
         }
         // const expected_schema = ((this.names.get_name("outputs_record_schema", null)) as Schema);
-        validate(this.outputs_record_schema, ret, false);
+        validate(this.outputs_record_schema, ret, true);
         if (ret && builder.mutation_manager) {
           adjustFileObjs(ret, builder.mutation_manager.set_generation);
         }
@@ -1410,12 +1406,7 @@ export class CommandLineTool extends Process {
         single = true;
       }
       if (binding.outputEval) {
-        try {
-          result = await builder.do_eval(binding.outputEval, r);
-        } catch (error) {
-          _logger.warn(error);
-          // Log the error here
-        }
+        result = await builder.do_eval(binding.outputEval, r);
       } else {
         result = r as CWLOutputType;
       }
