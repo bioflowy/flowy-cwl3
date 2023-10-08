@@ -106,6 +106,75 @@ interface StageFilesOptions {
   fix_conflicts?: boolean;
   secret_store?: SecretStore;
 }
+export function stage_files_for_outputs(
+  pathmapper: PathMapper,
+  stage_func?: (src: string, dest: string) => void,
+  { ignore_writable = false, symlink = true, fix_conflicts = false, secret_store = undefined }: StageFilesOptions = {},
+): void {
+  let items: [string, MapperEnt][] = symlink ? pathmapper.items_exclude_children() : pathmapper.items();
+  const targets: { [key: string]: MapperEnt } = {};
+
+  for (const [key, entry] of items) {
+    if (!entry.type.includes('File')) continue;
+    if (!targets[entry.target]) {
+      targets[entry.target] = entry;
+    } else if (targets[entry.target].resolved !== entry.resolved) {
+      if (fix_conflicts) {
+        let i = 2;
+        let tgt = `${entry.target}_${i}`;
+        while (targets[tgt]) {
+          i++;
+          tgt = `${entry.target}_${i}`;
+        }
+        targets[tgt] = pathmapper.update(key, entry.resolved, tgt, entry.type, entry.staged);
+      } else {
+        throw new Error(
+          `File staging conflict, trying to stage both ${targets[entry.target].resolved} and ${
+            entry.resolved
+          } to the same target ${entry.target}`,
+        );
+      }
+    }
+  }
+
+  items = symlink ? pathmapper.items_exclude_children() : pathmapper.items();
+
+  for (const [key, entry] of items) {
+    if (!entry.staged) continue;
+
+    const targetDir = path.dirname(entry.target);
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    if ((entry.type === 'File' || entry.type === 'Directory') && fs.existsSync(entry.resolved)) {
+      if (symlink) {
+        fs.symlinkSync(entry.resolved, entry.target);
+      } else if (stage_func) {
+        stage_func(entry.resolved, entry.target);
+      }
+    } else if (entry.type === 'Directory' && !fs.existsSync(entry.target) && entry.resolved.startsWith('_:')) {
+      fs.mkdirSync(entry.target, { recursive: true });
+    } else if (entry.type === 'WritableFile' && !ignore_writable) {
+      fs.copyFileSync(entry.resolved, entry.target);
+      ensureWritable(entry.target);
+    } else if (entry.type === 'WritableDirectory' && !ignore_writable) {
+      if (entry.resolved.startsWith('_:')) {
+        fs.mkdirSync(entry.target, { recursive: true });
+      } else {
+        fsExtra.copySync(entry.resolved, entry.target);
+        ensureWritable(entry.target, true);
+      }
+    } else if (entry.type === 'CreateFile' || entry.type === 'CreateWritableFile') {
+      const content = entry.resolved;
+      fs.writeFileSync(entry.target, content, { mode: entry.type === 'CreateFile' ? 0o400 : 0o600 });
+      if (entry.type === 'CreateWritableFile') {
+        ensureWritable(entry.target);
+      }
+      pathmapper.update(key, entry.target, entry.target, entry.type, entry.staged);
+    }
+  }
+}
+
 export function stage_files(
   staging: Staging,
   pathmapper: PathMapper,
@@ -154,21 +223,18 @@ export function stage_files(
     } else if (entry.type === 'Directory' && entry.resolved.startsWith('_:')) {
       staging.mkdirSync(entry.target, true);
     } else if (entry.type === 'WritableFile' && !ignore_writable) {
-      staging.copyFileSync(entry.resolved, entry.target);
-      ensureWritable(entry.target);
+      staging.copyFileSync(entry.resolved, entry.target, { ensureWritable: true });
     } else if (entry.type === 'WritableDirectory' && !ignore_writable) {
       if (entry.resolved.startsWith('_:')) {
         staging.mkdirSync(entry.target, true);
       } else {
-        staging.copyFileSync(entry.resolved, entry.target);
-        ensureWritable(entry.target, true);
+        staging.copyFileSync(entry.resolved, entry.target, { ensureWritable: true });
       }
     } else if (entry.type === 'CreateFile' || entry.type === 'CreateWritableFile') {
       const content = entry.resolved;
-      staging.writeFileSync(entry.target, content, entry.type === 'CreateFile' ? 0o400 : 0o600);
-      if (entry.type === 'CreateWritableFile') {
-        ensureWritable(entry.target);
-      }
+      staging.writeFileSync(entry.target, content, entry.type === 'CreateFile' ? 0o400 : 0o600, {
+        ensureWritable: entry.type === 'CreateWritableFile',
+      });
       pathmapper.update(key, entry.target, entry.target, entry.type, entry.staged);
     }
   }
@@ -289,11 +355,10 @@ export async function relocateOutputs(
       ob['location'] = fileUri(fs_access.realpath(location));
     }
   }
-  const staging = new immediateStaging();
   const outfiles = Array.from(_collectDirEntries(outputObj));
   visit_class(outfiles, ['File', 'Directory'], _realpath);
   const pm = new PathMapper(outfiles, '', destination_path, false);
-  stage_files(staging, pm, _relocate, { symlink: false, fix_conflicts: true });
+  stage_files_for_outputs(pm, _relocate, { symlink: false, fix_conflicts: true });
 
   function _check_adjust(a_file: CWLObjectType): CWLObjectType {
     a_file['location'] = fileUri(pm.mapper(a_file['location'] as string)?.target ?? '');

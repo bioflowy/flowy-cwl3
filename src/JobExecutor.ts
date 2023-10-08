@@ -9,6 +9,8 @@ import {
   WriteFileContentCommand,
 } from './staging.js';
 import { st } from 'rdflib';
+import { ensureWritable } from './utils.js';
+import fsExtra from 'fs-extra/esm';
 export interface JobExec {
   staging: StagingCommand[];
   commands: string[];
@@ -26,6 +28,9 @@ async function prepareStagingDir(StagingCommand: StagingCommand[]): Promise<void
         const c = command as WriteFileContentCommand;
         if (!fs.existsSync(command.target)) {
           fs.writeFileSync(command.target, command.content, { mode: command.mode });
+          if (command.options.ensureWritable) {
+            ensureWritable(command.target);
+          }
         }
         break;
       }
@@ -45,8 +50,11 @@ async function prepareStagingDir(StagingCommand: StagingCommand[]): Promise<void
       }
       case 'copy': {
         const c = command as CopyCommand;
-        if (!fs.existsSync(c.resolved)) {
-          await fs.promises.copyFile(c.resolved, c.target);
+        if (!fs.existsSync(c.target)) {
+          await fsExtra.copy(c.resolved, c.target);
+          if (c.options.ensureWritable) {
+            ensureWritable(c.target);
+          }
         }
         break;
       }
