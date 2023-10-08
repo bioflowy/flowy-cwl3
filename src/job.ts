@@ -24,6 +24,8 @@ import {
   ensure_non_writable,
   getRequirement,
 } from './utils.js';
+import { LazyStaging, Staging } from './staging.js';
+import { executeJob } from './JobExecutor.js';
 // ... and so on for other modules
 const needsShellQuotingRe = /(^$|[\s|&;()<>\'"$@])/;
 
@@ -71,6 +73,7 @@ const neverquote = (string: string, pos = 0, endpos = 0): any => {
   return null;
 };
 export async function _job_popen(
+  staging: LazyStaging,
   commands: string[],
   stdin_path: string | undefined,
   stdout_path: string | undefined,
@@ -85,43 +88,22 @@ export async function _job_popen(
   default_stdout: any = undefined,
   default_stderr: any = undefined,
 ): Promise<number> {
-  let stdin: any = 'pipe';
-  let stdout: any = default_stdout ? default_stdout : process.stderr;
-  let stderr: any = default_stderr ? default_stderr : process.stderr;
-
-  if (stdin_path !== undefined) {
-    stdin = fs.openSync(stdin_path, 'r');
-  }
-  if (stdout_path !== undefined) {
-    stdout = fs.openSync(stdout_path, 'w');
-  }
-  if (stderr_path !== undefined) {
-    stderr = fs.openSync(stderr_path, 'w');
-  }
-  const [cmd, ...args] = commands;
-  return new Promise((resolve, reject) => {
-    const child = cp.spawn(cmd, args, {
-      cwd,
-      env,
-      stdio: [stdin, stdout, stderr],
-      timeout: timelimit !== undefined ? timelimit * 1000 : undefined,
-    });
-    if (monitor_function) {
-      monitor_function(child);
-    }
-    child.on('close', (code) => {
-      resolve(code ?? -1);
-    });
-
-    child.on('error', (error) => {
-      reject(error);
-    });
+  return executeJob({
+    staging: staging.commands,
+    commands,
+    stdin_path,
+    stdout_path,
+    stderr_path,
+    env,
+    cwd,
+    timelimit,
   });
 }
 
 type CollectOutputsType = (str: string, int: number) => Promise<CWLObjectType>; // Assuming functools.partial as any
 export abstract class JobBase {
   builder: Builder;
+  staging: LazyStaging = new LazyStaging();
   base_path_logs: string;
   joborder: CWLObjectType;
   make_path_mapper: (param1: CWLObjectType[], param2: string, param3: RuntimeContext, param4: boolean) => PathMapper;
@@ -329,6 +311,7 @@ export abstract class JobBase {
         job_script_contents = builder.build_job_script(commands);
       }
       const rcode = await _job_popen(
+        this.staging,
         commands,
         stdin_path,
         stdout_path,
@@ -536,13 +519,13 @@ export class CommandLineJob extends JobBase {
 
     this._setup(runtimeContext);
 
-    stage_files(this.pathmapper, null, {
+    stage_files(this.staging, this.pathmapper, null, {
       ignore_writable: true,
       symlink: true,
       secret_store: runtimeContext.secret_store,
     });
     if (this.generatemapper) {
-      stage_files(this.generatemapper, null, {
+      stage_files(this.staging, this.generatemapper, null, {
         ignore_writable: this.inplace_update,
         symlink: true,
         secret_store: runtimeContext.secret_store,

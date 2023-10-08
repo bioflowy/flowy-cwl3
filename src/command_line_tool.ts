@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import cwlTsAuto, {
+  CommandOutputBinding,
   Directory,
   Dirent,
   DockerRequirement,
@@ -39,6 +40,7 @@ import {
   getRequirement,
   type JobsType,
   josonStringifyLikePython,
+  isStringOrStringArray,
 } from './utils.js';
 import { validate } from './validate.js';
 export class ExpressionJob {
@@ -1179,7 +1181,7 @@ export class CommandLineTool extends Process {
   }
   async glob_output(
     builder: Builder,
-    binding,
+    binding: CommandOutputBinding,
     debug: boolean,
     outdir: string,
     fs_access: StdFsAccess,
@@ -1189,34 +1191,22 @@ export class CommandLineTool extends Process {
     const r: CWLOutputType[] = [];
     const globpatterns: string[] = [];
 
-    if (!binding['glob']) {
+    if (!binding.glob) {
       return [r, globpatterns];
     }
 
     try {
-      for (let gb of aslist(binding['glob'])) {
-        gb = await builder.do_eval(gb);
+      for (let g of aslist(binding.glob)) {
+        const gb = await builder.do_eval(g);
         if (gb) {
           let gb_eval_fail = false;
-          if (typeof gb !== 'string') {
-            if (Array.isArray(gb)) {
-              for (const entry of gb) {
-                if (typeof entry !== 'string') {
-                  gb_eval_fail = true;
-                }
-              }
-            } else {
-              gb_eval_fail = true;
-            }
-          }
-
-          if (gb_eval_fail) {
+          if (isStringOrStringArray(gb)) {
+            globpatterns.push(...aslist(gb));
+          } else {
             throw new WorkflowException(
-              'Resolved glob patterns must be strings or list of strings, not ' + `${gb} from ${binding['glob']!}`,
+              'Resolved glob patterns must be strings or list of strings, not ' + `${gb} from ${binding.glob}`,
             );
           }
-
-          globpatterns.push(...aslist(gb));
         }
       }
 

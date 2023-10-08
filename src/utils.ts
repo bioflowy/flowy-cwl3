@@ -83,6 +83,18 @@ export class WorkflowStateItem {
 export function isString(value: any): value is string {
   return typeof value === 'string';
 }
+export function isStringOrStringArray(value: any): value is string | string[] {
+  if (Array.isArray(value)) {
+    for (const v of value) {
+      if (typeof value !== 'string') {
+        return false;
+      }
+    }
+    return true;
+  } else {
+    return typeof value === 'string';
+  }
+}
 export function urldefrag(url: string): { url: string; fragment: string } {
   const [urlWithoutFragment, fragment] = url.split('#');
   return { url: urlWithoutFragment, fragment: fragment || '' };
