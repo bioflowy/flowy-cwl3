@@ -35,8 +35,17 @@ export function isArraySchema(
 }
 export function isRecordSchema(
   type: ToolType,
-): type is cwlTsAuto.CommandInputRecordSchema | cwlTsAuto.InputRecordSchema {
-  return type instanceof cwlTsAuto.CommandInputRecordSchema || type instanceof cwlTsAuto.InputRecordSchema;
+): type is
+  | cwlTsAuto.CommandInputRecordSchema
+  | cwlTsAuto.InputRecordSchema
+  | cwlTsAuto.CommandOutputRecordSchema
+  | cwlTsAuto.OutputRecordSchema {
+  return (
+    type instanceof cwlTsAuto.CommandInputRecordSchema ||
+    type instanceof cwlTsAuto.InputRecordSchema ||
+    type instanceof cwlTsAuto.CommandOutputRecordSchema ||
+    type instanceof cwlTsAuto.OutputRecordSchema
+  );
 }
 export function canAssignSrcToSinkType(src: ToolType, sink?: ToolType, strict = false): boolean {
   // Check for identical type specifications, ignoring extra keys like inputBinding.

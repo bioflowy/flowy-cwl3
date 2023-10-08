@@ -123,22 +123,34 @@ export function validate(t, datum, raise_ex: boolean) {
     return true;
   } else if (Array.isArray(t)) {
     for (let index = 0; index < t.length; index++) {
-      if (validate(t[index], datum, raise_ex)) {
+      if (validate(t[index], datum, false)) {
         return true;
       }
     }
-  } else if (isArraySchema(t)) {
-    if (!Array.isArray(datum)) {
-      return false;
+    if (raise_ex) {
+      throw new ValidationException(`the value ${JSON.stringify(datum)} is not ${t.join(' or ')}`);
     }
-    for (const d of datum) {
-      for (const item of aslist(t.items)) {
-        if (!validate(item, d, raise_ex)) {
-          return false;
+    return false;
+  } else if (isArraySchema(t)) {
+    let valid = true;
+    if (Array.isArray(datum)) {
+      for (const d of datum) {
+        if (!validate(t.items, d, false)) {
+          valid = false;
+          break;
         }
       }
     }
-    return true;
+    if (valid) {
+      return true;
+    }
+    if (raise_ex) {
+      throw new ValidationException(`the value ${JSON.stringify(datum)} is not ${t.items}`);
+    }
+    return false;
+  }
+  if (raise_ex) {
+    throw new ValidationException(`the value ${JSON.stringify(datum)} is not ${t}`);
   }
   return false;
 }
