@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { DockerRequirement, ShellCommandRequirement } from 'cwl-ts-auto';
-import fsExtra from 'fs-extra';
+import fsExtra, { outputFileSync } from 'fs-extra';
 import { remove } from 'lodash';
 import { v4 as uuidv4 } from 'uuid';
 import { Builder } from './builder.js';
@@ -23,12 +23,38 @@ import {
   ensureWritable,
   ensure_non_writable,
   getRequirement,
+  aslist,
+  isStringOrStringArray,
 } from './utils.js';
-import { LazyStaging, Staging } from './staging.js';
+import { LazyStaging } from './staging.js';
 import { executeJob } from './JobExecutor.js';
+import { glob } from 'glob';
 // ... and so on for other modules
 const needsShellQuotingRe = /(^$|[\s|&;()<>\'"$@])/;
 
+function relink_initialworkdir_lazy(
+  staging: LazyStaging,
+  pathmapper: PathMapper,
+  host_outdir: string,
+  container_outdir: string,
+  inplace_update = false,
+) {
+  for (const [key, vol] of pathmapper.items_exclude_children()) {
+    if (!vol.staged) {
+      continue;
+    }
+    if (
+      ['File', 'Directory'].includes(vol.type) ||
+      (inplace_update && ['WritableFile', 'WritableDirectory'].includes(vol.type))
+    ) {
+      if (!vol.target.startsWith(container_outdir)) {
+        continue;
+      }
+      const host_outdir_tgt = path.join(host_outdir, vol.target.substr(container_outdir.length + 1));
+      staging.relink(vol.resolved, host_outdir_tgt);
+    }
+  }
+}
 async function relink_initialworkdir(
   pathmapper: PathMapper,
   host_outdir: string,
@@ -530,7 +556,13 @@ export class CommandLineJob extends JobBase {
         symlink: true,
         secret_store: runtimeContext.secret_store,
       });
-      await relink_initialworkdir(this.generatemapper, this.outdir, this.builder.outdir, this.inplace_update);
+      relink_initialworkdir_lazy(
+        this.staging,
+        this.generatemapper,
+        this.outdir,
+        this.builder.outdir,
+        this.inplace_update,
+      );
     }
 
     const monitor_function = this.process_monitor.bind(this);

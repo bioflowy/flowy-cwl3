@@ -55,7 +55,7 @@ import {
   isString,
 } from './utils.js';
 import { validate } from './validate.js';
-import { Staging, immediateStaging } from './staging.js';
+import { LazyStaging } from './staging.js';
 
 const _logger_validation_warnings = _logger;
 
@@ -176,7 +176,7 @@ export function stage_files_for_outputs(
 }
 
 export function stage_files(
-  staging: Staging,
+  staging: LazyStaging,
   pathmapper: PathMapper,
   stage_func?: (src: string, dest: string) => void,
   { ignore_writable = false, symlink = true, fix_conflicts = false, secret_store = undefined }: StageFilesOptions = {},

@@ -3,7 +3,7 @@ import * as cp from 'node:child_process';
 import {
   CopyCommand,
   MkdirCommand,
-  Staging,
+  RelinkCommand,
   StagingCommand,
   SymlinkCommand,
   WriteFileContentCommand,
@@ -11,6 +11,7 @@ import {
 import { st } from 'rdflib';
 import { ensureWritable } from './utils.js';
 import fsExtra from 'fs-extra/esm';
+import { removeIgnorePermissionError } from './fileutils.js';
 export interface JobExec {
   staging: StagingCommand[];
   commands: string[];
@@ -36,7 +37,7 @@ async function prepareStagingDir(StagingCommand: StagingCommand[]): Promise<void
       }
       case 'symlink': {
         const c = command as SymlinkCommand;
-        if (!fs.existsSync(c.target)) {
+        if (!fs.existsSync(c.target) && fs.existsSync(c.resolved)) {
           await fs.promises.symlink(c.resolved, c.target);
         }
         break;
@@ -57,6 +58,29 @@ async function prepareStagingDir(StagingCommand: StagingCommand[]): Promise<void
           }
         }
         break;
+      }
+      case 'relink': {
+        const c = command as RelinkCommand;
+        const resolved = c.resolved;
+        const host_outdir_tgt = c.target;
+        const stat = fs.existsSync(host_outdir_tgt) ? fs.lstatSync(host_outdir_tgt) : undefined;
+        if (stat && (stat.isSymbolicLink() || stat.isFile())) {
+          // eslint-disable-next-line no-useless-catch
+          try {
+            await fs.promises.unlink(host_outdir_tgt);
+          } catch (e) {
+            if (!(e.code !== 'EPERM' || e.code !== 'EACCES')) throw e;
+          }
+        } else if (stat && stat.isDirectory() && !resolved.startsWith('_:')) {
+          await removeIgnorePermissionError(host_outdir_tgt);
+        }
+        if (!resolved.startsWith('_:')) {
+          try {
+            fs.symlinkSync(resolved, host_outdir_tgt);
+          } catch (e) {
+            if (e.code !== 'EEXIST') throw e;
+          }
+        }
       }
     }
   }

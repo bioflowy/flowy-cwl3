@@ -85,12 +85,7 @@ export function isString(value: any): value is string {
 }
 export function isStringOrStringArray(value: any): value is string | string[] {
   if (Array.isArray(value)) {
-    for (const v of value) {
-      if (typeof value !== 'string') {
-        return false;
-      }
-    }
-    return true;
+    return value.every((v) => typeof v === 'string');
   } else {
     return typeof value === 'string';
   }
