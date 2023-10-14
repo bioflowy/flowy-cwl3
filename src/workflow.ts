@@ -13,7 +13,6 @@ import { _logger } from './loghandler.js';
 import { Process, shortname } from './process.js';
 import {
   type CommandOutputParameter,
-  type Tool,
   transferProperties,
   type CommandInputParameter,
   type WorkflowStepInput,

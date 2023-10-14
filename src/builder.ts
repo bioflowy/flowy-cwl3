@@ -8,12 +8,7 @@ import { FormatGraph } from './formatgraph.js';
 import { _logger } from './loghandler.js';
 import { PathMapper } from './pathmapper.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import {
-  type CommandInputParameter,
-  type ToolRequirement,
-  CommandLineBinded,
-  type CommandLineBinding,
-} from './types.js';
+import { type ToolRequirement, CommandLineBinded } from './types.js';
 import {
   CONTENT_LIMIT,
   type CWLObjectType,
@@ -30,6 +25,7 @@ import {
   str,
 } from './utils.js';
 import { validate } from './validate.js';
+import { CommandInputParameter, CommandInputRecordSchema, isCommandInputRecordSchema } from './cwltypes.js';
 
 export const INPUT_OBJ_VOCAB: { [key: string]: string } = {
   Any: 'https://w3id.org/cwl/salad#Any',
@@ -238,7 +234,7 @@ export class Builder {
     let binding: CommandLineBinded | undefined;
     let value_from_expression = false;
 
-    if (schema.inputBinding && typeof schema.inputBinding === 'object') {
+    if (schema.inputBinding) {
       [binding, value_from_expression] = await this.handle_binding(schema, datum, lead_pos, tail_pos);
     }
 
@@ -277,7 +273,7 @@ export class Builder {
         }
       }
 
-      if (schema.type == 'record') {
+      if (isCommandInputRecordSchema(schema.type)) {
         datum = await this.handle_record(schema, datum, discover_secondaryFiles, lead_pos, tail_pos, bindings);
       }
 
@@ -582,7 +578,7 @@ export class Builder {
     return { positions: undefined };
   }
   async handle_record(
-    schema: CommandInputParameter,
+    schema: CommandInputRecordSchema,
     datum: CWLOutputType,
     discover_secondaryFiles: boolean,
     lead_pos: number | number[] | undefined,
