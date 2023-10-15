@@ -7,13 +7,6 @@ import { do_eval } from './expression.js';
 import { _logger } from './loghandler.js';
 import { shortname, uniquename } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import type {
-  CommandInputParameter,
-  CommandOutputParameter,
-  IWorkflowStep,
-  ToolType,
-  WorkflowStepInput,
-} from './types.js';
 import {
   type CWLObjectType,
   type CWLOutputType,
@@ -35,6 +28,7 @@ import {
   isMissingOrNull,
 } from './utils.js';
 import { Workflow, WorkflowStep } from './workflow.js';
+import { CommandOutputParameter, IWorkflowStep, ToolType, WorkflowStepInput } from './cwltypes.js';
 
 class WorkflowJobStep {
   step: WorkflowStep;

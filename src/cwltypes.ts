@@ -2,15 +2,13 @@ import * as cwl from 'cwl-ts-auto';
 import { Dictionary } from 'cwl-ts-auto/dist/util/Dict.js';
 import { ToolRequirement } from './types.js';
 import type { LoadingOptions } from 'cwl-ts-auto/dist/util/LoadingOptions.js';
-import { object } from '../work/tests/underscore.js';
-
 export interface IOParam {
   extensionFields?: Dictionary<any>;
   name?: undefined | string;
   label?: undefined | string;
   doc?: undefined | string | Array<string>;
 }
-type CommandOutputType =
+export type CommandOutputType =
   | cwl.CWLType
   | CommandOutputRecordSchema
   | CommandOutputEnumSchema
@@ -32,8 +30,19 @@ export type CommandInputType =
   | string
   | Array<cwl.CWLType | CommandInputRecordSchema | CommandInputEnumSchema | CommandInputArraySchema | string>;
 
-export function isCommandInputRecordSchema(t: CommandInputType): t is CommandInputRecordSchema {
-  return t instanceof object && t['type'] === 'record';
+export type ToolType = CommandOutputType | CommandInputType | OutputType | InputType;
+
+export function isCommandInputRecordSchema(t: CommandInputParameter): t is CommandInputRecordSchema {
+  return t instanceof Object && t['type'] === 'record';
+}
+export function isCommandInputArraySchema(t: CommandInputParameter): t is CommandInputArraySchema {
+  return t instanceof Object && t['type'] === 'array';
+}
+export function isIORecordSchema(t: any): t is IORecordSchema<any> {
+  return t instanceof Object && t['type'] === 'record';
+}
+export function isIOArraySchema(t: any): t is IOArraySchema<any> {
+  return t instanceof Object && t['type'] === 'array';
 }
 export type InputType =
   | cwl.CWLType
@@ -62,21 +71,22 @@ export interface IOArraySchema<T> extends IOParam {
 export type CommandOutputArraySchema = IOArraySchema<CommandOutputType>;
 export type OutputArraySchema = IOArraySchema<OutputType>;
 export interface CommandInputArraySchema extends IOArraySchema<CommandInputType> {
-  inputBinding?: undefined | cwl.CommandLineBinding;
+  inputBinding?: undefined | CommandLineBinding;
 }
 export type InputArraySchema = IOArraySchema<InputType>;
 
 // EnumSchema
 export type EnumTypeEnum = cwl.enum_d961d79c225752b9fadb617367615ab176b47d77;
-export interface InputEnumSchema extends IOParam {
+export interface IOEnumSchema extends IOParam {
   symbols: Array<string>;
   type: EnumTypeEnum;
 }
-export interface CommandInputEnumSchema extends InputEnumSchema {
+export interface InputEnumSchema extends IOEnumSchema {}
+export interface CommandInputEnumSchema extends IOEnumSchema {
   inputBinding?: undefined | CommandLineBinding;
 }
-export type CommandOutputEnumSchema = InputEnumSchema;
-export type OutputEnumSchema = InputEnumSchema;
+export type CommandOutputEnumSchema = IOEnumSchema;
+export type OutputEnumSchema = IOEnumSchema;
 
 // RecordSchema
 export interface AbstractInputRecordField<T> {
@@ -105,7 +115,7 @@ export interface OutputRecordField extends AbstractInputRecordField<OutputType> 
   format?: undefined | string;
 }
 export type RecordTypeEnum = cwl.enum_d9cba076fca539106791a4f46d198c7fcfbdb779;
-export interface AbstractRecordSchema<T> {
+export interface IORecordSchema<T> {
   extensionFields?: Dictionary<any>;
   name?: undefined | string;
   fields?: undefined | Array<T>;
@@ -113,12 +123,12 @@ export interface AbstractRecordSchema<T> {
   label?: undefined | string;
   doc?: undefined | string | Array<string>;
 }
-export type InputRecordSchema = AbstractRecordSchema<InputRecordField>;
-export interface CommandInputRecordSchema extends AbstractRecordSchema<CommandInputRecordField> {
+export type InputRecordSchema = IORecordSchema<InputRecordField>;
+export interface CommandInputRecordSchema extends IORecordSchema<CommandInputRecordField> {
   inputBinding?: undefined | CommandLineBinding;
 }
-export interface CommandOutputRecordSchema extends AbstractRecordSchema<CommandOutputRecordField> {}
-export interface OutputRecordSchema extends AbstractRecordSchema<OutputRecordField> {}
+export interface CommandOutputRecordSchema extends IORecordSchema<CommandOutputRecordField> {}
+export interface OutputRecordSchema extends IORecordSchema<OutputRecordField> {}
 
 export interface SecondaryFileSchema {
   extensionFields?: Dictionary<any>;
@@ -140,6 +150,7 @@ export interface CommandLineBinding {
 export interface CommandOutputParameter {
   extensionFields?: Dictionary<any>;
   id?: undefined | string;
+  name?: undefined | string;
   label?: undefined | string;
   secondaryFiles?: undefined | SecondaryFileSchema | Array<SecondaryFileSchema>;
   streamable?: undefined | boolean;
@@ -158,6 +169,7 @@ export interface CommandOutputBinding {
 
 export interface CommandInputParameter {
   id?: undefined | string;
+  name?: undefined | string;
   label?: undefined | string;
   secondaryFiles?: undefined | SecondaryFileSchema | SecondaryFileSchema[];
   streamable?: undefined | boolean;
@@ -187,9 +199,9 @@ export interface IWorkflowStep {
   id?: undefined | string;
   label?: undefined | string;
   doc?: undefined | string | string[];
-  in_: cwl.WorkflowStepInput[];
+  in_: WorkflowStepInput[];
   inputs: WorkflowStepInput[];
-  out: (string | cwl.WorkflowStepOutput)[];
+  out: (string | WorkflowStepOutput)[];
   outputs: WorkflowStepOutput[];
   requirements: ToolRequirement;
   hints: ToolRequirement;
@@ -214,4 +226,85 @@ export interface Tool {
    *
    */
   arguments_?: undefined | (string | CommandLineBinding)[];
+}
+export interface InputBinding {
+  extensionFields?: Dictionary<any>;
+  loadContents?: undefined | boolean;
+}
+export interface WorkflowOutputParameter {
+  extensionFields?: Dictionary<any>;
+  id?: undefined | string;
+  label?: undefined | string;
+  secondaryFiles?: undefined | SecondaryFileSchema | Array<SecondaryFileSchema>;
+  /**
+   * Only valid when `type: File` or is an array of `items: File`.
+   *
+   * A value of `true` indicates that the file is read or written
+   * sequentially without seeking.  An implementation may use this flag to
+   * indicate whether it is valid to stream file contents using a named
+   * pipe.  Default: `false`.
+   *
+   */
+  streamable?: undefined | boolean;
+  /**
+   * A documentation string for this object, or an array of strings which should be concatenated.
+   */
+  doc?: undefined | string | Array<string>;
+  /**
+   * Only valid when `type: File` or is an array of `items: File`.
+   *
+   * This is the file format that will be assigned to the output
+   * File object.
+   *
+   */
+  format?: undefined | string;
+  /**
+   * Specifies one or more names of an output from a workflow step (in the form
+   * `step_name/output_name` with a `/` separator`), or a workflow input name,
+   * that supply their value(s) to the output parameter.
+   * the output parameter.  It is valid to reference workflow level inputs
+   * here.
+   *
+   */
+  outputSource?: undefined | string | Array<string>;
+  /**
+   * The method to use to merge multiple sources into a single array.
+   * If not specified, the default method is "merge_nested".
+   *
+   */
+  linkMerge?: undefined | cwl.LinkMergeMethod;
+  /**
+   * The method to use to choose non-null elements among multiple sources.
+   *
+   */
+  pickValue?: undefined | cwl.PickValueMethod;
+  /**
+   * Specify valid types of data that may be assigned to this parameter.
+   *
+   */
+  type: OutputType;
+}
+export interface WorkflowInputParameter {
+  extensionFields?: Dictionary<any>;
+  id?: undefined | string;
+  label?: undefined | string;
+  secondaryFiles?: undefined | SecondaryFileSchema | Array<SecondaryFileSchema>;
+  streamable?: undefined | boolean;
+  doc?: undefined | string | Array<string>;
+  format?: undefined | string | Array<string>;
+  loadContents?: undefined | boolean;
+  loadListing?: undefined | cwl.LoadListingEnum;
+  default_?: undefined | cwl.File | cwl.Directory | any;
+  /**
+   * Specify valid types of data that may be assigned to this parameter.
+   *
+   */
+  type:
+    | cwl.CWLType
+    | InputRecordSchema
+    | InputEnumSchema
+    | InputArraySchema
+    | string
+    | Array<cwl.CWLType | InputRecordSchema | InputEnumSchema | InputArraySchema | string>;
+  inputBinding?: undefined | cwl.InputBinding;
 }

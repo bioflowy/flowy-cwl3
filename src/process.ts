@@ -5,7 +5,7 @@ import * as crypto from 'node:crypto';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import cwlTsAuto, { SecondaryFileSchema } from 'cwl-ts-auto';
+import cwlTsAuto from 'cwl-ts-auto';
 import fsExtra from 'fs-extra';
 import { cloneDeep } from 'lodash-es';
 import { v4 } from 'uuid';
@@ -24,14 +24,7 @@ import { MapperEnt, PathMapper } from './pathmapper.js';
 import { SecretStore } from './secrets.js';
 import { StdFsAccess } from './stdfsaccess.js';
 
-import {
-  compareInputBinding,
-  type Tool,
-  type ToolType,
-  type CommandInputParameter,
-  CommandLineBinded,
-  type ToolRequirement,
-} from './types.js';
+import { compareInputBinding, CommandLineBinded, type ToolRequirement } from './types.js';
 import {
   type CWLObjectType,
   type CWLOutputAtomType,
@@ -56,6 +49,16 @@ import {
 } from './utils.js';
 import { validate } from './validate.js';
 import { LazyStaging } from './staging.js';
+import {
+  CommandInputParameter,
+  CommandInputRecordField,
+  CommandOutputParameter,
+  CommandOutputRecordField,
+  CommandOutputType,
+  RecordTypeEnum,
+  Tool,
+  ToolType,
+} from './cwltypes.js';
 
 const _logger_validation_warnings = _logger;
 
@@ -429,12 +432,9 @@ function avroizeType(fieldType: ToolType | null, namePrefix = ''): ToolType {
       }
     }
 
-    if (fieldType instanceof cwlTsAuto.CommandInputRecordSchema) {
+    if (fieldType.type === 'record') {
       fieldType.fields = avroizeType(fieldType.fields as any, namePrefix) as any;
-    } else if (
-      fieldType instanceof cwlTsAuto.CommandInputArraySchema ||
-      fieldType instanceof cwlTsAuto.InputArraySchema
-    ) {
+    } else if (fieldType.type === 'array') {
       fieldType.items = avroizeType(fieldType.items, namePrefix);
     } else {
       fieldType.type = avroizeType(fieldType.type, namePrefix) as any;
@@ -520,8 +520,8 @@ export abstract class Process {
       | cwlTsAuto.CommandInputEnumSchema
       | cwlTsAuto.CommandInputRecordSchema;
   };
-  inputs_record_schema: CommandInputParameter;
-  outputs_record_schema: CommandInputParameter;
+  inputs_record_schema: { name: string; type: { type: RecordTypeEnum; fields: CommandInputRecordField[] } };
+  outputs_record_schema: { name: string; type: { type: RecordTypeEnum; fields: CommandOutputRecordField[] } };
   container_engine: 'docker' | 'podman' | 'singularity';
   constructor(toolpath_object: Tool) {
     this.tool = toolpath_object;
@@ -594,16 +594,20 @@ export abstract class Process {
     }
     // Build record schema from inputs
 
-    this.inputs_record_schema = new cwlTsAuto.CommandInputRecordSchema({
+    this.inputs_record_schema = {
       name: 'inputs_record_schema',
-      type: 'record' as any,
-      fields: [],
-    });
-    this.outputs_record_schema = new cwlTsAuto.CommandInputRecordSchema({
+      type: {
+        type: 'record' as RecordTypeEnum,
+        fields: [],
+      },
+    };
+    this.outputs_record_schema = {
       name: 'outputs_record_schema',
-      type: 'record' as any,
-      fields: [],
-    });
+      type: {
+        type: 'record' as RecordTypeEnum,
+        fields: [],
+      },
+    };
 
     for (const i of this.tool.inputs) {
       const c = cloneDeep(i);
@@ -618,7 +622,7 @@ export abstract class Process {
       }
 
       c.type = avroizeType(c.type, c.name);
-      this.inputs_record_schema.fields.push(c);
+      this.inputs_record_schema.type.fields.push(c as CommandInputRecordField);
     }
     for (const i of this.tool.outputs) {
       const c = cloneDeep(i);
@@ -626,9 +630,9 @@ export abstract class Process {
         throw new Error(`Missing 'type' in parameter '${c.name}'`);
       }
 
-      c.type = avroizeType(c.type, c.name);
+      c.type = avroizeType(c.type, c.name) as CommandOutputType;
 
-      (this.outputs_record_schema['fields'] as any).push(c);
+      this.outputs_record_schema.type.fields.push(c as CommandOutputRecordField);
     }
     this.container_engine = 'docker';
     if (loadingContext.podman) {
@@ -719,7 +723,7 @@ export abstract class Process {
       if (schema == null) {
         throw new WorkflowException(`Missing input record schema`);
       }
-      validate(schema, job, false);
+      validate(schema.type, job, false);
 
       if (load_listing != 'no_listing') {
         get_listing(fs_access, job, load_listing == 'deep_listing');
@@ -842,7 +846,21 @@ hints:
     if (this.tool.arguments_) {
       for (let i = 0; i < this.tool.arguments_.length; i++) {
         const arg = this.tool.arguments_[i];
-        if (arg instanceof cwlTsAuto.CommandLineBinding) {
+        if (isString(arg)) {
+          if (arg.includes('$(') || arg.includes('${')) {
+            const cm = {
+              positions: [0, i],
+              valueFrom: arg,
+            };
+            bindings.push(cm);
+          } else {
+            const cm = {
+              positions: [0, i],
+              datum: arg,
+            };
+            bindings.push(cm);
+          }
+        } else {
           const arg2 = CommandLineBinded.fromBinding(arg);
           if (arg.position) {
             let position = arg.position;
@@ -857,18 +875,6 @@ hints:
             arg2.positions = [0, i];
           }
           bindings.push(arg2);
-        } else if (arg.includes('$(') || arg.includes('${')) {
-          const cm = {
-            positions: [0, i],
-            valueFrom: arg,
-          };
-          bindings.push(cm);
-        } else {
-          const cm = {
-            positions: [0, i],
-            datum: arg,
-          };
-          bindings.push(cm);
         }
       }
     }

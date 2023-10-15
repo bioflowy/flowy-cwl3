@@ -14,7 +14,7 @@ import { _logger } from './loghandler.js';
 import { MapperEnt, PathMapper } from './pathmapper.js';
 import { stage_files } from './process.js';
 import { SecretStore } from './secrets.js';
-import type { Tool, ToolRequirement } from './types.js';
+import type { ToolRequirement } from './types.js';
 import {
   type CWLObjectType,
   type DirectoryType,
@@ -29,6 +29,7 @@ import {
 import { LazyStaging } from './staging.js';
 import { executeJob } from './JobExecutor.js';
 import { glob } from 'glob';
+import { Tool } from './cwltypes.js';
 // ... and so on for other modules
 const needsShellQuotingRe = /(^$|[\s|&;()<>\'"$@])/;
 

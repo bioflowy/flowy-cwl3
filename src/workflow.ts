@@ -11,17 +11,18 @@ import { pathJoin } from './fileutils.js';
 import { loadDocument } from './loader.js';
 import { _logger } from './loghandler.js';
 import { Process, shortname } from './process.js';
-import {
-  type CommandOutputParameter,
-  transferProperties,
-  type CommandInputParameter,
-  type WorkflowStepInput,
-  type IWorkflowStep,
-  type WorkflowStepOutput,
-} from './types.js';
+import { transferProperties } from './types.js';
 
 import { isString, type CWLObjectType, type JobsGeneratorType, type OutputCallbackType, aslist } from './utils.js';
 import { WorkflowJob } from './workflow_job.js';
+import {
+  ArrayTypeEnum,
+  CommandInputParameter,
+  CommandOutputParameter,
+  IWorkflowStep,
+  WorkflowStepInput,
+  WorkflowStepOutput,
+} from './cwltypes.js';
 
 function sha1(data: string): string {
   const hash = crypto.createHash('sha1');
@@ -235,7 +236,7 @@ function used_by_step(step: IWorkflowStep, shortinputid: string): boolean {
 function handleInput(
   tool: IWorkflowStep,
   embedded_tool: Process,
-  toolpath_object: cwlTsAuto.WorkflowStepInput[],
+  toolpath_object: WorkflowStepInput[],
   bound: Set<any>,
   validation_errors,
   debug: boolean,
@@ -277,7 +278,7 @@ function handleInput(
 }
 function handleOutput(
   embedded_tool: Process,
-  stepOutputs: (cwlTsAuto.WorkflowStepOutput | string)[],
+  stepOutputs: (WorkflowStepOutput | string)[],
   bound: Set<any>,
   validation_errors,
   debug: boolean,
@@ -288,7 +289,7 @@ function handleOutput(
     let inputid;
 
     if (isString(step_entry)) {
-      param = {};
+      param = { type: 'Any' };
       inputid = step_entry;
     } else {
       param = deepcopy(step_entry);
@@ -471,7 +472,7 @@ export class WorkflowStep extends Process {
 
       for (const _ of Array(nesting).keys()) {
         for (const oparam of outputparms) {
-          oparam.type = new cwlTsAuto.CommandInputArraySchema({ type: 'array' as any, items: oparam.type });
+          oparam.type = { type: 'array' as ArrayTypeEnum, items: oparam.type };
         }
       }
       this.tool['inputs'] = inputparms;

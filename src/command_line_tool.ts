@@ -20,7 +20,7 @@ import { convertFileDirectoryToDict } from './main.js';
 import { PathMapper } from './pathmapper.js';
 import { Process, compute_checksums, shortname, uniquename } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import { type CommandOutputParameter, type Tool, type CommandInputParameter, type ToolRequirement } from './types.js';
+import { type ToolRequirement } from './types.js';
 import {
   type CWLObjectType,
   type CWLOutputType,
@@ -43,6 +43,7 @@ import {
   isStringOrStringArray,
 } from './utils.js';
 import { validate } from './validate.js';
+import { CommandInputParameter, CommandOutputParameter, Tool } from './cwltypes.js';
 export class ExpressionJob {
   builder: Builder;
   script: string;
@@ -1159,7 +1160,7 @@ export class CommandLineTool extends Process {
           adjustFileObjs(ret, async (val) => compute_checksums(fs_access, val));
         }
         // const expected_schema = ((this.names.get_name("outputs_record_schema", null)) as Schema);
-        validate(this.outputs_record_schema, ret, true);
+        validate(this.outputs_record_schema.type, ret, true);
         if (ret && builder.mutation_manager) {
           adjustFileObjs(ret, builder.mutation_manager.set_generation);
         }

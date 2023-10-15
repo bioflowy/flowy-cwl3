@@ -7,7 +7,6 @@ import { WorkflowException } from './errors.js';
 import { ContainerCommandLineJob } from './job.js';
 import { _logger } from './loghandler.js';
 import { MapperEnt, PathMapper } from './pathmapper.js';
-import type { Tool } from './types.js';
 import {
   type CWLObjectType,
   type MutableMapping,
@@ -18,6 +17,7 @@ import {
   which,
   getRequirement,
 } from './utils.js';
+import { Tool } from './cwltypes.js';
 
 const _IMAGES: Set<string> = new Set();
 

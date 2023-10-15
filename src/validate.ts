@@ -1,14 +1,25 @@
-import {
-  CommandInputArraySchema,
-  CommandInputEnumSchema,
-  CommandInputRecordSchema,
-  InputArraySchema,
-} from 'cwl-ts-auto';
+import { CommandInputEnumSchema } from 'cwl-ts-auto';
 import { ValidationException } from './errors.js';
 import { aslist, get_filed_name, isString } from './utils.js';
-import { isArraySchema, isRecordSchema } from './checker.js';
+import {
+  IOArraySchema,
+  IORecordSchema,
+  InputEnumSchema,
+  isCommandInputRecordSchema,
+  isIOArraySchema,
+  isIORecordSchema,
+} from './cwltypes.js';
 
-export function validate(t, datum, raise_ex: boolean) {
+export function validate(
+  t:
+    | string
+    | IOArraySchema<any>
+    | IORecordSchema<any>
+    | InputEnumSchema
+    | (string | IOArraySchema<any> | IORecordSchema<any> | InputEnumSchema)[],
+  datum,
+  raise_ex: boolean,
+) {
   if (t === 'null') {
     if (datum === null || datum === undefined) {
       return true;
@@ -33,7 +44,7 @@ export function validate(t, datum, raise_ex: boolean) {
       throw new ValidationException(`Excepted class is string but ${typeof datum}`);
     }
     return false;
-  } else if (['org.w3id.cwl.salad.Any', 'Any'].includes(t)) {
+  } else if (t === 'Any') {
     if (datum) {
       return true;
     }
@@ -81,9 +92,19 @@ export function validate(t, datum, raise_ex: boolean) {
       throw new ValidationException(`the value ${JSON.stringify(datum)} is not long`);
     }
     return false;
+  } else if (Array.isArray(t)) {
+    for (let index = 0; index < t.length; index++) {
+      if (validate(t[index], datum, false)) {
+        return true;
+      }
+    }
+    if (raise_ex) {
+      throw new ValidationException(`the value ${JSON.stringify(datum)} is not ${t.join(' or ')}`);
+    }
+    return false;
   } else if (t instanceof CommandInputEnumSchema) {
     return t.symbols.some((e) => get_filed_name(e) === datum);
-  } else if (isRecordSchema(t)) {
+  } else if (isIORecordSchema(t)) {
     if (!(datum instanceof Object)) {
       if (raise_ex) {
         throw new ValidationException(`is not a dict. Expected a ${t.name} object.`);
@@ -121,17 +142,7 @@ export function validate(t, datum, raise_ex: boolean) {
       }
     }
     return true;
-  } else if (Array.isArray(t)) {
-    for (let index = 0; index < t.length; index++) {
-      if (validate(t[index], datum, false)) {
-        return true;
-      }
-    }
-    if (raise_ex) {
-      throw new ValidationException(`the value ${JSON.stringify(datum)} is not ${t.join(' or ')}`);
-    }
-    return false;
-  } else if (isArraySchema(t)) {
+  } else if (isIOArraySchema(t)) {
     let valid = true;
     if (Array.isArray(datum)) {
       for (const d of datum) {

@@ -14,7 +14,7 @@ import { _logger } from './loghandler.js';
 import { MapperEnt, PathMapper } from './pathmapper.js';
 import { SecretStore } from './secrets.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import type { Tool, ToolRequirement } from './types.js';
+import type { ToolRequirement } from './types.js';
 import type { WorkflowJob } from './workflow_job.js';
 
 let __random_outdir: string | null = null;
