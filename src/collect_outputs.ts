@@ -97,6 +97,7 @@ export async function collect_output_ports(
   builder: Builder,
   outdir: string,
   rcode: number,
+  filemap: { [key: string]: CWLObjectType[] },
   compute_checksum = true,
   jobname = '',
   readers: MutableMapping<CWLObjectType> | null = null,

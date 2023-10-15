@@ -29,7 +29,7 @@ import {
 import { LazyStaging } from './staging.js';
 import { executeJob } from './JobExecutor.js';
 import { glob } from 'glob';
-import { Tool } from './cwltypes.js';
+import { JobOutputBinding, Tool, convertToJobOutputBindings } from './cwltypes.js';
 // ... and so on for other modules
 const needsShellQuotingRe = /(^$|[\s|&;()<>\'"$@])/;
 
@@ -106,7 +106,9 @@ export async function _job_popen(
   stdout_path: string | undefined,
   stderr_path: string | undefined,
   env: { [key: string]: string },
+  outputBinding: JobOutputBinding[],
   cwd: string,
+  builderOutDir: string,
   make_job_dir: () => string,
   job_script_contents: string | null = null,
   timelimit: number | undefined = undefined,
@@ -114,7 +116,7 @@ export async function _job_popen(
   monitor_function: ((sproc: any) => void) | null = null,
   default_stdout: any = undefined,
   default_stderr: any = undefined,
-): Promise<number> {
+): Promise<[number, { [key: string]: CWLObjectType[] }]> {
   return executeJob({
     staging: staging.commands,
     commands,
@@ -124,10 +126,17 @@ export async function _job_popen(
     env,
     cwd,
     timelimit,
+    outdir: cwd,
+    outputBinding,
+    builderOutDir,
   });
 }
 
-type CollectOutputsType = (str: string, int: number) => Promise<CWLObjectType>; // Assuming functools.partial as any
+type CollectOutputsType = (
+  str: string,
+  int: number,
+  filemap: { [key: string]: CWLObjectType[] },
+) => Promise<CWLObjectType>; // Assuming functools.partial as any
 export abstract class JobBase {
   builder: Builder;
   staging: LazyStaging = new LazyStaging();
@@ -337,14 +346,17 @@ export abstract class JobBase {
       if (builder !== null) {
         job_script_contents = builder.build_job_script(commands);
       }
-      const rcode = await _job_popen(
+      const jobOutputs = await convertToJobOutputBindings(this.tool.outputs, builder);
+      const [rcode, filemap] = await _job_popen(
         this.staging,
         commands,
         stdin_path,
         stdout_path,
         stderr_path,
         env,
+        jobOutputs,
         this.outdir,
+        builder.outdir,
         () => runtimeContext.createOutdir(),
         job_script_contents,
         this.timelimit,
@@ -381,7 +393,7 @@ export abstract class JobBase {
         }
       }
       runtimeContext.log_dir_handler(this.outdir, this.base_path_logs, stdout_path, stderr_path);
-      outputs = await this.collect_outputs(this.outdir, rcode);
+      outputs = await this.collect_outputs(this.outdir, rcode, filemap);
       // outputs = bytes2str_in_dicts(outputs);
       // } catch (e) {
       //     if (e.errno == 2) {

@@ -2,6 +2,9 @@ import * as cwl from 'cwl-ts-auto';
 import { Dictionary } from 'cwl-ts-auto/dist/util/Dict.js';
 import { ToolRequirement } from './types.js';
 import type { LoadingOptions } from 'cwl-ts-auto/dist/util/LoadingOptions.js';
+import { aslist, isStringOrStringArray } from './utils.js';
+import { Builder } from './builder.js';
+import { WorkflowException } from './errors.js';
 export interface IOParam {
   extensionFields?: Dictionary<any>;
   name?: undefined | string;
@@ -156,7 +159,50 @@ export interface JobOutputBinding {
   loadListing: cwl.LoadListingEnum;
   glob?: Array<string>;
 }
-
+export async function convertToJobOutputBindings(
+  outputs: CommandOutputParameter[],
+  builder: Builder,
+): Promise<JobOutputBinding[]> {
+  const jobOutputBindings: JobOutputBinding[] = [];
+  for (const output of outputs) {
+    const jobOutputBinding = await convertToJobOutputBinding(output, builder);
+    if (jobOutputBinding) {
+      jobOutputBindings.push(jobOutputBinding);
+    }
+  }
+  return jobOutputBindings;
+}
+export async function convertToJobOutputBinding(
+  output: CommandOutputParameter,
+  builder: Builder,
+): Promise<JobOutputBinding | undefined> {
+  if (output.outputBinding === undefined) {
+    return undefined;
+  }
+  const glob = [];
+  for (const g of aslist(output.outputBinding.glob)) {
+    const gb = await builder.do_eval(g);
+    if (gb) {
+      let gb_eval_fail = false;
+      if (isStringOrStringArray(gb)) {
+        glob.push(...aslist(gb));
+      } else {
+        throw new WorkflowException(
+          'Resolved glob patterns must be strings or list of strings, not ' + `${gb} from ${output}`,
+        );
+      }
+    }
+  }
+  return {
+    name: output.name,
+    secondaryFiles: aslist(output.secondaryFiles),
+    streamable: output.streamable || false,
+    type: output.type,
+    loadContents: output.outputBinding.loadContents || false,
+    loadListing: output.outputBinding.loadListing || cwl.LoadListingEnum.NO_LISTING,
+    glob: glob,
+  };
+}
 export interface CommandOutputParameter {
   extensionFields?: Dictionary<any>;
   id?: undefined | string;

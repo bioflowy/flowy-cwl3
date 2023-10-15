@@ -1035,12 +1035,13 @@ export class CommandLineTool extends Process {
     await this.setup_command_line(builder, j, debug);
 
     j.pathmapper = builder.pathmapper;
-    j.collect_outputs = async (outdir, rcode) =>
+    j.collect_outputs = async (outdir, rcode, filemap) =>
       collect_output_ports(
         this.tool.outputs,
         builder,
         outdir,
         rcode,
+        filemap,
         getDefault(runtimeContext.compute_checksum, true),
         jobname,
         readers,

@@ -21,11 +21,14 @@ import * as path from 'node:path';
 export interface JobExec {
   staging: StagingCommand[];
   commands: string[];
+  outdir: string;
+  builderOutDir: string;
   stdin_path: string | undefined;
   stdout_path: string | undefined;
   stderr_path: string | undefined;
   env: { [key: string]: string };
   cwd: string;
+  outputBinding: JobOutputBinding[];
   timelimit: number | undefined;
 }
 async function prepareStagingDir(StagingCommand: StagingCommand[]): Promise<void> {
@@ -93,14 +96,12 @@ async function prepareStagingDir(StagingCommand: StagingCommand[]): Promise<void
 }
 async function glob_output(
   binding: JobOutputBinding,
-  debug: boolean,
   outdir: string,
   builderOutDir: string,
   fs_access: StdFsAccess,
   compute_checksum: boolean,
-  revmap,
-): Promise<[CWLOutputType[], string[]]> {
-  const r: CWLOutputType[] = [];
+): Promise<[CWLObjectType[], string[]]> {
+  const r: CWLObjectType[] = [];
   const globpatterns: string[] = [];
 
   try {
@@ -137,8 +138,8 @@ async function glob_output(
     }
 
     for (const files of r) {
-      const rfile = { ...(files as any) };
-      revmap(rfile);
+      // const rfile = { ...(files as any) };
+      // revmap(rfile);
       if (files['class'] === 'Directory') {
         const ll = binding.loadListing;
         if (ll && ll !== 'no_listing') {
@@ -148,7 +149,7 @@ async function glob_output(
         if (binding.loadContents) {
           const f: any = undefined;
           try {
-            files['contents'] = await contentLimitRespectedReadBytes(rfile['location']);
+            files['contents'] = await contentLimitRespectedReadBytes(files['location'] as string);
           } finally {
             if (f) {
               f.close();
@@ -157,11 +158,11 @@ async function glob_output(
         }
 
         if (compute_checksum) {
-          await compute_checksums(fs_access, rfile);
-          files['checksum'] = rfile['checksum'];
+          await compute_checksums(fs_access, files as CWLObjectType);
+          files['checksum'] = files['checksum'];
         }
 
-        files['size'] = fs_access.size(rfile['location'] as string);
+        files['size'] = fs_access.size(files['location'] as string);
       }
     }
 
@@ -170,11 +171,13 @@ async function glob_output(
     throw e;
   }
 }
-expor type Evaluator = (pattern:string, primary:CWLObjectType) => Promise<CWLOutputType | null>;
+export type Evaluator = (pattern: string, primary: CWLObjectType) => Promise<CWLOutputType | null>;
+
 async function collect_secondary_files(
   schema: JobOutputBinding,
-  result: CWLOutputType | null,
+  result: CWLObjectType | null,
   fs_access: StdFsAccess,
+  evaluator: Evaluator,
 ): Promise<void> {
   for (const primary of aslist(result)) {
     if (primary instanceof Object) {
@@ -183,22 +186,11 @@ async function collect_secondary_files(
       }
       const pathprefix = primary['path'].substring(0, primary['path'].lastIndexOf(path.sep) + 1);
       for (const sf of schema.secondaryFiles) {
-        let sf_required: boolean;
-        if (sf.required) {
-          const sf_required_eval = await builder.do_eval(sf.required, primary);
-          if (!(typeof sf_required_eval === 'boolean' || sf_required_eval === null)) {
-            throw new WorkflowException(
-              `Expressions in the field 'required' must evaluate to a Boolean (true or false) or None. Got ${sf_required_eval} for ${sf['required']}.`,
-            );
-          }
-          sf_required = (sf_required_eval as boolean) || false;
-        } else {
-          sf_required = false;
-        }
+        let sf_required = sf.required;
 
         let sfpath;
         if (sf.pattern.includes('$(') || sf.pattern.includes('${')) {
-          sfpath = await builder.do_eval(sf.pattern, primary);
+          sfpath = await evaluator(sf.pattern, primary as CWLObjectType);
         } else {
           sfpath = substitute(primary['basename'], sf.pattern);
         }
@@ -211,12 +203,12 @@ async function collect_secondary_files(
             sfitem = { path: pathprefix + sfitem };
           }
           const original_sfitem = JSON.parse(JSON.stringify(sfitem));
-          if (!fs_access.exists(revmap(sfitem)['location']) && sf_required) {
-            throw new WorkflowException(`Missing required secondary file '${original_sfitem['path']}'`);
-          }
-          if ('path' in sfitem && !('location' in sfitem)) {
-            revmap(sfitem);
-          }
+          // if (!fs_access.exists(revmap(sfitem)['location']) && sf_required) {
+          //   throw new WorkflowException(`Missing required secondary file '${original_sfitem['path']}'`);
+          // }
+          // if ('path' in sfitem && !('location' in sfitem)) {
+          //   revmap(sfitem);
+          // }
           if (fs_access.isfile(sfitem['location'])) {
             sfitem['class'] = 'File';
             primary['secondaryFiles'].push(sfitem);
@@ -229,6 +221,19 @@ async function collect_secondary_files(
     }
   }
 }
+async function collect_outputs(
+  outputBindings: JobOutputBinding[],
+  outdir: string,
+  builderOutDir: string,
+  fs_access: StdFsAccess,
+): Promise<{ [key: string]: CWLObjectType[] }> {
+  const rmap: { [key: string]: CWLObjectType[] } = {};
+  for (const binding of outputBindings) {
+    const t = await glob_output(binding, outdir, builderOutDir, fs_access, true);
+    rmap[binding.name] = t[0];
+  }
+  return rmap;
+}
 
 export async function executeJob({
   staging,
@@ -236,10 +241,13 @@ export async function executeJob({
   stdin_path,
   stdout_path,
   stderr_path,
+  outputBinding,
+  outdir,
+  builderOutDir,
   env,
   cwd,
   timelimit,
-}: JobExec): Promise<number> {
+}: JobExec): Promise<[number, { [key: string]: CWLObjectType[] }]> {
   await prepareStagingDir(staging);
   let stdin: any = 'pipe';
   let stdout: any = process.stderr;
@@ -262,8 +270,11 @@ export async function executeJob({
       stdio: [stdin, stdout, stderr],
       timeout: timelimit !== undefined ? timelimit * 1000 : undefined,
     });
-    child.on('close', (code) => {
-      resolve(code ?? -1);
+    child.on('close', async (code) => {
+      const fs_access = new StdFsAccess(outdir);
+      const r = await collect_outputs(outputBinding, outdir, builderOutDir, fs_access);
+
+      resolve([code ?? -1, r]);
     });
 
     child.on('error', (error) => {
