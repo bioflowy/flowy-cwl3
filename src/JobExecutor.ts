@@ -9,9 +9,15 @@ import {
   WriteFileContentCommand,
 } from './staging.js';
 import { st } from 'rdflib';
-import { ensureWritable } from './utils.js';
+import { CWLObjectType, CWLOutputType, aslist, ensureWritable, get_listing, splitext } from './utils.js';
 import fsExtra from 'fs-extra/esm';
 import { removeIgnorePermissionError } from './fileutils.js';
+import { WorkflowException } from './errors.js';
+import { JobOutputBinding } from './cwltypes.js';
+import { StdFsAccess } from './stdfsaccess.js';
+import { contentLimitRespectedReadBytes, substitute } from './builder.js';
+import { compute_checksums } from './process.js';
+import * as path from 'node:path';
 export interface JobExec {
   staging: StagingCommand[];
   commands: string[];
@@ -85,6 +91,145 @@ async function prepareStagingDir(StagingCommand: StagingCommand[]): Promise<void
     }
   }
 }
+async function glob_output(
+  binding: JobOutputBinding,
+  debug: boolean,
+  outdir: string,
+  builderOutDir: string,
+  fs_access: StdFsAccess,
+  compute_checksum: boolean,
+  revmap,
+): Promise<[CWLOutputType[], string[]]> {
+  const r: CWLOutputType[] = [];
+  const globpatterns: string[] = [];
+
+  try {
+    for (let gb of aslist(binding.glob)) {
+      if (gb.startsWith(builderOutDir)) {
+        gb = gb.substring(builderOutDir.length + 1);
+      } else if (gb === '.') {
+        gb = outdir;
+      } else if (gb.startsWith('/')) {
+        throw new WorkflowException("glob patterns must not start with '/'");
+      }
+
+      try {
+        const prefix = fs_access.glob(outdir);
+        const sorted_glob_result = fs_access.glob(fs_access.join(outdir, gb)).sort();
+
+        r.push(
+          ...sorted_glob_result.map((g) => {
+            const decoded_basename = path.basename(g);
+            return {
+              location: g,
+              path: fs_access.join(builderOutDir, decodeURIComponent(g.substring(prefix[0].length + 1))),
+              basename: decoded_basename,
+              nameroot: splitext(decoded_basename)[0],
+              nameext: splitext(decoded_basename)[1],
+              class: fs_access.isfile(g) ? 'File' : 'Directory',
+            };
+          }),
+        );
+      } catch (e) {
+        console.error('Unexpected error from fs_access');
+        throw e;
+      }
+    }
+
+    for (const files of r) {
+      const rfile = { ...(files as any) };
+      revmap(rfile);
+      if (files['class'] === 'Directory') {
+        const ll = binding.loadListing;
+        if (ll && ll !== 'no_listing') {
+          get_listing(fs_access, files, ll === 'deep_listing');
+        }
+      } else {
+        if (binding.loadContents) {
+          const f: any = undefined;
+          try {
+            files['contents'] = await contentLimitRespectedReadBytes(rfile['location']);
+          } finally {
+            if (f) {
+              f.close();
+            }
+          }
+        }
+
+        if (compute_checksum) {
+          await compute_checksums(fs_access, rfile);
+          files['checksum'] = rfile['checksum'];
+        }
+
+        files['size'] = fs_access.size(rfile['location'] as string);
+      }
+    }
+
+    return [r, globpatterns];
+  } catch (e) {
+    throw e;
+  }
+}
+expor type Evaluator = (pattern:string, primary:CWLObjectType) => Promise<CWLOutputType | null>;
+async function collect_secondary_files(
+  schema: JobOutputBinding,
+  result: CWLOutputType | null,
+  fs_access: StdFsAccess,
+): Promise<void> {
+  for (const primary of aslist(result)) {
+    if (primary instanceof Object) {
+      if (!primary['secondaryFiles']) {
+        primary['secondaryFiles'] = [];
+      }
+      const pathprefix = primary['path'].substring(0, primary['path'].lastIndexOf(path.sep) + 1);
+      for (const sf of schema.secondaryFiles) {
+        let sf_required: boolean;
+        if (sf.required) {
+          const sf_required_eval = await builder.do_eval(sf.required, primary);
+          if (!(typeof sf_required_eval === 'boolean' || sf_required_eval === null)) {
+            throw new WorkflowException(
+              `Expressions in the field 'required' must evaluate to a Boolean (true or false) or None. Got ${sf_required_eval} for ${sf['required']}.`,
+            );
+          }
+          sf_required = (sf_required_eval as boolean) || false;
+        } else {
+          sf_required = false;
+        }
+
+        let sfpath;
+        if (sf.pattern.includes('$(') || sf.pattern.includes('${')) {
+          sfpath = await builder.do_eval(sf.pattern, primary);
+        } else {
+          sfpath = substitute(primary['basename'], sf.pattern);
+        }
+
+        for (let sfitem of aslist(sfpath)) {
+          if (!sfitem) {
+            continue;
+          }
+          if (typeof sfitem === 'string') {
+            sfitem = { path: pathprefix + sfitem };
+          }
+          const original_sfitem = JSON.parse(JSON.stringify(sfitem));
+          if (!fs_access.exists(revmap(sfitem)['location']) && sf_required) {
+            throw new WorkflowException(`Missing required secondary file '${original_sfitem['path']}'`);
+          }
+          if ('path' in sfitem && !('location' in sfitem)) {
+            revmap(sfitem);
+          }
+          if (fs_access.isfile(sfitem['location'])) {
+            sfitem['class'] = 'File';
+            primary['secondaryFiles'].push(sfitem);
+          } else if (fs_access.isdir(sfitem['location'])) {
+            sfitem['class'] = 'Directory';
+            primary['secondaryFiles'].push(sfitem);
+          }
+        }
+      }
+    }
+  }
+}
+
 export async function executeJob({
   staging,
   commands,

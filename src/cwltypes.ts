@@ -115,6 +115,7 @@ export interface OutputRecordField extends AbstractInputRecordField<OutputType> 
   format?: undefined | string;
 }
 export type RecordTypeEnum = cwl.enum_d9cba076fca539106791a4f46d198c7fcfbdb779;
+
 export interface IORecordSchema<T> {
   extensionFields?: Dictionary<any>;
   name?: undefined | string;
@@ -146,6 +147,15 @@ export interface CommandLineBinding {
   valueFrom?: undefined | string;
   shellQuote?: undefined | boolean;
 }
+export interface JobOutputBinding {
+  name: string;
+  secondaryFiles?: Array<SecondaryFileSchema>;
+  streamable: boolean;
+  type: CommandOutputType | cwl.stdout | cwl.stderr;
+  loadContents: boolean;
+  loadListing: cwl.LoadListingEnum;
+  glob?: Array<string>;
+}
 
 export interface CommandOutputParameter {
   extensionFields?: Dictionary<any>;
@@ -157,7 +167,7 @@ export interface CommandOutputParameter {
   doc?: undefined | string | Array<string>;
   format?: undefined | string;
   type: CommandOutputType | cwl.stdout | cwl.stderr;
-  outputBinding?: undefined | cwl.CommandOutputBinding;
+  outputBinding?: undefined | CommandOutputBinding;
 }
 export interface CommandOutputBinding {
   extensionFields?: Dictionary<any>;

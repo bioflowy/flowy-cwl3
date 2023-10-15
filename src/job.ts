@@ -401,10 +401,6 @@ export abstract class JobBase {
       }
       processStatus = 'permanentFail';
     }
-    //  catch {
-    //     _logger.exception("Exception while running job");
-    //     processStatus = "permanentFail";
-    // }
     if (
       runtimeContext.research_obj !== undefined &&
       this.prov_obj !== undefined &&
