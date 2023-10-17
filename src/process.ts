@@ -347,15 +347,14 @@ export async function relocateOutputs(
   const pm = new PathMapper(outfiles, '', destination_path, false);
   stage_files_for_outputs(pm, _relocate, { symlink: false, fix_conflicts: true });
 
-  function _check_adjust(a_file: CWLObjectType): CWLObjectType {
-    a_file['location'] = fileUri(pm.mapper(a_file['location'] as string)?.target ?? '');
+  function _check_adjust(a_file: cwlTsAuto.File | cwlTsAuto.Directory): void {
+    a_file.location = fileUri(pm.mapper(a_file.location)?.target ?? '');
     if (a_file['contents']) {
-      delete a_file['contents'];
+      a_file['contents'] = undefined;
     }
-    return a_file;
   }
 
-  visit_class(outputObj, ['File', 'Directory'], _check_adjust);
+  visitFileDirectory(outputObj, _check_adjust);
 
   if (compute_checksum) {
     const promises = visit_class_promise(outputObj, ['File'], async (vals) => compute_checksums(fs_access, vals));

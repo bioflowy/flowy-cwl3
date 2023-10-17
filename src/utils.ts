@@ -309,7 +309,15 @@ export function visitClass<T>(
 export const visitFile = (rec: unknown, callback: (f: cwl.File) => void) =>
   visitClass<cwl.File>(rec, callback, cwl.File);
 export const visitFileDirectory = (rec: unknown, callback: (f: cwl.File | cwl.Directory) => void) =>
-  visitClass<cwl.File>(rec, callback, cwl.File, cwl.Directory);
+  visitClass<cwl.File>(
+    rec,
+    (v) => {
+      v.loadingOptions = undefined;
+      callback(v);
+    },
+    cwl.File,
+    cwl.Directory,
+  );
 
 export function visit_class(rec: any, cls: any[], op: (...args: any[]) => any): void {
   if (typeof rec === 'object' && rec !== null) {

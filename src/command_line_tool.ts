@@ -1165,6 +1165,7 @@ export class CommandLineTool extends Process {
         if (debug) {
           _logger.debug(`Raw output from ${custom_output}: ${JSON.stringify(ret, null, 4)}`);
         }
+        convertDictToFileDirectory(ret);
       } else if (Array.isArray(ports)) {
         for (let i = 0; i < ports.length; i++) {
           const port = ports[i];
@@ -1175,10 +1176,10 @@ export class CommandLineTool extends Process {
       if (ret) {
         const revmap = (val) => revmap_file(builder, outdir, val);
         // adjustDirObjs(ret, trim_listing);
-        visit_class(ret, ['File', 'Directory'], revmap);
-        visit_class(ret, ['File', 'Directory'], remove_path);
+        visitFileDirectory(ret, revmap);
+        visitFileDirectory(ret, remove_path);
         normalizeFilesDirs(ret);
-        visit_class(ret, ['File', 'Directory'], (val) => checkValidLocations(fs_access, val));
+        visitFileDirectory(ret, (val) => checkValidLocations(fs_access, val));
 
         if (compute_checksum) {
           adjustFileObjs(ret, async (val) => compute_checksums(fs_access, val));
@@ -1251,14 +1252,19 @@ export class CommandLineTool extends Process {
           r.push(
             ...sorted_glob_result.map((g) => {
               const decoded_basename = path.basename(g);
-              return {
-                location: g,
-                path: fs_access.join(builder.outdir, decodeURIComponent(g.substring(prefix[0].length + 1))),
-                basename: decoded_basename,
-                nameroot: splitext(decoded_basename)[0],
-                nameext: splitext(decoded_basename)[1],
-                class: fs_access.isfile(g) ? 'File' : 'Directory',
-              };
+              return fs_access.isfile(g)
+                ? new cwlTsAuto.File({
+                    location: g,
+                    path: fs_access.join(builder.outdir, decodeURIComponent(g.substring(prefix[0].length + 1))),
+                    basename: decoded_basename,
+                    nameroot: splitext(decoded_basename)[0],
+                    nameext: splitext(decoded_basename)[1],
+                  })
+                : new cwlTsAuto.Directory({
+                    location: g,
+                    path: fs_access.join(builder.outdir, decodeURIComponent(g.substring(prefix[0].length + 1))),
+                    basename: decoded_basename,
+                  });
             }),
           );
         } catch (e) {

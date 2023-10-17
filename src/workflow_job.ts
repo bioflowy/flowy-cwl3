@@ -1,4 +1,5 @@
 import * as cwlTsAuto from 'cwl-ts-auto';
+import { cloneDeep } from 'lodash-es';
 import { contentLimitRespectedReadBytes } from './builder.js';
 import { canAssignSrcToSink, canAssignSrcToSinkType } from './checker.js';
 import { RuntimeContext, getDefault, make_default_fs_access } from './context.js';
@@ -205,7 +206,7 @@ async function _flat_crossproduct_scatter(
   let put = startindex;
 
   for (let index = 0; index < jobl; index++) {
-    let sjob: CWLObjectType = JSON.parse(JSON.stringify(joborder));
+    let sjob: CWLObjectType = cloneDeep(joborder);
     sjob[scatter_key] = joborder[scatter_key][index];
 
     if (scatter_keys.length == 1) {
@@ -430,7 +431,7 @@ function matchTypes(
     }
     return true;
   } else if (valueFrom !== null || canAssignSrcToSinkType(src.parameter.type, sinktype) || sinktype === 'Any') {
-    inputobj[iid] = structuredClone(src.value);
+    inputobj[iid] = cloneDeep(src.value);
     return true;
   }
   return false;

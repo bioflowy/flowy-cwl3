@@ -284,6 +284,11 @@ export interface Args {
 export async function main(args: Args): Promise<number> {
   const [output, status] = await exec(args.tool_path, args.job_path, args.outdir);
   if (status === 'success') {
+    visitFileDirectory(output, (f) => {
+      f.loadingOptions = undefined;
+      f.extensionFields = undefined;
+      f['class'] = f.constructor.name;
+    });
     process.stdout.write(`${JSON.stringify(output)}\n`);
     return new Promise((resolve) => {
       process.stdout.end(() => {
