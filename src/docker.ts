@@ -1,8 +1,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DockerRequirement, ResourceRequirement } from 'cwl-ts-auto';
+import * as cwl from 'cwl-ts-auto';
 import { Builder } from './builder.js';
 import { RuntimeContext } from './context.js';
+import { Tool } from './cwltypes.js';
 import { WorkflowException } from './errors.js';
 import { ContainerCommandLineJob } from './job.js';
 import { _logger } from './loghandler.js';
@@ -17,7 +19,6 @@ import {
   which,
   getRequirement,
 } from './utils.js';
-import { Tool } from './cwltypes.js';
 
 const _IMAGES: Set<string> = new Set();
 
@@ -28,7 +29,12 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
   constructor(
     builder: Builder,
     joborder: CWLObjectType,
-    make_path_mapper: (arg1: CWLObjectType[], arg2: string, arg3: RuntimeContext, arg4: boolean) => PathMapper,
+    make_path_mapper: (
+      arg1: (cwl.File | cwl.Directory)[],
+      arg2: string,
+      arg3: RuntimeContext,
+      arg4: boolean,
+    ) => PathMapper,
     tool: Tool,
     name: string,
   ) {
@@ -355,7 +361,7 @@ export class PodmanCommandLineJob extends DockerCommandLineJob {
   constructor(
     builder: Builder,
     joborder: CWLObjectType,
-    make_path_mapper: (p1: CWLObjectType[], p2: string, p3: RuntimeContext, p4: boolean) => PathMapper,
+    make_path_mapper: (p1: (cwl.File | cwl.Directory)[], p2: string, p3: RuntimeContext, p4: boolean) => PathMapper,
     tool: Tool,
     name: string,
   ) {

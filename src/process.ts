@@ -5,13 +5,23 @@ import * as crypto from 'node:crypto';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import cwlTsAuto from 'cwl-ts-auto';
+import cwlTsAuto, { LoadListingEnum } from 'cwl-ts-auto';
 import fsExtra from 'fs-extra';
 import { cloneDeep } from 'lodash-es';
 import { v4 } from 'uuid';
 import { Builder } from './builder.js';
 import { LoadingContext, RuntimeContext, getDefault } from './context.js';
 
+import {
+  CommandInputParameter,
+  CommandInputRecordField,
+  CommandOutputParameter,
+  CommandOutputRecordField,
+  CommandOutputType,
+  RecordTypeEnum,
+  Tool,
+  ToolType,
+} from './cwltypes.js';
 import { ValidationException, WorkflowException } from './errors.js';
 
 import { needs_parsing } from './expression.js';
@@ -19,9 +29,10 @@ import { isdir, isfile, removeIgnorePermissionError, removeSyncIgnorePermissionE
 import { FormatGraph } from './formatgraph.js';
 import { _logger } from './loghandler.js';
 
-import { convertFileDirectoryToDict } from './main.js';
+import { convertDictToFileDirectory } from './main.js';
 import { MapperEnt, PathMapper } from './pathmapper.js';
 import { SecretStore } from './secrets.js';
+import { LazyStaging } from './staging.js';
 import { StdFsAccess } from './stdfsaccess.js';
 
 import { compareInputBinding, CommandLineBinded, type ToolRequirement } from './types.js';
@@ -46,19 +57,9 @@ import {
   ensureWritable,
   visit_class_promise,
   isString,
+  visitFileDirectory,
 } from './utils.js';
 import { validate } from './validate.js';
-import { LazyStaging } from './staging.js';
-import {
-  CommandInputParameter,
-  CommandInputRecordField,
-  CommandOutputParameter,
-  CommandOutputRecordField,
-  CommandOutputType,
-  RecordTypeEnum,
-  Tool,
-  ToolType,
-} from './cwltypes.js';
 
 const _logger_validation_warnings = _logger;
 
@@ -289,24 +290,6 @@ export async function relocateOutputs(
     return outputObj;
   }
 
-  function* _collectDirEntries(obj: CWLObjectType | CWLObjectType[] | null): Generator<CWLObjectType> {
-    if (obj instanceof Object) {
-      if (['File', 'Directory'].includes(obj['class'])) {
-        yield obj as CWLObjectType;
-      } else {
-        for (const sub_obj of Object.values(obj)) {
-          if (sub_obj) {
-            yield* _collectDirEntries(sub_obj as any);
-          }
-        }
-      }
-    } else if (Array.isArray(obj)) {
-      for (const sub_obj of obj as any[]) {
-        yield* _collectDirEntries(sub_obj);
-      }
-    }
-  }
-
   function _relocate(src: string, dst: string): void {
     src = fs_access.realpath(src);
     dst = fs_access.realpath(dst);
@@ -348,18 +331,19 @@ export async function relocateOutputs(
     }
   }
 
-  function _realpath(ob: CWLObjectType): void {
-    const location = ob['location'] as string;
+  function _realpath(ob: cwlTsAuto.Directory | cwlTsAuto.File): void {
+    const location = ob.location;
     if (location.startsWith('file:')) {
-      ob['location'] = fileUri(fs.realpathSync(uriFilePath(location)));
+      ob.location = fileUri(fs.realpathSync(uriFilePath(location)));
     } else if (location.startsWith('/')) {
-      ob['location'] = fs.realpathSync(location);
+      ob.location = fs.realpathSync(location);
     } else if (!location.startsWith('_:') && location.includes(':')) {
-      ob['location'] = fileUri(fs_access.realpath(location));
+      ob.location = fileUri(fs_access.realpath(location));
     }
   }
-  const outfiles = Array.from(_collectDirEntries(outputObj));
-  visit_class(outfiles, ['File', 'Directory'], _realpath);
+  const outfiles: (cwlTsAuto.File | cwlTsAuto.Directory)[] = [];
+  visitFileDirectory(outputObj, (v) => outfiles.push(v));
+  visitFileDirectory(outfiles, _realpath);
   const pm = new PathMapper(outfiles, '', destination_path, false);
   stage_files_for_outputs(pm, _relocate, { symlink: false, fix_conflicts: true });
 
@@ -388,15 +372,15 @@ export async function cleanIntermediate(output_dirs: Iterable<string>): Promise<
   }
 }
 
-export function add_sizes(fsaccess: StdFsAccess, obj: CWLObjectType): void {
-  if (obj['location']) {
+export function add_sizes(fsaccess: StdFsAccess, obj: cwlTsAuto.File): void {
+  if (obj.location) {
     try {
-      if (!obj['size']) {
+      if (!obj.size) {
         obj['size'] = fsaccess.size(String(obj['location']));
       }
-    } catch (e) {}
-  } else if (obj['contents']) {
-    obj['size'] = (obj['contents'] as string).length;
+    } catch {}
+  } else if (obj.contents) {
+    obj.size = obj.contents.length;
   }
   // best effort
 }
@@ -407,8 +391,7 @@ function fill_in_defaults(inputs: CommandInputParameter[], job: CWLObjectType, f
     if (job[fieldname] != null) {
       continue;
     } else if (job[fieldname] == null && inp.default_ !== undefined) {
-      const converted = convertFileDirectoryToDict(inp.default_);
-      job[fieldname] = structuredClone(converted);
+      job[fieldname] = structuredClone(inp.default_);
     } else if (job[fieldname] == null && aslist(inp.type).includes('null')) {
       job[fieldname] = null;
     } else {
@@ -717,7 +700,7 @@ export abstract class Process {
     // Validate job order
     try {
       fill_in_defaults(this.tool.inputs, job, fs_access);
-      convertFileDirectoryToDict(job);
+      convertDictToFileDirectory(job);
       normalizeFilesDirs(job);
       const schema = this.inputs_record_schema;
       if (schema == null) {
@@ -726,7 +709,7 @@ export abstract class Process {
       validate(schema.type, job, false);
 
       if (load_listing != 'no_listing') {
-        get_listing(fs_access, job, load_listing == 'deep_listing');
+        get_listing(fs_access, job, load_listing === LoadListingEnum.DEEP_LISTING);
       }
 
       visit_class(job, ['File'], (x: any): void => add_sizes(fs_access, x));
@@ -1261,10 +1244,10 @@ async function calculateSHA1(filePath: string): Promise<string> {
     });
   });
 }
-export async function compute_checksums(fsAccess: StdFsAccess, fileobj: CWLObjectType): Promise<void> {
-  if (!fileobj['checksum']) {
+export async function compute_checksums(fsAccess: StdFsAccess, fileobj: cwlTsAuto.File): Promise<void> {
+  if (!fileobj.checksum) {
     const checksum = crypto.createHash('sha1');
-    const location = fileobj['location'] as string;
+    const location = fileobj.location;
 
     const fileHandle = await fsAccess.open(location, 'r');
     let contents = await fileHandle.readFile();
@@ -1277,8 +1260,8 @@ export async function compute_checksums(fsAccess: StdFsAccess, fileobj: CWLObjec
     await fileHandle.close();
 
     // eslint-disable-next-line require-atomic-updates
-    fileobj['checksum'] = `sha1$${checksum.digest('hex')}`;
+    fileobj.checksum = `sha1$${checksum.digest('hex')}`;
     // eslint-disable-next-line require-atomic-updates
-    fileobj['size'] = fsAccess.size(location);
+    fileobj.size = fsAccess.size(location);
   }
 }

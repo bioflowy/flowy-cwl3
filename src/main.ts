@@ -25,6 +25,7 @@ import {
   trim_listing,
   adjustDirObjs,
   isString,
+  visitFileDirectory,
 } from './utils.js';
 import { default_make_tool } from './workflow.js';
 
@@ -113,57 +114,44 @@ function load_job_order(basedir: string | undefined, job_order_file: string): [C
 
   return [job_order_object, input_basedir];
 }
-export const convertFileDirectoryToDict = (obj: any) => {
-  if (obj instanceof Array) {
-    return obj.map(convertFileDirectoryToDict);
-  } else if (obj instanceof cwlTsAuto.File) {
-    const file = {
-      class: 'File',
-      location: obj.location,
-      basename: obj.basename,
-      dirname: obj.dirname,
-      checksum: obj.checksum,
-      size: obj.size,
-      secondaryFiles: obj.secondaryFiles,
-      format: obj.format,
-      path: obj.path,
-      contents: obj.contents,
-    };
-    return file;
-  } else if (obj instanceof cwlTsAuto.Directory) {
-    const file = {
-      class: 'Directory',
-      location: obj.location,
-      path: obj.path,
-      basename: obj.basename,
-      listing: obj.listing,
-    };
-    return file;
+export const convertObjectToFileDirectory = (obj: unknown): cwlTsAuto.File | cwlTsAuto.Directory | undefined => {
+  if ('object' !== typeof obj) {
+    return undefined;
+  }
+  if (obj['class'] === 'File') {
+    return new cwlTsAuto.File({
+      location: obj['location'],
+      basename: obj['basename'],
+      dirname: obj['dirname'],
+      checksum: obj['checksum'],
+      size: obj['size'],
+      secondaryFiles: obj['secondaryFiles'],
+      format: obj['format'],
+      path: obj['path'],
+      contents: obj['contents'],
+    });
+  } else if (obj['class'] === 'Directory') {
+    return new cwlTsAuto.Directory({
+      location: obj['location'],
+      path: obj['path'],
+      basename: obj['basename'],
+      listing: obj['listing'],
+    });
+  }
+  return undefined;
+};
+export const convertDictToFileDirectory = (obj: unknown) => {
+  if (obj instanceof cwlTsAuto.File || obj instanceof cwlTsAuto.Directory) {
+    return obj;
+  } else if (obj instanceof Array) {
+    return obj.map(convertDictToFileDirectory);
   } else if (obj instanceof Object) {
-    if (obj['class'] === 'File') {
-      return {
-        class: 'File',
-        location: obj.location,
-        basename: obj.basename,
-        dirname: obj.dirname,
-        checksum: obj.checksum,
-        size: obj.size,
-        secondaryFiles: obj.secondaryFiles,
-        format: obj.format,
-        path: obj.path,
-        contents: obj.contents,
-      };
-    } else if (obj['class'] === 'Directory') {
-      return {
-        class: 'Directory',
-        location: obj.location,
-        path: obj.path,
-        basename: obj.basename,
-        listing: obj.listing,
-      };
+    const rslt = convertObjectToFileDirectory(obj);
+    if (rslt) {
+      return rslt;
     } else {
       for (const key of Object.keys(obj)) {
-        obj[key] = convertFileDirectoryToDict(obj[key]);
+        obj[key] = convertDictToFileDirectory(obj[key]);
       }
       return obj;
     }
@@ -184,37 +172,32 @@ function init_job_order(
   for (const inp of process.tool.inputs) {
     if (inp.default_ && (!job_order_object || !job_order_object[shortname(inp.id)])) {
       if (!job_order_object) job_order_object = {};
-      job_order_object[shortname(inp.id)] = convertFileDirectoryToDict(inp.default_);
+      job_order_object[shortname(inp.id)] = convertDictToFileDirectory(inp.default_);
     }
   }
 
-  function path_to_loc(p: CWLObjectType): void {
-    if (!p['location'] && 'path' in p) {
-      p['location'] = p['path'];
-      delete p['path'];
-    }
-  }
   const namespaces = process.tool.loadingOptions.namespaces;
-
-  function expand_formats(p: CWLObjectType): void {
-    if (!namespaces) {
-      return;
+  const fs_access = runtime_context.make_fs_access(input_basedir);
+  function path_to_loc(p: cwlTsAuto.File | cwlTsAuto.Directory): void {
+    if (!p.location && p.path) {
+      p.location = p.path;
     }
-    const format = p['format'];
-    if (isString(format)) {
-      const [id, rest] = format.split(':');
-      if (namespaces[id]) {
-        p['format'] = namespaces[id] + rest;
+    if (p instanceof cwlTsAuto.File) {
+      add_sizes(fs_access, p);
+      if (namespaces) {
+        const format = p.format;
+        if (isString(format)) {
+          const [id, rest] = format.split(':');
+          if (namespaces[id]) {
+            p.format = namespaces[id] + rest;
+          }
+        }
       }
+    } else {
+      trim_listing(p);
     }
   }
-
-  visit_class(job_order_object, ['File', 'Directory'], path_to_loc);
-  visit_class(job_order_object, ['File'], (obj: CWLObjectType) =>
-    add_sizes(runtime_context.make_fs_access(input_basedir), obj),
-  );
-  visit_class(job_order_object, ['File'], expand_formats);
-  adjustDirObjs(job_order_object, trim_listing);
+  visitFileDirectory(job_order_object, path_to_loc);
   normalizeFilesDirs(job_order_object);
 
   if ('cwl:tool' in job_order_object) delete job_order_object['cwl:tool'];

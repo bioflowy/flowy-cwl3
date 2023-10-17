@@ -2,6 +2,7 @@ import * as cwlTsAuto from 'cwl-ts-auto';
 import { contentLimitRespectedReadBytes } from './builder.js';
 import { canAssignSrcToSink, canAssignSrcToSinkType } from './checker.js';
 import { RuntimeContext, getDefault, make_default_fs_access } from './context.js';
+import { CommandOutputParameter, IWorkflowStep, ToolType, WorkflowStepInput } from './cwltypes.js';
 import { WorkflowException } from './errors.js';
 import { do_eval } from './expression.js';
 import { _logger } from './loghandler.js';
@@ -28,7 +29,6 @@ import {
   isMissingOrNull,
 } from './utils.js';
 import { Workflow, WorkflowStep } from './workflow.js';
-import { CommandOutputParameter, IWorkflowStep, ToolType, WorkflowStepInput } from './cwltypes.js';
 
 class WorkflowJobStep {
   step: WorkflowStep;
@@ -710,7 +710,7 @@ export class WorkflowJob {
 
         const valueFromFunc = async (k: string, v: CWLOutputType | null): Promise<CWLOutputType | null> => {
           if (k in valueFrom) {
-            adjustDirObjs(v, (val) => get_listing(val, fs_access, true));
+            adjustDirObjs(v, (val) => get_listing(fs_access, val, true));
             const [inline] = getRequirement(this.workflow, cwlTsAuto.InlineJavascriptRequirement);
             return do_eval(valueFrom[k], shortio, inline, null, null, {}, v);
           }

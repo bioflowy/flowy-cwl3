@@ -1,22 +1,22 @@
 import * as path from 'node:path';
+import { resourceLimits } from 'node:worker_threads';
 import cwlTsAuto, {
   CommandOutputBinding,
-  Directory,
-  Dirent,
   DockerRequirement,
-  File,
   InitialWorkDirRequirement,
   InplaceUpdateRequirement,
   WorkReuse,
 } from 'cwl-ts-auto';
+import { cloneDeep } from 'lodash-es';
 import { Builder, contentLimitRespectedReadBytes, substitute } from './builder.js';
 import { LoadingContext, RuntimeContext, getDefault } from './context.js';
+import { CommandInputParameter, CommandOutputParameter, Tool } from './cwltypes.js';
 import { DockerCommandLineJob, PodmanCommandLineJob } from './docker.js';
 import { UnsupportedRequirement, ValidationException, WorkflowException } from './errors.js';
 import { pathJoin } from './fileutils.js';
 import { CommandLineJob, JobBase } from './job.js';
 import { _logger } from './loghandler.js';
-import { convertFileDirectoryToDict } from './main.js';
+import { convertDictToFileDirectory, convertObjectToFileDirectory } from './main.js';
 import { PathMapper } from './pathmapper.js';
 import { Process, compute_checksums, shortname, uniquename } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
@@ -38,12 +38,19 @@ import {
   uriFilePath,
   visit_class,
   getRequirement,
-  type JobsType,
   josonStringifyLikePython,
   isStringOrStringArray,
+  visitFileDirectory,
+  str,
 } from './utils.js';
 import { validate } from './validate.js';
-import { CommandInputParameter, CommandOutputParameter, Tool } from './cwltypes.js';
+
+interface Dirent {
+  entryname?: string;
+  entry?: string | cwlTsAuto.File | cwlTsAuto.Directory;
+  writable?: boolean;
+}
+
 export class ExpressionJob {
   builder: Builder;
   script: string;
@@ -117,42 +124,46 @@ export class ExpressionTool extends Process {
   }
 }
 
-function remove_path(f: CWLObjectType): void {
-  if ('path' in f) {
-    delete f['path'];
+function remove_path(f: cwlTsAuto.File | cwlTsAuto.Directory): void {
+  if (f.path) {
+    f.path = undefined;
   }
 }
-function revmap_file(builder: Builder, outdir: string, f: CWLObjectType): CWLObjectType | null {
+function revmap_file(
+  builder: Builder,
+  outdir: string,
+  f: cwlTsAuto.File | cwlTsAuto.Directory,
+): cwlTsAuto.File | cwlTsAuto.Directory | null {
   if (outdir.startsWith('/')) {
     outdir = fileUri(outdir);
   }
-  if (f.hasOwnProperty('location') && !f.hasOwnProperty('path')) {
-    const location: string = f['location'] as string;
+  if (f.location && !f.path) {
+    const location: string = f.location;
     if (location.startsWith('file://')) {
-      f['path'] = uriFilePath(location);
+      f.path = uriFilePath(location);
     } else {
-      f['location'] = builder.fs_access.join(outdir, f['location'] as string);
+      f.location = builder.fs_access.join(outdir, f.location['location']);
       return f;
     }
   }
-  if (f.hasOwnProperty('dirname')) {
+  if (f['dirname']) {
     delete f['dirname'];
   }
-  if (f.hasOwnProperty('path')) {
-    const path1 = builder.fs_access.join(builder.outdir, f['path'] as string);
+  if (f.path) {
+    const path1 = builder.fs_access.join(builder.outdir, f.path);
     const uripath = fileUri(path1);
-    delete f['path'];
-    if (!f.hasOwnProperty('basename')) {
-      f['basename'] = path.basename(path1);
+    f.path = undefined;
+    if (!f.basename) {
+      f.basename = path.basename(path1);
     }
     if (!builder.pathmapper) {
       throw new Error("Do not call revmap_file using a builder that doesn't have a pathmapper.");
     }
     const revmap_f = builder.pathmapper.reversemap(path1);
     if (revmap_f && !builder.pathmapper.mapper(revmap_f[0]).type.startsWith('Writable')) {
-      f['location'] = revmap_f[1];
+      f.location = revmap_f[1];
     } else if (uripath == outdir || uripath.startsWith(outdir + path.sep) || uripath.startsWith(`${outdir}/`)) {
-      f['location'] = uripath;
+      f.location = uripath;
     } else if (
       path1 == builder.outdir ||
       path1.startsWith(builder.outdir + path.sep) ||
@@ -162,7 +173,7 @@ function revmap_file(builder: Builder, outdir: string, f: CWLObjectType): CWLObj
         outdir,
         encodeURIComponent(path1.substring(builder.outdir.length + 1)),
       );
-      f['location'] = joined_path;
+      f.location = joined_path;
     } else {
       throw new WorkflowException(
         `Output file path ${path1} must be within designated output directory ${builder.outdir} or an input file pass through.`,
@@ -173,7 +184,7 @@ function revmap_file(builder: Builder, outdir: string, f: CWLObjectType): CWLObj
   throw new WorkflowException(`Output File object is missing both 'location' and 'path' fields: ${f}`);
 }
 function make_path_mapper(
-  reffiles: CWLObjectType[],
+  reffiles: (cwlTsAuto.File | cwlTsAuto.Directory)[],
   stagedir: string,
   runtimeContext: RuntimeContext,
   separateDirs: boolean,
@@ -210,11 +221,15 @@ export class CallbackJob {
     }
   }
 }
-function checkAdjust(acceptRe: RegExp, builder: Builder, fileO: CWLObjectType): CWLObjectType {
+function checkAdjust(
+  acceptRe: RegExp,
+  builder: Builder,
+  fileO: cwlTsAuto.File | cwlTsAuto.Directory,
+): cwlTsAuto.File | cwlTsAuto.Directory {
   if (!builder.pathmapper) {
     throw new Error("Do not call check_adjust using a builder that doesn't have a pathmapper.");
   }
-  const m = builder.pathmapper.mapper(fileO['location'] as string);
+  const m = builder.pathmapper.mapper(fileO.location);
   const path1 = m.target;
   fileO['path'] = path1;
   let basename = fileO['basename'];
@@ -224,16 +239,17 @@ function checkAdjust(acceptRe: RegExp, builder: Builder, fileO: CWLObjectType): 
     fileO['dirname'] = dn.toString();
   }
   if (basename !== bn) {
-    fileO['basename'] = basename = bn.toString();
+    basename = bn.toString();
+    fileO.basename = basename;
   }
-  if (fileO['class'] === 'File') {
+  if (fileO instanceof cwlTsAuto.File) {
     const ne = path.extname(basename);
     const nr = path.basename(basename, ne);
-    if (fileO['nameroot'] !== nr) {
-      fileO['nameroot'] = nr.toString();
+    if (fileO.nameroot !== nr) {
+      fileO.nameroot = nr.toString();
     }
-    if (fileO['nameext'] !== ne) {
-      fileO['nameext'] = ne.toString();
+    if (fileO.nameext !== ne) {
+      fileO.nameext = ne.toString();
     }
   }
   if (!acceptRe.test(basename)) {
@@ -242,15 +258,15 @@ function checkAdjust(acceptRe: RegExp, builder: Builder, fileO: CWLObjectType): 
   return fileO;
 }
 
-function checkValidLocations(fsAccess: StdFsAccess, ob: CWLObjectType): void {
-  const location = ob['location'] as string;
+function checkValidLocations(fsAccess: StdFsAccess, ob: cwlTsAuto.Directory | cwlTsAuto.File): void {
+  const location = ob.location;
   if (location.startsWith('_:')) {
     return;
   }
-  if (ob['class'] === 'File' && !fsAccess.isfile(location)) {
+  if (ob instanceof cwlTsAuto.File && !fsAccess.isfile(location)) {
     throw new Error(`Does not exist or is not a File: '${location}'`);
   }
-  if (ob['class'] === 'Directory' && !fsAccess.isdir(location)) {
+  if (ob instanceof cwlTsAuto.Directory && !fsAccess.isdir(location)) {
     throw new Error(`Does not exist or is not a Directory: '${location}'`);
   }
 }
@@ -322,7 +338,12 @@ export class CommandLineTool extends Process {
   ): (
     builder: Builder,
     joborder: CWLObjectType,
-    make_path_mapper: (param1: CWLObjectType[], param2: string, param3: RuntimeContext, param4: boolean) => PathMapper,
+    make_path_mapper: (
+      param1: (cwlTsAuto.File | cwlTsAuto.Directory)[],
+      param2: string,
+      param3: RuntimeContext,
+      param4: boolean,
+    ) => PathMapper,
     tool: Tool,
     name: string,
   ) => JobBase {
@@ -361,13 +382,13 @@ export class CommandLineTool extends Process {
       new CommandLineJob(builder, joborder, make_path_mapper, tool, name);
   }
 
-  updatePathmap(outdir: string, pathmap: PathMapper, fn: CWLObjectType): void {
+  updatePathmap(outdir: string, pathmap: PathMapper, fn: cwlTsAuto.File | cwlTsAuto.Directory): void {
     if (!(fn instanceof Object)) {
       throw new WorkflowException(`Expected File or Directory object, was ${typeof fn}`);
     }
-    const basename = fn['basename'] as string;
-    if ('location' in fn) {
-      const location = fn['location'] as string;
+    const basename = fn.basename;
+    if (fn.location) {
+      const location = fn.location;
       if (pathmap.contains(location)) {
         pathmap.update(
           location,
@@ -378,79 +399,89 @@ export class CommandLineTool extends Process {
         );
       }
     }
-    for (const sf of (fn['secondaryFiles'] || []) as CWLObjectType[]) {
-      this.updatePathmap(outdir, pathmap, sf);
+    if (fn instanceof cwlTsAuto.File) {
+      for (const sf of fn.secondaryFiles || []) {
+        this.updatePathmap(outdir, pathmap, sf);
+      }
     }
-    for (const ls of (fn['listing'] || []) as CWLObjectType[]) {
-      this.updatePathmap(pathJoin(outdir, fn['basename'] as string), pathmap, ls);
+    if (fn instanceof cwlTsAuto.Directory) {
+      for (const ls of fn.listing || []) {
+        this.updatePathmap(pathJoin(outdir, fn['basename']), pathmap, ls);
+      }
     }
   }
   async evaluate_listing_string(
-    initialWorkdir: any,
+    initialWorkdir: InitialWorkDirRequirement,
+    listing: string,
     builder: Builder,
-    classic_dirent: any,
-    classic_listing: any,
-    debug: any,
-  ): Promise<CWLObjectType[]> {
-    const ls_evaluated = await builder.do_eval(initialWorkdir['listing']);
+  ): Promise<(cwlTsAuto.File | cwlTsAuto.Directory | Dirent)[]> {
+    const ls_evaluated = await builder.do_eval(listing);
     let fail: any = false;
-    let fail_suffix = '';
+    const fail_suffix = '';
+    const results: (cwlTsAuto.File | cwlTsAuto.Directory | Dirent)[] = [];
     if (!(ls_evaluated instanceof Array)) {
       fail = ls_evaluated;
     } else {
-      const ls_evaluated2 = ls_evaluated as any[];
-      for (const entry of ls_evaluated2) {
+      for (const entry of ls_evaluated) {
         if (entry == null) {
-          if (classic_dirent) {
-            fail = entry;
-            fail_suffix =
-              " Dirent.entry cannot return 'null' before CWL v1.2. Please consider using 'cwl-upgrader' to upgrade your document to CWL version v1.2.";
-          }
+          // flowy_cwl only supports cwl1.2 or later, so no need to check classic_dirent
+          // if (classic_dirent) {
+          //   fail = entry;
+          //   fail_suffix =
+          //     " Dirent.entry cannot return 'null' before CWL v1.2. Please consider using 'cwl-upgrader' to upgrade your document to CWL version v1.2.";
+          // }
         } else if (entry instanceof Array) {
-          if (classic_listing) {
-            throw new WorkflowException(
-              "InitialWorkDirRequirement.listing expressions cannot return arrays of Files or Directories before CWL v1.1. Please considering using 'cwl-upgrader' to upgrade your document to CWL v1.1' or later.",
-            );
-          } else {
-            for (const entry2 of entry) {
-              if (!(entry2 instanceof Object && (('class' in entry2 && entry2['class'] == 'File') || 'Directory'))) {
-                fail = `an array with an item ('${entry2}') that is not a File nor a Directory object.`;
-              }
+          // flowy_cwl only supports cwl1.2 or later, so no need to check classic_listing
+          // if (classic_listing) {
+          //   throw new WorkflowException(
+          //     "InitialWorkDirRequirement.listing expressions cannot return arrays of Files or Directories before CWL v1.1. Please considering using 'cwl-upgrader' to upgrade your document to CWL v1.1' or later.",
+          //   );
+          // }
+          for (const entry2 of entry) {
+            const result = convertObjectToFileDirectory(entry2);
+            if (!result) {
+              fail = `an array with an item ('${entry2}') that is not a File nor a Directory object.`;
+            } else {
+              results.push(result);
             }
           }
-        } else if (
-          !(
-            entry instanceof Object &&
-            (('class' in entry && (entry['class'] == 'File' || 'Directory')) || 'entry' in entry)
-          )
-        ) {
-          fail = entry;
+        } else {
+          const rslt = convertObjectToFileDirectory(entry);
+          if (rslt) {
+            results.push(rslt);
+          } else if (entry instanceof Object && 'entry' in entry) {
+            results.push(entry as Dirent);
+          } else {
+            fail = entry;
+          }
         }
       }
     }
     if (fail !== false) {
       let message =
-        "Expression in a 'InitialWorkdirRequirement.listing' field must return a list containing zero or more of: File or Directory objects; Dirent objects";
-      if (classic_dirent) {
-        message += '. ';
-      } else {
-        message += '; null; or arrays of File or Directory objects. ';
-      }
+        "Expression in a 'InitialWorkdirRequirement.listing' field must return a list containing zero or more of:" +
+        ' File or Directory objects; Dirent objects; null; or arrays of File or Directory objects. ';
       message += `Got ${fail} among the results from `;
-      message += `${initialWorkdir['listing'].trim()}.${fail_suffix}`;
+      message += `${str(initialWorkdir.listing)}.${fail_suffix}`;
       throw new WorkflowException(message);
     }
-    return ls_evaluated as CWLObjectType[];
+    return results;
   }
   async evaluate_listing_expr_or_dirent(
     initialWorkdir: InitialWorkDirRequirement,
+    listing: (
+      | string
+      | cwlTsAuto.File
+      | cwlTsAuto.Directory
+      | (cwlTsAuto.File | cwlTsAuto.Directory)[]
+      | cwlTsAuto.Dirent
+    )[],
     builder: Builder,
-    classic_dirent: boolean,
-  ): Promise<CWLObjectType[]> {
-    const ls: CWLObjectType[] = [];
+  ): Promise<(cwlTsAuto.File | cwlTsAuto.Directory | Dirent)[]> {
+    const ls: (cwlTsAuto.File | cwlTsAuto.Directory | Dirent)[] = [];
 
-    for (const t of aslist(initialWorkdir.listing)) {
-      if (t instanceof Dirent) {
+    for (const t of listing) {
+      if (t instanceof cwlTsAuto.Dirent) {
         const entry_field: string = t.entry;
         const entry = await builder.do_eval(entry_field, undefined, false, false);
         if (entry === null) {
@@ -477,24 +508,18 @@ export class CommandLineTool extends Process {
               const ec: CWLObjectType = e as CWLObjectType;
               ec['writable'] = t['writable'] || false;
             }
-            ls.push(...(entry as CWLObjectType[]));
+            ls.push(convertDictToFileDirectory(entry));
             continue;
           }
         }
-        const et: CWLObjectType = {} as CWLObjectType;
-
+        const et: Dirent = {};
         if (['File', 'Directory'].includes(entry['class'])) {
-          et['entry'] = entry;
+          et.entry = convertObjectToFileDirectory(entry);
         } else {
           if (typeof entry === 'string') {
-            et['entry'] = entry;
+            et.entry = entry;
           } else {
-            if (classic_dirent) {
-              throw new WorkflowException(
-                `'entry' expression resulted in something other than number, object or array besides a single File or Dirent object. In CWL v1.2+ this would be serialized to a JSON object. However this is a document. If that is the desired result then please consider using 'cwl-upgrader' to upgrade your document to CWL version 1.2. Result of ${entry_field} was ${entry}.`,
-              );
-            }
-            et['entry'] = josonStringifyLikePython(entry);
+            et.entry = josonStringifyLikePython(entry);
           }
         }
 
@@ -507,99 +532,93 @@ export class CommandLineTool extends Process {
                 `'entryname' expression must result a string. Got ${en} from ${entryname_field}`,
               );
             }
-            et['entryname'] = en;
+            et.entryname = en;
           } else {
-            et['entryname'] = entryname_field;
+            et.entryname = entryname_field;
           }
         } else {
-          et['entryname'] = undefined;
+          et.entryname = undefined;
         }
-        et['writable'] = t['writable'] || false;
+        et.writable = t['writable'] || false;
         ls.push(et);
       } else if (isString(t)) {
         const initwd_item = await builder.do_eval(t);
         if (!initwd_item) {
           continue;
         }
-        if (initwd_item instanceof Array) {
-          ls.push(...(initwd_item as CWLObjectType[]));
-        } else {
-          ls.push(initwd_item as CWLObjectType);
+        for (const item of aslist(initwd_item)) {
+          const rslt = convertObjectToFileDirectory(item);
+          if (rslt) {
+            ls.push(rslt);
+          } else {
+            ls.push({ ...rslt } as Dirent);
+          }
         }
       } else {
-        if (Array.isArray(t)) {
-          for (const f of t) {
-            ls.push(convertFileDirectoryToDict(f));
-          }
-        } else {
-          ls.push(convertFileDirectoryToDict(t));
-        }
+        ls.push(...aslist(t));
       }
     }
     return ls;
   }
-  check_output_items(initialWorkdir: cwlTsAuto.InitialWorkDirRequirement, ls: CWLObjectType[]): void {
+  check_output_items(
+    initialWorkdir: cwlTsAuto.InitialWorkDirRequirement,
+    ls: (cwlTsAuto.File | cwlTsAuto.Directory | Dirent)[],
+  ): (cwlTsAuto.File | cwlTsAuto.Directory)[] {
+    const results: (cwlTsAuto.File | cwlTsAuto.Directory)[] = [];
     for (let i = 0; i < ls.length; i++) {
       const t2 = ls[i];
-      if (!(t2 instanceof Object)) {
-        throw new WorkflowException(`Entry at index ${i} of listing is not a record, was ${typeof t2}`);
-      }
-
-      if (!('entry' in t2)) {
+      if (t2 instanceof cwlTsAuto.File || t2 instanceof cwlTsAuto.Directory) {
+        results.push(t2);
         continue;
       }
 
       // Dirent
-      if (typeof t2['entry'] === 'string') {
-        if (!t2['entryname']) {
+      if (typeof t2.entry === 'string') {
+        if (!t2.entryname) {
           throw new WorkflowException(`Entry at index ${i} of listing missing entryname`);
         }
-        ls[i] = {
-          class: 'File',
-          basename: t2['entryname'],
-          contents: t2['entry'],
-          writable: t2['writable'],
-        };
-        continue;
-      }
-
-      if (!(t2['entry'] instanceof Object)) {
-        throw new WorkflowException(`Entry at index ${i} of listing is not a record, was ${typeof t2['entry']}`);
-      }
-
-      if (!['File', 'Directory'].includes(t2['entry']['class'])) {
-        throw new WorkflowException(`Entry at index ${i} of listing is not a File or Directory object, was ${t2}`);
-      }
-
-      if (t2['entryname'] || t2['writable']) {
-        const t3 = JSON.parse(JSON.stringify(t2));
-        const t2entry = t3['entry'] as CWLObjectType;
-        if (t3['entryname']) {
-          t2entry['basename'] = t3['entryname'];
-        }
-        t2entry['writable'] = t3['writable'];
-        ls[i] = t3['entry'] as CWLObjectType;
+        results.push(
+          new cwlTsAuto.File({
+            basename: t2.entryname,
+            contents: t2.entry,
+            extensionFields: { writable: t2['writable'] },
+          }),
+        );
       } else {
-        ls[i] = t2['entry'] as CWLObjectType;
+        if (!(t2.entry instanceof Object)) {
+          throw new WorkflowException(`Entry at index ${i} of listing is not a record, was ${typeof t2['entry']}`);
+        }
+
+        if (t2.entryname || t2.writable) {
+          const t2entry = cloneDeep(t2.entry);
+          if (t2.entryname) {
+            t2entry.basename = t2.entryname;
+          }
+          t2entry.extensionFields['writable'] = t2.writable;
+          results.push(t2entry);
+        } else {
+          ls.push(t2.entry);
+        }
       }
     }
+    return results;
   }
   check_output_items2(
     initialWorkdir: cwlTsAuto.InitialWorkDirRequirement,
-    ls: CWLObjectType[],
+    ls: (cwlTsAuto.File | cwlTsAuto.Directory)[],
     cwl_version: string,
     debug: boolean,
   ) {
     for (let i = 0; i < ls.length; i++) {
       const t3 = ls[i];
-      if (!['File', 'Directory'].includes(t3['class'] as string)) {
-        throw new WorkflowException(
-          `Entry at index ${i} of listing is not a Dirent, File or ` + `Directory object, was ${t3}.`,
-        );
-      }
-      if (!t3['basename']) continue;
-      const basename = path.normalize(t3['basename'] as string);
-      t3['basename'] = basename;
+      // if (!['File', 'Directory'].includes(t3['class'] as string)) {
+      //   throw new WorkflowException(
+      //     `Entry at index ${i} of listing is not a Dirent, File or ` + `Directory object, was ${t3}.`,
+      //   );
+      // }
+      if (!t3.basename) continue;
+      const basename = path.normalize(t3.basename);
+      t3.basename = basename;
       if (basename.startsWith('../')) {
         throw new WorkflowException(
           `Name ${basename} at index ${i} of listing is invalid, ` + `cannot start with '../'`,
@@ -617,28 +636,34 @@ export class CommandLineTool extends Process {
     }
   }
 
-  setup_output_items(initialWorkdir: cwlTsAuto.InitialWorkDirRequirement, builder: Builder, ls: CWLObjectType[]): void {
+  setup_output_items(
+    initialWorkdir: cwlTsAuto.InitialWorkDirRequirement,
+    builder: Builder,
+    ls: (cwlTsAuto.File | cwlTsAuto.Directory)[],
+  ): void {
     for (const entry of ls) {
-      if (entry['basename']) {
-        const basename = entry['basename'] as string;
-        entry['dirname'] = pathJoin(builder.outdir, path.dirname(basename));
-        entry['basename'] = path.basename(basename);
+      let dirname: string | undefined = undefined;
+      if (entry.basename) {
+        const basename = entry.basename;
+        entry.basename = path.basename(basename);
+        dirname = pathJoin(builder.outdir, path.dirname(basename));
+        if (entry instanceof cwlTsAuto.File) {
+          entry.dirname = dirname;
+        }
       }
       normalizeFilesDirs(entry);
-      this.updatePathmap((entry['dirname'] || builder.outdir) as string, builder.pathmapper, entry);
-      if ('listing' in entry) {
-        function remove_dirname(d: CWLObjectType): void {
+      this.updatePathmap(dirname || builder.outdir, builder.pathmapper, entry);
+      if (entry instanceof cwlTsAuto.Directory && entry.listing) {
+        function remove_dirname(d: cwlTsAuto.Directory | cwlTsAuto.File): void {
           if ('dirname' in d) {
             delete d['dirname'];
           }
         }
 
-        visit_class(entry['listing'], ['File', 'Directory'], remove_dirname);
+        visitFileDirectory(entry.listing, remove_dirname);
       }
 
-      visit_class([builder.files, builder.bindings], ['File', 'Directory'], (val) =>
-        checkAdjust(this.path_check_mode, builder, val),
-      );
+      visitFileDirectory([builder.files, builder.bindings], (val) => checkAdjust(this.path_check_mode, builder, val));
     }
   }
 
@@ -648,22 +673,21 @@ export class CommandLineTool extends Process {
       return;
     }
     const debug = _logger.isDebugEnabled();
-    const classic_dirent = false;
-    const classic_listing = false;
 
-    let ls: CWLObjectType[] = [];
-    if (typeof initialWorkdir.listing === 'string') {
-      ls = await this.evaluate_listing_string(initialWorkdir, builder, classic_dirent, classic_listing, debug);
+    let ls: (cwlTsAuto.File | cwlTsAuto.Directory | Dirent)[] = [];
+    const listing = initialWorkdir.listing;
+    if (typeof listing === 'string') {
+      ls = await this.evaluate_listing_string(initialWorkdir, listing, builder);
     } else {
-      ls = await this.evaluate_listing_expr_or_dirent(initialWorkdir, builder, classic_dirent);
+      ls = await this.evaluate_listing_expr_or_dirent(initialWorkdir, listing, builder);
     }
 
-    this.check_output_items(initialWorkdir, ls);
+    const ls2 = this.check_output_items(initialWorkdir, ls);
 
-    this.check_output_items2(initialWorkdir, ls, 'cwl_version', debug);
+    this.check_output_items2(initialWorkdir, ls2, 'cwl_version', debug);
 
-    j.generatefiles['listing'] = ls;
-    this.setup_output_items(initialWorkdir, builder, ls);
+    j.generatefiles.listing = ls2;
+    this.setup_output_items(initialWorkdir, builder, ls2);
   }
   cache_context(runtimeContext: RuntimeContext): (arg1: CWLObjectType, arg2: string) => void {
     return (arg1: CWLObjectType, arg2: string) => {};
@@ -1028,7 +1052,7 @@ export class CommandLineTool extends Process {
     }
     const builder = await this._init_job(job_order, runtimeContext);
 
-    const reffiles = JSON.parse(JSON.stringify(builder.files));
+    const reffiles = cloneDeep(builder.files);
     const mjr = this.make_job_runner(runtimeContext);
     const j = mjr(builder, builder.job, make_path_mapper, this.tool, jobname);
 
@@ -1052,7 +1076,7 @@ export class CommandLineTool extends Process {
 
     const _check_adjust = (val) => checkAdjust(this.path_check_mode, builder, val);
 
-    visit_class([builder.files, builder.bindings], ['File', 'Directory'], _check_adjust);
+    visitFileDirectory([builder.files, builder.bindings], _check_adjust);
 
     await this._initialworkdir(j, builder);
 
@@ -1197,10 +1221,10 @@ export class CommandLineTool extends Process {
     }
 
     try {
-      for (let g of aslist(binding.glob)) {
+      for (const g of aslist(binding.glob)) {
         const gb = await builder.do_eval(g);
         if (gb) {
-          let gb_eval_fail = false;
+          const gb_eval_fail = false;
           if (isStringOrStringArray(gb)) {
             globpatterns.push(...aslist(gb));
           } else {

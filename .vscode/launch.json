@@ -25,11 +25,7 @@
       "runtimeExecutable": "/home/uehara/.nodenv/shims/node",
       "console": "integratedTerminal",
       "preLaunchTask": "npm build",
-      "runtimeArgs": [
-        "${workspaceFolder}/bin/flowycwl.js",
-        "tests/conditionals/cond-wf-013.cwl",
-        "tests/conditionals/cond20.job.yaml"
-      ]
+      "runtimeArgs": ["${workspaceFolder}/bin/flowycwl.js", "tests/bwa-mem-tool.cwl", "tests/bwa-mem-job.json"]
     },
     {
       "name": "test",

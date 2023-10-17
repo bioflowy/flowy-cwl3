@@ -2,6 +2,16 @@ import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as cwlTsAuto from 'cwl-ts-auto';
 import { InlineJavascriptRequirement } from 'cwl-ts-auto';
+import {
+  CommandInputArraySchema,
+  CommandInputEnumSchema,
+  CommandInputParameter,
+  CommandInputRecordSchema,
+  SecondaryFileSchema,
+  isCommandInputArraySchema,
+  isCommandInputRecordSchema,
+  isFileOrDirectory,
+} from './cwltypes.js';
 import { ValidationException, WorkflowException } from './errors.js';
 import * as expression from './expression.js';
 import { FormatGraph } from './formatgraph.js';
@@ -23,17 +33,9 @@ import {
   getRequirement,
   get_filed_name,
   str,
+  visitFileDirectory,
 } from './utils.js';
 import { validate } from './validate.js';
-import {
-  CommandInputArraySchema,
-  CommandInputEnumSchema,
-  CommandInputParameter,
-  CommandInputRecordSchema,
-  SecondaryFileSchema,
-  isCommandInputArraySchema,
-  isCommandInputRecordSchema,
-} from './cwltypes.js';
 
 export const INPUT_OBJ_VOCAB: { [key: string]: string } = {
   Any: 'https://w3id.org/cwl/salad#Any',
@@ -59,27 +61,23 @@ export async function contentLimitRespectedReadBytes(filePath: string): Promise<
     });
   });
 }
-async function check_format(
-  actual_file: CWLObjectType | CWLObjectType[],
-  input_formats: string | string[],
-  ontology: FormatGraph,
-) {
+async function check_format(actual_file: cwlTsAuto.File[], input_formats: string | string[], ontology: FormatGraph) {
   // Confirm that the format present is valid for the allowed formats."""
   for (const afile of aslist(actual_file)) {
     if (!afile) {
       continue;
     }
-    if (!afile['format']) {
+    if (!afile.format) {
       throw new ValidationException(`File has no 'format' defined: ${JSON.stringify(afile, null, 4)}`);
     }
     for (const inpf of aslist(input_formats)) {
-      if (afile['format'] === inpf) {
+      if (afile.format === inpf) {
         return;
       } else {
         if (!ontology.isLoaded()) {
           await ontology.loads();
         }
-        if (ontology.isSubClassOf(afile['format'] as string, inpf)) {
+        if (ontology.isSubClassOf(afile.format, inpf)) {
           return;
         }
       }
@@ -105,7 +103,7 @@ function isCommandInputObjectSchema(
 }
 export class Builder {
   job: CWLObjectType;
-  files: any[];
+  files: (cwlTsAuto.File | cwlTsAuto.Directory)[];
   bindings: CommandLineBinded[];
   schemaDefs: {
     [key: string]: CommandInputArraySchema | CommandInputEnumSchema | CommandInputRecordSchema;
@@ -290,9 +288,8 @@ export class Builder {
         }
       }
 
-      const _capture_files = (f: CWLObjectType): CWLObjectType => {
+      const _capture_files = (f: cwlTsAuto.File | cwlTsAuto.Directory) => {
         this.files.push(f);
-        return f;
       };
 
       if (schema.type == 'File') {
@@ -390,40 +387,35 @@ export class Builder {
     }
   }
 
-  handle_directory(schema: CommandInputParameter, datum: CWLOutputType): CWLObjectType {
-    datum = datum as CWLObjectType;
+  handle_directory(schema: CommandInputParameter, datum: CWLOutputType): cwlTsAuto.Directory {
+    const dir = datum as cwlTsAuto.Directory;
     const ll = schema.loadListing;
     if (ll && ll !== cwlTsAuto.LoadListingEnum.NO_LISTING) {
       get_listing(this.fs_access, datum, ll === cwlTsAuto.LoadListingEnum.DEEP_LISTING);
     }
-    this.files.push(datum);
-    return datum;
+    this.files.push(dir);
+    return dir;
   }
   async handleFile(
     schema: CommandInputParameter,
-    datum: CWLOutputType,
+    datum2: CWLOutputType,
     discoverSecondaryFiles: boolean,
     debug: boolean,
-    binding: { [key: string]: string | number[] } | CommentedMap,
+    binding: CommandLineBinded,
   ): Promise<void> {
-    const _captureFiles = (f: CWLObjectType): CWLObjectType => {
-      this.files.push(f);
-      return f;
-    };
-
-    datum = datum as CWLObjectType;
+    const datum = datum2 as cwlTsAuto.File;
     this.files.push(datum);
 
-    let loadContentsSourceline: { [key: string]: string | number[] } | CommandInputParameter | null = null;
-    if (binding && binding['loadContents']) {
+    let loadContentsSourceline: CommandLineBinded | CommandInputParameter | null = null;
+    if (binding && binding.loadContents) {
       loadContentsSourceline = binding;
     } else if (schema.loadContents) {
       loadContentsSourceline = schema;
     }
 
-    if (loadContentsSourceline && loadContentsSourceline['loadContents']) {
+    if (loadContentsSourceline && loadContentsSourceline.loadContents) {
       try {
-        datum['contents'] = await contentLimitRespectedReadBytes(datum['location'] as string);
+        datum.contents = await contentLimitRespectedReadBytes(datum.location);
       } catch (error) {
         throw new WorkflowException(`Reading ${str(datum['location'])}\n${error}`);
       }
@@ -436,10 +428,13 @@ export class Builder {
     if (schema.format) {
       await this.handleFileFormat(schema, datum);
     }
+    const _capture_files = (f: cwlTsAuto.File | cwlTsAuto.Directory) => {
+      this.files.push(f);
+    };
 
-    visit_class(datum['secondaryFiles'] || [], ['File', 'Directory'], _captureFiles);
+    visitFileDirectory(datum['secondaryFiles'] || [], _capture_files);
   }
-  async handleFileFormat(schema: CommandInputParameter, datum: CWLObjectType | CWLObjectType[]) {
+  async handleFileFormat(schema: CommandInputParameter, datum: cwlTsAuto.File) {
     const eval_format = await this.do_eval(schema.format);
     let evaluated_format: string | string[];
 
@@ -475,7 +470,7 @@ export class Builder {
     }
     // TODO check_format is not implemented
     try {
-      await check_format(datum, evaluated_format, this.formatgraph);
+      await check_format(aslist(datum), evaluated_format, this.formatgraph);
     } catch (ve) {
       throw new WorkflowException(
         `Expected value of ${schema['name']} to have format ${str(schema['format'])} but\n ${ve}`,
@@ -484,13 +479,13 @@ export class Builder {
   }
   async handleSecondaryFile(
     schema: CommandInputParameter,
-    datum: CWLObjectType,
+    datum: cwlTsAuto.File,
     discover_secondaryFiles: boolean,
     debug: boolean,
   ): Promise<void> {
     let sf_schema: SecondaryFileSchema[] = [];
-    if (!datum['secondaryFiles']) {
-      datum['secondaryFiles'] = [];
+    if (!datum.secondaryFiles) {
+      datum.secondaryFiles = [];
       sf_schema = aslist(schema.secondaryFiles);
     } else if (!discover_secondaryFiles) {
       sf_schema = []; // trust the inputs
@@ -518,7 +513,7 @@ export class Builder {
         if (pattern.includes('$(') || pattern.includes('${')) {
           sfpath = await this.do_eval(sf_entry.pattern, datum);
         } else {
-          sfpath = substitute(datum['basename'] as string, pattern);
+          sfpath = substitute(datum['basename'], pattern);
         }
       }
 
@@ -530,11 +525,11 @@ export class Builder {
       }
     }
 
-    normalizeFilesDirs(datum['secondaryFiles'] as MutableSequence<CWLObjectType>);
+    normalizeFilesDirs(datum.secondaryFiles || []);
   }
   handle_secondary_path(
     schema: CommandInputParameter,
-    datum: CWLObjectType,
+    datum: cwlTsAuto.File,
     discover_secondaryFiles: boolean,
     debug: boolean,
     sf_entry: any,
@@ -548,7 +543,7 @@ export class Builder {
     let sfbasename: string;
 
     if (typeof sfname === 'string') {
-      d_location = datum['location'] as string;
+      d_location = datum.location;
       if (d_location.indexOf('/') != -1) {
         sf_location = d_location.slice(0, d_location.lastIndexOf('/') + 1) + sfname;
       } else {
@@ -577,7 +572,7 @@ export class Builder {
     }
 
     if (!found) {
-      function addsf(files: CWLObjectType[], newsf: CWLObjectType): void {
+      function addsf(files: (cwlTsAuto.File | cwlTsAuto.Directory)[], newsf: cwlTsAuto.File): void {
         for (const f of files) {
           if (f['location'] == newsf['location']) {
             f['basename'] = newsf['basename'];
@@ -588,13 +583,15 @@ export class Builder {
       }
 
       if (typeof sfname === 'object') {
-        addsf(datum['secondaryFiles'] as CWLObjectType[], sfname);
+        addsf(datum.secondaryFiles || [], sfname);
       } else if (discover_secondaryFiles && this.fs_access.exists(sf_location)) {
-        addsf(datum['secondaryFiles'] as CWLObjectType[], {
-          location: sf_location,
-          basename: sfname,
-          class: 'File',
-        });
+        addsf(
+          datum.secondaryFiles || [],
+          new cwlTsAuto.File({
+            location: sf_location,
+            basename: sfname,
+          }),
+        );
       } else if (sf_required) {
         throw new WorkflowException(
           `Missing required secondary file '${sfname}' from file object: ${JSON.stringify(datum, null, 4)}`,
@@ -720,11 +717,12 @@ export class Builder {
     return [binded, valueFrom];
   }
   tostr(value: CWLOutputType): string {
-    if (value instanceof Object && ['File', 'Directory'].includes(value['class'] as string)) {
-      if (!value['path']) {
+    if (isFileOrDirectory(value)) {
+      if (!value.path) {
         throw new WorkflowException(`${value['class']} object missing "path": ${value}`);
       }
-      return value['path'] as string;
+      return value.path;
+
       // TODO
       // } else if (value instanceof ScalarFloat) {
       //     let rep = new RoundTripRepresenter();
@@ -766,7 +764,7 @@ export class Builder {
       } else {
         return [];
       }
-    } else if (value instanceof Object && ['File', 'Directory'].includes(value['class'] as string)) {
+    } else if (value instanceof cwlTsAuto.File || value instanceof cwlTsAuto.Directory) {
       argl = [value];
     } else if (value instanceof Object) {
       return prefix ? [prefix] : [];

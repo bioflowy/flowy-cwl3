@@ -1,14 +1,8 @@
 import { CommandInputEnumSchema } from 'cwl-ts-auto';
+import * as cwl from 'cwl-ts-auto';
+import { IOArraySchema, IORecordSchema, InputEnumSchema, isIOArraySchema, isIORecordSchema } from './cwltypes.js';
 import { ValidationException } from './errors.js';
 import { aslist, get_filed_name, isString } from './utils.js';
-import {
-  IOArraySchema,
-  IORecordSchema,
-  InputEnumSchema,
-  isCommandInputRecordSchema,
-  isIOArraySchema,
-  isIORecordSchema,
-} from './cwltypes.js';
 
 export function validate(
   t:
@@ -53,7 +47,7 @@ export function validate(
     }
     return false;
   } else if (t === 'File') {
-    if (datum && datum['class'] === 'File') {
+    if (datum && datum instanceof cwl.File) {
       return true;
     }
     if (raise_ex) {
@@ -61,7 +55,7 @@ export function validate(
     }
     return false;
   } else if (t === 'Directory') {
-    if (datum && datum['class'] === 'Directory') {
+    if (datum && datum instanceof cwl.Directory) {
       return true;
     }
     if (raise_ex) {

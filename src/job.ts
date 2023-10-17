@@ -3,17 +3,22 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { DockerRequirement, ShellCommandRequirement } from 'cwl-ts-auto';
+import * as cwl from 'cwl-ts-auto';
 import fsExtra, { outputFileSync } from 'fs-extra';
+import { glob } from 'glob';
 import { remove } from 'lodash';
 import { v4 as uuidv4 } from 'uuid';
+import { executeJob } from './JobExecutor.js';
 import { Builder } from './builder.js';
 import { RuntimeContext } from './context.js';
+import { Tool } from './cwltypes.js';
 import { UnsupportedRequirement, ValueError, WorkflowException } from './errors.js';
 import { removeIgnorePermissionError } from './fileutils.js';
 import { _logger } from './loghandler.js';
 import { MapperEnt, PathMapper } from './pathmapper.js';
 import { stage_files } from './process.js';
 import { SecretStore } from './secrets.js';
+import { LazyStaging } from './staging.js';
 import type { ToolRequirement } from './types.js';
 import {
   type CWLObjectType,
@@ -26,10 +31,6 @@ import {
   aslist,
   isStringOrStringArray,
 } from './utils.js';
-import { LazyStaging } from './staging.js';
-import { executeJob } from './JobExecutor.js';
-import { glob } from 'glob';
-import { Tool } from './cwltypes.js';
 // ... and so on for other modules
 const needsShellQuotingRe = /(^$|[\s|&;()<>\'"$@])/;
 
@@ -126,14 +127,18 @@ export async function _job_popen(
     timelimit,
   });
 }
-
 type CollectOutputsType = (str: string, int: number) => Promise<CWLObjectType>; // Assuming functools.partial as any
 export abstract class JobBase {
   builder: Builder;
   staging: LazyStaging = new LazyStaging();
   base_path_logs: string;
   joborder: CWLObjectType;
-  make_path_mapper: (param1: CWLObjectType[], param2: string, param3: RuntimeContext, param4: boolean) => PathMapper;
+  make_path_mapper: (
+    param1: (cwl.File | cwl.Directory)[],
+    param2: string,
+    param3: RuntimeContext,
+    param4: boolean,
+  ) => PathMapper;
   tool: Tool;
   name: string;
   stdin?: string;
@@ -150,7 +155,7 @@ export abstract class JobBase {
   outdir: string;
   tmpdir: string;
   environment: { [key: string]: string };
-  generatefiles: DirectoryType = { class: 'Directory', listing: [], basename: '' };
+  generatefiles: cwl.Directory = new cwl.Directory({ listing: [], basename: '' });
   stagedir?: string;
   inplace_update: boolean;
   prov_obj?: any; // ProvenanceProfile;
@@ -162,7 +167,12 @@ export abstract class JobBase {
   constructor(
     builder: Builder,
     joborder: CWLObjectType,
-    make_path_mapper: (param1: CWLObjectType[], param2: string, param3: RuntimeContext, param4: boolean) => PathMapper,
+    make_path_mapper: (
+      param1: (cwl.File | cwl.Directory)[],
+      param2: string,
+      param3: RuntimeContext,
+      param4: boolean,
+    ) => PathMapper,
     tool: Tool,
     name: string,
   ) {
@@ -231,10 +241,10 @@ export abstract class JobBase {
       }
     }
 
-    if ('listing' in this.generatefiles) {
+    if (this.generatefiles.listing) {
       runtimeContext.outdir = this.outdir;
       this.generatemapper = this.make_path_mapper(
-        this.generatefiles['listing'],
+        this.generatefiles.listing,
         this.builder.outdir,
         runtimeContext,
         false,
