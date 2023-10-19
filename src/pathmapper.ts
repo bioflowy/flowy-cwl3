@@ -1,9 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { File, Directory } from 'cwl-ts-auto';
 import { v4 as uuidv4 } from 'uuid';
+import { RuntimeContext } from './context.js';
+import { Directory, File } from './cwltypes.js';
 import { abspath } from './stdfsaccess.js';
-import { uriFilePath, dedup, downloadHttpFile } from './utils.js';
+import { uriFilePath, dedup, downloadHttpFile, isFile, isDirectory } from './utils.js';
+
 export class MapperEnt {
   resolved: string;
   target: string;
@@ -65,13 +67,7 @@ export class PathMapper {
     staged = false,
   ): void {
     for (const ld of listing) {
-      this.visit(
-        ld,
-        stagedir,
-        basedir,
-        (copy = ld.extensionFields['writable'] ? (ld.extensionFields['writable'] as boolean) : copy),
-        staged,
-      );
+      this.visit(ld, stagedir, basedir, (copy = ld.writable ?? copy), staged);
     }
   }
   update(key: string, resolved: string, target: string, type: string, staged: boolean): MapperEnt {
@@ -104,7 +100,7 @@ export class PathMapper {
       return;
     }
 
-    if (obj instanceof Directory) {
+    if (isDirectory(obj)) {
       const location: string = obj.location;
       let resolved: string;
 
@@ -121,7 +117,7 @@ export class PathMapper {
       }
 
       this.visitlisting(obj.listing || [], tgt, basedir, copy, staged);
-    } else if (obj instanceof File) {
+    } else if (isFile(obj)) {
       const path1: string = obj.location;
       const ab: string = abspath(path1, basedir);
 
@@ -154,7 +150,7 @@ export class PathMapper {
       if (this.separateDirs) {
         stagedir = path.join(this.stagedir, `stg${uuidv4()}`);
       }
-      const copy = (fob.extensionFields['writable'] as boolean | undefined) || false;
+      const copy = fob.writable || false;
       this.visit(fob, stagedir, basedir, copy, true);
     }
   }
@@ -192,3 +188,9 @@ export class PathMapper {
     return Object.entries(newitems);
   }
 }
+export type MakePathMapper = (
+  param1: (File | Directory)[],
+  param2: string,
+  param3: RuntimeContext,
+  param4: boolean,
+) => PathMapper;

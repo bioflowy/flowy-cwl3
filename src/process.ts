@@ -5,7 +5,12 @@ import * as crypto from 'node:crypto';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import cwlTsAuto, { LoadListingEnum } from 'cwl-ts-auto';
+import cwlTsAuto, {
+  LoadListingEnum,
+  enum_d062602be0b4b8fd33e69e29a841317b6ab665bc as ArrayTypeEnum,
+  enum_d9cba076fca539106791a4f46d198c7fcfbdb779 as RecordTypeEnum,
+  enum_d961d79c225752b9fadb617367615ab176b47d77 as EnumTypeEnum,
+} from 'cwl-ts-auto';
 import fsExtra from 'fs-extra';
 import { cloneDeep } from 'lodash-es';
 import { v4 } from 'uuid';
@@ -15,12 +20,15 @@ import { LoadingContext, RuntimeContext, getDefault } from './context.js';
 import {
   CommandInputParameter,
   CommandInputRecordField,
-  CommandOutputParameter,
   CommandOutputRecordField,
   CommandOutputType,
-  RecordTypeEnum,
+  Directory,
+  File,
+  IOType,
   Tool,
-  ToolType,
+  ArrayType,
+  RecordType,
+  EnumType,
 } from './cwltypes.js';
 import { ValidationException, WorkflowException } from './errors.js';
 
@@ -331,7 +339,7 @@ export async function relocateOutputs(
     }
   }
 
-  function _realpath(ob: cwlTsAuto.Directory | cwlTsAuto.File): void {
+  function _realpath(ob: Directory | File): void {
     const location = ob.location;
     if (location.startsWith('file:')) {
       ob.location = fileUri(fs.realpathSync(uriFilePath(location)));
@@ -341,13 +349,13 @@ export async function relocateOutputs(
       ob.location = fileUri(fs_access.realpath(location));
     }
   }
-  const outfiles: (cwlTsAuto.File | cwlTsAuto.Directory)[] = [];
+  const outfiles: (File | Directory)[] = [];
   visitFileDirectory(outputObj, (v) => outfiles.push(v));
   visitFileDirectory(outfiles, _realpath);
   const pm = new PathMapper(outfiles, '', destination_path, false);
   stage_files_for_outputs(pm, _relocate, { symlink: false, fix_conflicts: true });
 
-  function _check_adjust(a_file: cwlTsAuto.File | cwlTsAuto.Directory): void {
+  function _check_adjust(a_file: File | Directory): void {
     a_file.location = fileUri(pm.mapper(a_file.location)?.target ?? '');
     if (a_file['contents']) {
       a_file['contents'] = undefined;
@@ -371,11 +379,11 @@ export async function cleanIntermediate(output_dirs: Iterable<string>): Promise<
   }
 }
 
-export function add_sizes(fsaccess: StdFsAccess, obj: cwlTsAuto.File): void {
+export function add_sizes(fsaccess: StdFsAccess, obj: File): void {
   if (obj.location) {
     try {
       if (!obj.size) {
-        obj['size'] = fsaccess.size(String(obj['location']));
+        obj.size = fsaccess.size(String(obj.location));
       }
     } catch {}
   } else if (obj.contents) {
@@ -390,7 +398,7 @@ function fill_in_defaults(inputs: CommandInputParameter[], job: CWLObjectType, f
     if (job[fieldname] != null) {
       continue;
     } else if (job[fieldname] == null && inp.default_ !== undefined) {
-      job[fieldname] = structuredClone(inp.default_);
+      job[fieldname] = cloneDeep(inp.default_);
     } else if (job[fieldname] == null && aslist(inp.type).includes('null')) {
       job[fieldname] = null;
     } else {
@@ -398,15 +406,14 @@ function fill_in_defaults(inputs: CommandInputParameter[], job: CWLObjectType, f
     }
   }
 }
-function avroizeType(fieldType: ToolType | null, namePrefix = ''): ToolType {
+function avroizeType(fieldType: IOType | null, namePrefix = '') {
   if (Array.isArray(fieldType)) {
-    const typeArray = fieldType as any[];
     for (let i = 0; i < fieldType.length; i++) {
-      typeArray[i] = avroizeType(fieldType[i], namePrefix);
+      avroizeType(fieldType[i], namePrefix);
     }
   } else if (fieldType instanceof Object) {
     const fieldTypeName = fieldType['type'];
-    if (fieldTypeName === 'enum' || fieldTypeName === 'record') {
+    if (fieldTypeName === EnumType || fieldTypeName === RecordType) {
       if (!('name' in fieldType)) {
         const r = v4();
         // eslint-disable-next-line
@@ -414,15 +421,14 @@ function avroizeType(fieldType: ToolType | null, namePrefix = ''): ToolType {
       }
     }
 
-    if (fieldType.type === 'record') {
-      fieldType.fields = avroizeType(fieldType.fields as any, namePrefix) as any;
-    } else if (fieldType.type === 'array') {
-      fieldType.items = avroizeType(fieldType.items, namePrefix);
-    } else {
-      fieldType.type = avroizeType(fieldType.type, namePrefix) as any;
+    if (fieldType.type === RecordType) {
+      for (const field of fieldType.fields) {
+        avroizeType(field.type, namePrefix);
+      }
+    } else if (fieldType.type === ArrayType) {
+      avroizeType(fieldType.items, namePrefix);
     }
   }
-  return fieldType;
 }
 
 function getOverrides(overrides: MutableSequence<CWLObjectType>, toolId: string): CWLObjectType {
@@ -491,8 +497,8 @@ export abstract class Process {
   tool: Tool;
   requirements: ToolRequirement = [];
   hints: ToolRequirement = [];
-  original_requirements: any[];
-  original_hints: any[];
+  original_requirements: ToolRequirement;
+  original_hints: ToolRequirement;
   doc_loader: any;
   doc_schema: any;
   formatgraph: FormatGraph;
@@ -569,7 +575,6 @@ export abstract class Process {
     if (sd) {
       const sdtypes = sd.types;
       avroizeType(sdtypes);
-      const alltypes = {};
       for (const t of sdtypes) {
         this.schemaDefs[t.name] = t;
       }
@@ -579,14 +584,14 @@ export abstract class Process {
     this.inputs_record_schema = {
       name: 'inputs_record_schema',
       type: {
-        type: 'record' as RecordTypeEnum,
+        type: RecordType,
         fields: [],
       },
     };
     this.outputs_record_schema = {
       name: 'outputs_record_schema',
       type: {
-        type: 'record' as RecordTypeEnum,
+        type: RecordType,
         fields: [],
       },
     };
@@ -598,12 +603,12 @@ export abstract class Process {
       }
 
       if (c.default_ && !aslist(c.type).includes('null')) {
-        const nullable: ToolType = ['null'];
+        const nullable: IOType = ['null'];
         nullable.push(...aslist(c.type));
         c.type = nullable;
       }
 
-      c.type = avroizeType(c.type, c.name);
+      avroizeType(c.type, c.name);
       this.inputs_record_schema.type.fields.push(c as CommandInputRecordField);
     }
     for (const i of this.tool.outputs) {
@@ -612,7 +617,7 @@ export abstract class Process {
         throw new Error(`Missing 'type' in parameter '${c.name}'`);
       }
 
-      c.type = avroizeType(c.type, c.name) as CommandOutputType;
+      avroizeType(c.type, c.name);
 
       this.outputs_record_schema.type.fields.push(c as CommandOutputRecordField);
     }
@@ -754,7 +759,7 @@ hints:
       }
     }
 
-    const files: CWLObjectType[] = [];
+    const files: (File | Directory)[] = [];
     const bindings: CommandLineBinded[] = [];
     let outdir = '';
     let tmpdir = '';
@@ -820,7 +825,7 @@ hints:
     bindings.push(...bs);
 
     if (this.tool.baseCommand) {
-      aslist(this.tool.baseCommand).forEach((command: any, index: number) => {
+      aslist(this.tool.baseCommand).forEach((command, index) => {
         bindings.push({ positions: [-1000000, index], datum: command });
       });
     }
@@ -890,8 +895,8 @@ hints:
 
     const rsca: string[] = ['cores', 'ram', 'tmpdir', 'outdir'];
     for (const rsc of rsca) {
-      let mn: any = null;
-      let mx: any = null;
+      let mn: string | number | null = null;
+      let mx: string | number | null = null;
       if (resourceReq[`${rsc}Min`]) {
         mn = await eval_resource(builder, resourceReq[`${rsc}Min`]);
       }
@@ -905,6 +910,12 @@ hints:
       }
 
       if (mn !== null) {
+        if (typeof mn === 'string') {
+          throw new ValidationException(`${rsc}Min must be a number, not a string`);
+        }
+        if (typeof mx === 'string') {
+          throw new ValidationException(`${rsc}Max must be a number, not a string`);
+        }
         request[`${rsc}Min`] = mn;
         request[`${rsc}Max`] = mx;
       }
@@ -982,10 +993,6 @@ hints:
     //       _logger.info(sl.makeError(`Unknown hint ${r["class"]}`));
     //     }
     //   }
-  }
-
-  visit(op: (map: any) => void): void {
-    op(this.tool);
   }
 
   abstract job(
@@ -1243,7 +1250,7 @@ async function calculateSHA1(filePath: string): Promise<string> {
     });
   });
 }
-export async function compute_checksums(fsAccess: StdFsAccess, fileobj: cwlTsAuto.File): Promise<void> {
+export async function compute_checksums(fsAccess: StdFsAccess, fileobj: File): Promise<void> {
   if (!fileobj.checksum) {
     const checksum = crypto.createHash('sha1');
     const location = fileobj.location;

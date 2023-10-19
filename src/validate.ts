@@ -1,17 +1,16 @@
 import { CommandInputEnumSchema } from 'cwl-ts-auto';
-import * as cwl from 'cwl-ts-auto';
 import { IOArraySchema, IORecordSchema, InputEnumSchema, isIOArraySchema, isIORecordSchema } from './cwltypes.js';
 import { ValidationException } from './errors.js';
-import { aslist, get_filed_name, isString } from './utils.js';
+import { CWLOutputType, get_filed_name, isDirectory, isFile, isString, str } from './utils.js';
 
 export function validate(
   t:
     | string
-    | IOArraySchema<any>
-    | IORecordSchema<any>
+    | IOArraySchema
     | InputEnumSchema
-    | (string | IOArraySchema<any> | IORecordSchema<any> | InputEnumSchema)[],
-  datum,
+    | IORecordSchema
+    | (string | IOArraySchema | InputEnumSchema | IORecordSchema)[],
+  datum: CWLOutputType | null | undefined,
   raise_ex: boolean,
 ) {
   if (t === 'null') {
@@ -47,7 +46,7 @@ export function validate(
     }
     return false;
   } else if (t === 'File') {
-    if (datum && datum instanceof cwl.File) {
+    if (datum && isFile(datum)) {
       return true;
     }
     if (raise_ex) {
@@ -55,7 +54,7 @@ export function validate(
     }
     return false;
   } else if (t === 'Directory') {
-    if (datum && datum instanceof cwl.Directory) {
+    if (datum && isDirectory(datum)) {
       return true;
     }
     if (raise_ex) {
@@ -106,11 +105,11 @@ export function validate(
       return false;
     }
 
-    const errors: any[] = [];
+    const errors: ValidationException[] = [];
     for (const f of t.fields) {
       if (f.name === 'class') continue;
 
-      let fieldval: any;
+      let fieldval: CWLOutputType | null | undefined = null;
       if (datum[get_filed_name(f.name)]) {
         fieldval = datum[get_filed_name(f.name)];
       }
@@ -140,7 +139,8 @@ export function validate(
     let valid = true;
     if (Array.isArray(datum)) {
       for (const d of datum) {
-        if (!validate(t.items, d, false)) {
+        const items = t.items;
+        if (!validate(items, d, false)) {
           valid = false;
           break;
         }
@@ -150,12 +150,12 @@ export function validate(
       return true;
     }
     if (raise_ex) {
-      throw new ValidationException(`the value ${JSON.stringify(datum)} is not ${t.items}`);
+      throw new ValidationException(`the value ${JSON.stringify(datum)} is not ${str(t.items)}`);
     }
     return false;
   }
   if (raise_ex) {
-    throw new ValidationException(`the value ${JSON.stringify(datum)} is not ${t}`);
+    throw new ValidationException(`the value ${JSON.stringify(datum)} is not ${str(t)}`);
   }
   return false;
 }

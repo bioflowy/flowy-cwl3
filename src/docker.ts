@@ -1,14 +1,13 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DockerRequirement, ResourceRequirement } from 'cwl-ts-auto';
-import * as cwl from 'cwl-ts-auto';
 import { Builder } from './builder.js';
 import { RuntimeContext } from './context.js';
 import { Tool } from './cwltypes.js';
 import { WorkflowException } from './errors.js';
 import { ContainerCommandLineJob } from './job.js';
 import { _logger } from './loghandler.js';
-import { MapperEnt, PathMapper } from './pathmapper.js';
+import { MakePathMapper, MapperEnt } from './pathmapper.js';
 import {
   type CWLObjectType,
   type MutableMapping,
@@ -26,27 +25,11 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
   docker_exec = 'docker';
 
   // eslint-disable-next-line @typescript-eslint/no-useless-constructor
-  constructor(
-    builder: Builder,
-    joborder: CWLObjectType,
-    make_path_mapper: (
-      arg1: (cwl.File | cwl.Directory)[],
-      arg2: string,
-      arg3: RuntimeContext,
-      arg4: boolean,
-    ) => PathMapper,
-    tool: Tool,
-    name: string,
-  ) {
+  constructor(builder: Builder, joborder: CWLObjectType, make_path_mapper: MakePathMapper, tool: Tool, name: string) {
     super(builder, joborder, make_path_mapper, tool, name);
   }
 
-  async get_image(
-    docker_requirement: DockerRequirement,
-    pull_image: boolean,
-    force_pull: boolean,
-    tmp_outdir_prefix: string,
-  ): Promise<boolean> {
+  async get_image(docker_requirement: DockerRequirement, pull_image: boolean, force_pull: boolean): Promise<boolean> {
     let found = false;
 
     if (!docker_requirement.dockerImageId && docker_requirement.dockerPull)
@@ -77,6 +60,7 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
           break;
         }
       } catch (error) {
+        _logger.warn(`Error parsing docker images output: ${error}`);
         continue;
       }
     }
@@ -86,13 +70,9 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
       if ('dockerPull' in docker_requirement) {
         cmd = [this.docker_exec, 'pull', docker_requirement['dockerPull'].toString()];
         _logger.info(cmd.toString());
-        const rslt = await checkOutput(cmd);
+        await checkOutput(cmd);
         found = true;
       }
-      // TypeScript does not have an equivalent of Python's 'with open()' statement.
-      // Uses Node.js traditional filesystem io for writing file.
-      // else if (...) {...}
-      // else if (...) {...}
     }
     if (found) {
       // synchronized (_IMAGES_LOCK, () => {
@@ -106,13 +86,12 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
     r: DockerRequirement,
     pull_image: boolean,
     force_pull: boolean,
-    tmp_outdir_prefix: string,
   ): Promise<string | undefined> {
     const rslt = await which(this.docker_exec);
     if (!rslt) {
       throw new WorkflowException(`${this.docker_exec} executable is not available`);
     }
-    const r2 = await this.get_image(r, pull_image, force_pull, tmp_outdir_prefix);
+    await this.get_image(r, pull_image, force_pull);
     if (r) {
       return r['dockerImageId'];
     }
@@ -134,7 +113,7 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
     }
   }
 
-  add_file_or_directory_volume(runtime: string[], volume: MapperEnt, host_outdir_tgt: string | null): void {
+  add_file_or_directory_volume(runtime: string[], volume: MapperEnt, _host_outdir_tgt: string | null): void {
     if (!volume.resolved.startsWith('_:')) {
       this.append_volume(runtime, volume.resolved, volume.target);
     }
@@ -295,15 +274,15 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
         cidfile_dir = runtimeContext.cidfile_dir;
 
         if (!fs.existsSync(cidfile_dir)) {
-          _logger.error(`--cidfile-dir ${cidfile_dir} error:\ndirectory doesn't exist, please create it first`);
-          process.exit(2);
+          throw new Error(
+            `--cidfile-dir ${cidfile_dir} error:\n${cidfile_dir} is not a directory, please check it first`,
+          );
         }
 
         if (!fs.statSync(cidfile_dir).isDirectory()) {
-          _logger.error(
+          throw new Error(
             `--cidfile-dir ${cidfile_dir} error:\n${cidfile_dir} is not a directory, please check it first`,
           );
-          process.exit(2);
         }
       } else {
         cidfile_dir = runtimeContext.createTmpdir();
@@ -358,13 +337,7 @@ function getCurrentTimestamp(): string {
   return `${year}${month}${day}${hours}${minutes}${seconds}-${milliseconds}`;
 }
 export class PodmanCommandLineJob extends DockerCommandLineJob {
-  constructor(
-    builder: Builder,
-    joborder: CWLObjectType,
-    make_path_mapper: (p1: (cwl.File | cwl.Directory)[], p2: string, p3: RuntimeContext, p4: boolean) => PathMapper,
-    tool: Tool,
-    name: string,
-  ) {
+  constructor(builder: Builder, joborder: CWLObjectType, make_path_mapper: MakePathMapper, tool: Tool, name: string) {
     super(builder, joborder, make_path_mapper, tool, name);
     this.docker_exec = 'podman';
   }

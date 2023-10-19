@@ -1,16 +1,16 @@
 import * as path from 'node:path';
-import { resourceLimits } from 'node:worker_threads';
-import cwlTsAuto, {
-  CommandOutputBinding,
-  DockerRequirement,
-  InitialWorkDirRequirement,
-  InplaceUpdateRequirement,
-  WorkReuse,
-} from 'cwl-ts-auto';
+import * as cwl from 'cwl-ts-auto';
 import { cloneDeep } from 'lodash-es';
 import { Builder, contentLimitRespectedReadBytes, substitute } from './builder.js';
 import { LoadingContext, RuntimeContext, getDefault } from './context.js';
-import { CommandInputParameter, CommandOutputParameter, Tool } from './cwltypes.js';
+import {
+  CommandInputParameter,
+  CommandOutputBinding,
+  CommandOutputParameter,
+  Directory,
+  File,
+  Tool,
+} from './cwltypes.js';
 import { DockerCommandLineJob, PodmanCommandLineJob } from './docker.js';
 import { UnsupportedRequirement, ValidationException, WorkflowException } from './errors.js';
 import { pathJoin } from './fileutils.js';
@@ -36,18 +36,20 @@ import {
   quote,
   splitext,
   uriFilePath,
-  visit_class,
   getRequirement,
   josonStringifyLikePython,
   isStringOrStringArray,
   visitFileDirectory,
   str,
+  isDirectory,
+  isFileOrDirectory,
+  isFile,
 } from './utils.js';
 import { validate } from './validate.js';
 
 interface Dirent {
   entryname?: string;
-  entry?: string | cwlTsAuto.File | cwlTsAuto.Directory;
+  entry?: string | File | Directory;
   writable?: boolean;
 }
 
@@ -99,7 +101,7 @@ export class ExpressionJob {
   }
 }
 export class ExpressionTool extends Process {
-  declare tool: cwlTsAuto.ExpressionTool;
+  declare tool: cwl.ExpressionTool;
   override init(loadContent: LoadingContext) {
     for (const i of this.tool.inputs) {
       const c: CommandInputParameter = i;
@@ -124,16 +126,12 @@ export class ExpressionTool extends Process {
   }
 }
 
-function remove_path(f: cwlTsAuto.File | cwlTsAuto.Directory): void {
+function remove_path(f: File | Directory): void {
   if (f.path) {
     f.path = undefined;
   }
 }
-function revmap_file(
-  builder: Builder,
-  outdir: string,
-  f: cwlTsAuto.File | cwlTsAuto.Directory,
-): cwlTsAuto.File | cwlTsAuto.Directory | null {
+function revmap_file(builder: Builder, outdir: string, f: File | Directory): File | Directory | null {
   if (outdir.startsWith('/')) {
     outdir = fileUri(outdir);
   }
@@ -142,7 +140,7 @@ function revmap_file(
     if (location.startsWith('file://')) {
       f.path = uriFilePath(location);
     } else {
-      f.location = builder.fs_access.join(outdir, f.location['location']);
+      f.location = builder.fs_access.join(outdir, f.location);
       return f;
     }
   }
@@ -184,7 +182,7 @@ function revmap_file(
   throw new WorkflowException(`Output File object is missing both 'location' and 'path' fields: ${f}`);
 }
 function make_path_mapper(
-  reffiles: (cwlTsAuto.File | cwlTsAuto.Directory)[],
+  reffiles: (File | Directory)[],
   stagedir: string,
   runtimeContext: RuntimeContext,
   separateDirs: boolean,
@@ -192,40 +190,7 @@ function make_path_mapper(
   return new PathMapper(reffiles, runtimeContext.basedir, stagedir, separateDirs);
 }
 
-export class CallbackJob {
-  job: any;
-  output_callback: any | null;
-  cachebuilder: any;
-  outdir: string;
-  prov_obj: any | null;
-
-  constructor(job: any, output_callback: any | null, cachebuilder: any, jobcache: string) {
-    this.job = job;
-    this.output_callback = output_callback;
-    this.cachebuilder = cachebuilder;
-    this.outdir = jobcache;
-    this.prov_obj = null;
-  }
-
-  run(runtimeContext: any, tmpdir_lock: any | null = null): void {
-    if (this.output_callback) {
-      this.output_callback(
-        this.job.collect_output_ports(
-          this.job.tool['outputs'],
-          this.cachebuilder,
-          this.outdir,
-          runtimeContext.compute_checksum != null ? runtimeContext.compute_checksum : true,
-        ),
-        'success',
-      );
-    }
-  }
-}
-function checkAdjust(
-  acceptRe: RegExp,
-  builder: Builder,
-  fileO: cwlTsAuto.File | cwlTsAuto.Directory,
-): cwlTsAuto.File | cwlTsAuto.Directory {
+function checkAdjust(acceptRe: RegExp, builder: Builder, fileO: File | Directory): File | Directory {
   if (!builder.pathmapper) {
     throw new Error("Do not call check_adjust using a builder that doesn't have a pathmapper.");
   }
@@ -242,7 +207,7 @@ function checkAdjust(
     basename = bn.toString();
     fileO.basename = basename;
   }
-  if (fileO instanceof cwlTsAuto.File) {
+  if (isFile(fileO)) {
     const ne = path.extname(basename);
     const nr = path.basename(basename, ne);
     if (fileO.nameroot !== nr) {
@@ -258,15 +223,15 @@ function checkAdjust(
   return fileO;
 }
 
-function checkValidLocations(fsAccess: StdFsAccess, ob: cwlTsAuto.Directory | cwlTsAuto.File): void {
+function checkValidLocations(fsAccess: StdFsAccess, ob: Directory | File): void {
   const location = ob.location;
   if (location.startsWith('_:')) {
     return;
   }
-  if (ob instanceof cwlTsAuto.File && !fsAccess.isfile(location)) {
+  if (isFile(ob) && !fsAccess.isfile(location)) {
     throw new Error(`Does not exist or is not a File: '${location}'`);
   }
-  if (ob instanceof cwlTsAuto.Directory && !fsAccess.isdir(location)) {
+  if (isDirectory(ob) && !fsAccess.isdir(location)) {
     throw new Error(`Does not exist or is not a Directory: '${location}'`);
   }
 }
@@ -318,7 +283,7 @@ class ParameterOutputWorkflowException extends WorkflowException {
 }
 const MPIRequirementName = 'http://commonwl.org/cwltool#MPIRequirement';
 export class CommandLineTool extends Process {
-  declare tool: cwlTsAuto.CommandLineTool;
+  declare tool: cwl.CommandLineTool;
   prov_obj: any; // placeholder type
   path_check_mode: RegExp; // placeholder type
   override init(loadContent: LoadingContext) {
@@ -339,7 +304,7 @@ export class CommandLineTool extends Process {
     builder: Builder,
     joborder: CWLObjectType,
     make_path_mapper: (
-      param1: (cwlTsAuto.File | cwlTsAuto.Directory)[],
+      param1: (File | Directory)[],
       param2: string,
       param3: RuntimeContext,
       param4: boolean,
@@ -348,12 +313,12 @@ export class CommandLineTool extends Process {
     name: string,
   ) => JobBase {
     // placeholder types
-    let [dockerReq, dockerRequired] = getRequirement(this.tool, cwlTsAuto.DockerRequirement);
+    let [dockerReq, dockerRequired] = getRequirement(this.tool, cwl.DockerRequirement);
     if (!dockerReq && runtimeContext.use_container) {
       if (runtimeContext.find_default_container) {
         const default_container = runtimeContext.find_default_container(this);
         if (default_container) {
-          dockerReq = new cwlTsAuto.DockerRequirement({
+          dockerReq = new cwl.DockerRequirement({
             dockerPull: default_container,
           });
           this.requirements.unshift(dockerReq);
@@ -376,13 +341,13 @@ export class CommandLineTool extends Process {
     }
     if (dockerRequired)
       throw new UnsupportedRequirement(
-        '--no-container, but this CommandLineTool has ' + "DockerRequirement under 'requirements'.",
+        '--no-container, but this CommandLineTool has ' + "cwl.DockerRequirement under 'requirements'.",
       );
     return (builder, joborder, make_path_mapper, tool, name) =>
       new CommandLineJob(builder, joborder, make_path_mapper, tool, name);
   }
 
-  updatePathmap(outdir: string, pathmap: PathMapper, fn: cwlTsAuto.File | cwlTsAuto.Directory): void {
+  updatePathmap(outdir: string, pathmap: PathMapper, fn: File | Directory): void {
     if (!(fn instanceof Object)) {
       throw new WorkflowException(`Expected File or Directory object, was ${typeof fn}`);
     }
@@ -399,26 +364,26 @@ export class CommandLineTool extends Process {
         );
       }
     }
-    if (fn instanceof cwlTsAuto.File) {
+    if (isFile(fn)) {
       for (const sf of fn.secondaryFiles || []) {
         this.updatePathmap(outdir, pathmap, sf);
       }
     }
-    if (fn instanceof cwlTsAuto.Directory) {
+    if (isDirectory(fn)) {
       for (const ls of fn.listing || []) {
-        this.updatePathmap(pathJoin(outdir, fn['basename']), pathmap, ls);
+        this.updatePathmap(pathJoin(outdir, fn.basename), pathmap, ls);
       }
     }
   }
   async evaluate_listing_string(
-    initialWorkdir: InitialWorkDirRequirement,
+    initialWorkdir: cwl.InitialWorkDirRequirement,
     listing: string,
     builder: Builder,
-  ): Promise<(cwlTsAuto.File | cwlTsAuto.Directory | Dirent)[]> {
+  ): Promise<(File | Directory | Dirent)[]> {
     const ls_evaluated = await builder.do_eval(listing);
     let fail: any = false;
     const fail_suffix = '';
-    const results: (cwlTsAuto.File | cwlTsAuto.Directory | Dirent)[] = [];
+    const results: (File | Directory | Dirent)[] = [];
     if (!(ls_evaluated instanceof Array)) {
       fail = ls_evaluated;
     } else {
@@ -434,7 +399,7 @@ export class CommandLineTool extends Process {
           // flowy_cwl only supports cwl1.2 or later, so no need to check classic_listing
           // if (classic_listing) {
           //   throw new WorkflowException(
-          //     "InitialWorkDirRequirement.listing expressions cannot return arrays of Files or Directories before CWL v1.1. Please considering using 'cwl-upgrader' to upgrade your document to CWL v1.1' or later.",
+          //     "cwl.InitialWorkDirRequirement.listing expressions cannot return arrays of Files or Directories before CWL v1.1. Please considering using 'cwl-upgrader' to upgrade your document to CWL v1.1' or later.",
           //   );
           // }
           for (const entry2 of entry) {
@@ -468,21 +433,33 @@ export class CommandLineTool extends Process {
     return results;
   }
   async evaluate_listing_expr_or_dirent(
-    initialWorkdir: InitialWorkDirRequirement,
-    listing: (
-      | string
-      | cwlTsAuto.File
-      | cwlTsAuto.Directory
-      | (cwlTsAuto.File | cwlTsAuto.Directory)[]
-      | cwlTsAuto.Dirent
-    )[],
+    initialWorkdir: cwl.InitialWorkDirRequirement,
+    listing: (string | cwl.File | cwl.Directory | (cwl.File | cwl.Directory)[] | Dirent)[],
     builder: Builder,
-  ): Promise<(cwlTsAuto.File | cwlTsAuto.Directory | Dirent)[]> {
-    const ls: (cwlTsAuto.File | cwlTsAuto.Directory | Dirent)[] = [];
+  ): Promise<(File | Directory | Dirent)[]> {
+    const ls: (File | Directory | Dirent)[] = [];
 
     for (const t of listing) {
-      if (t instanceof cwlTsAuto.Dirent) {
-        const entry_field: string = t.entry;
+      if (Array.isArray(t)) {
+        ls.push(...t.map(convertObjectToFileDirectory));
+      } else if (isFileOrDirectory(t)) {
+        ls.push(convertObjectToFileDirectory(t));
+      } else if (isString(t)) {
+        const initwd_item = await builder.do_eval(t);
+        if (!initwd_item) {
+          continue;
+        }
+        for (const item of aslist(initwd_item)) {
+          const rslt = convertObjectToFileDirectory(item);
+          if (rslt) {
+            ls.push(rslt);
+          } else {
+            ls.push({ ...rslt } as Dirent);
+          }
+        }
+      } else {
+        const dirent: Dirent = t as Dirent;
+        const entry_field = dirent.entry;
         const entry = await builder.do_eval(entry_field, undefined, false, false);
         if (entry === null) {
           /**
@@ -501,7 +478,7 @@ export class CommandLineTool extends Process {
             }
           }
           if (filelist) {
-            if (t.entryname) {
+            if (dirent.entryname) {
               throw new WorkflowException("'entryname' is invalid when 'entry' returns list of File or Directory");
             }
             for (const e of entry) {
@@ -513,8 +490,8 @@ export class CommandLineTool extends Process {
           }
         }
         const et: Dirent = {};
-        if (['File', 'Directory'].includes(entry['class'])) {
-          et.entry = convertObjectToFileDirectory(entry);
+        if (isFileOrDirectory(entry)) {
+          et.entry = entry;
         } else {
           if (typeof entry === 'string') {
             et.entry = entry;
@@ -523,10 +500,10 @@ export class CommandLineTool extends Process {
           }
         }
 
-        if (t.entryname) {
-          const entryname_field = t.entryname;
+        if (dirent.entryname) {
+          const entryname_field = dirent.entryname;
           if (entryname_field.includes('${') || entryname_field.includes('$(')) {
-            const en = await builder.do_eval(t.entryname);
+            const en = await builder.do_eval(dirent.entryname);
             if (typeof en !== 'string') {
               throw new WorkflowException(
                 `'entryname' expression must result a string. Got ${en} from ${entryname_field}`,
@@ -541,33 +518,18 @@ export class CommandLineTool extends Process {
         }
         et.writable = t['writable'] || false;
         ls.push(et);
-      } else if (isString(t)) {
-        const initwd_item = await builder.do_eval(t);
-        if (!initwd_item) {
-          continue;
-        }
-        for (const item of aslist(initwd_item)) {
-          const rslt = convertObjectToFileDirectory(item);
-          if (rslt) {
-            ls.push(rslt);
-          } else {
-            ls.push({ ...rslt } as Dirent);
-          }
-        }
-      } else {
-        ls.push(...aslist(t));
       }
     }
     return ls;
   }
   check_output_items(
-    initialWorkdir: cwlTsAuto.InitialWorkDirRequirement,
-    ls: (cwlTsAuto.File | cwlTsAuto.Directory | Dirent)[],
-  ): (cwlTsAuto.File | cwlTsAuto.Directory)[] {
-    const results: (cwlTsAuto.File | cwlTsAuto.Directory)[] = [];
+    initialWorkdir: cwl.InitialWorkDirRequirement,
+    ls: (File | Directory | Dirent)[],
+  ): (File | Directory)[] {
+    const results: (File | Directory)[] = [];
     for (let i = 0; i < ls.length; i++) {
       const t2 = ls[i];
-      if (t2 instanceof cwlTsAuto.File || t2 instanceof cwlTsAuto.Directory) {
+      if (isFileOrDirectory(t2)) {
         results.push(t2);
         continue;
       }
@@ -577,13 +539,12 @@ export class CommandLineTool extends Process {
         if (!t2.entryname) {
           throw new WorkflowException(`Entry at index ${i} of listing missing entryname`);
         }
-        results.push(
-          new cwlTsAuto.File({
-            basename: t2.entryname,
-            contents: t2.entry,
-            extensionFields: { writable: t2['writable'] },
-          }),
-        );
+        results.push({
+          class: 'File',
+          basename: t2.entryname,
+          contents: t2.entry,
+          writable: t2['writable'] || false,
+        });
       } else {
         if (!(t2.entry instanceof Object)) {
           throw new WorkflowException(`Entry at index ${i} of listing is not a record, was ${typeof t2['entry']}`);
@@ -594,7 +555,7 @@ export class CommandLineTool extends Process {
           if (t2.entryname) {
             t2entry.basename = t2.entryname;
           }
-          t2entry.extensionFields['writable'] = t2.writable;
+          t2entry.writable = t2.writable;
           results.push(t2entry);
         } else {
           ls.push(t2.entry);
@@ -604,8 +565,8 @@ export class CommandLineTool extends Process {
     return results;
   }
   check_output_items2(
-    initialWorkdir: cwlTsAuto.InitialWorkDirRequirement,
-    ls: (cwlTsAuto.File | cwlTsAuto.Directory)[],
+    initialWorkdir: cwl.InitialWorkDirRequirement,
+    ls: (File | Directory)[],
     cwl_version: string,
     debug: boolean,
   ) {
@@ -625,36 +586,32 @@ export class CommandLineTool extends Process {
         );
       }
       if (basename.startsWith('/')) {
-        const [req, is_req] = this.getRequirement(DockerRequirement);
+        const [req, is_req] = this.getRequirement(cwl.DockerRequirement);
         if (is_req !== true) {
           throw new WorkflowException(
             `Name ${basename} at index ${i} of listing is invalid, ` +
-              `name can only start with '/' when DockerRequirement is in 'requirements'.`,
+              `name can only start with '/' when cwl.DockerRequirement is in 'requirements'.`,
           );
         }
       }
     }
   }
 
-  setup_output_items(
-    initialWorkdir: cwlTsAuto.InitialWorkDirRequirement,
-    builder: Builder,
-    ls: (cwlTsAuto.File | cwlTsAuto.Directory)[],
-  ): void {
+  setup_output_items(initialWorkdir: cwl.InitialWorkDirRequirement, builder: Builder, ls: (File | Directory)[]): void {
     for (const entry of ls) {
       let dirname: string | undefined = undefined;
       if (entry.basename) {
         const basename = entry.basename;
         entry.basename = path.basename(basename);
         dirname = pathJoin(builder.outdir, path.dirname(basename));
-        if (entry instanceof cwlTsAuto.File) {
+        if (isFile(entry)) {
           entry.dirname = dirname;
         }
       }
       normalizeFilesDirs(entry);
       this.updatePathmap(dirname || builder.outdir, builder.pathmapper, entry);
-      if (entry instanceof cwlTsAuto.Directory && entry.listing) {
-        function remove_dirname(d: cwlTsAuto.Directory | cwlTsAuto.File): void {
+      if (isDirectory(entry) && entry.listing) {
+        function remove_dirname(d: Directory | File): void {
           if ('dirname' in d) {
             delete d['dirname'];
           }
@@ -668,13 +625,13 @@ export class CommandLineTool extends Process {
   }
 
   async _initialworkdir(j: JobBase, builder: Builder): Promise<void> {
-    const [initialWorkdir, _] = getRequirement(this.tool, cwlTsAuto.InitialWorkDirRequirement);
+    const [initialWorkdir, _] = getRequirement(this.tool, cwl.InitialWorkDirRequirement);
     if (initialWorkdir == undefined) {
       return;
     }
     const debug = _logger.isDebugEnabled();
 
-    let ls: (cwlTsAuto.File | cwlTsAuto.Directory | Dirent)[] = [];
+    let ls: (File | Directory | Dirent)[] = [];
     const listing = initialWorkdir.listing;
     if (typeof listing === 'string') {
       ls = await this.evaluate_listing_string(initialWorkdir, listing, builder);
@@ -715,7 +672,7 @@ export class CommandLineTool extends Process {
     // );
     // visit_class([cachebuilder.files, cachebuilder.bindings], ["File"], _checksum);
     // let cmdline = flatten(list(map(cachebuilder.generate_arg, cachebuilder.bindings)));
-    // let [docker_req, ] = this.get_requirement("DockerRequirement");
+    // let [docker_req, ] = this.get_requirement("cwl.DockerRequirement");
     // let dockerimg;
     // if (docker_req !== undefined && runtimeContext.use_container) {
     //     dockerimg = docker_req["dockerImageId"] || docker_req["dockerPull"];
@@ -768,9 +725,9 @@ export class CommandLineTool extends Process {
     //     }
     // }
     // let interesting = new Set([
-    //     "DockerRequirement",
+    //     "cwl.DockerRequirement",
     //     "EnvVarRequirement",
-    //     "InitialWorkDirRequirement",
+    //     "cwl.InitialWorkDirRequirement",
     //     "ShellCommandRequirement",
     //     "NetworkAccess",
     // ]);
@@ -837,7 +794,7 @@ export class CommandLineTool extends Process {
     // }
   }
   async handle_tool_time_limit(builder: Builder, j: JobBase, debug: boolean): Promise<void> {
-    const [timelimit, _] = getRequirement(this, cwlTsAuto.ToolTimeLimit);
+    const [timelimit, _] = getRequirement(this, cwl.ToolTimeLimit);
     if (timelimit == undefined) {
       return;
     }
@@ -863,7 +820,7 @@ export class CommandLineTool extends Process {
   }
 
   async handle_network_access(builder: Builder, j: JobBase, debug: boolean): Promise<void> {
-    const [networkaccess, _] = getRequirement(this.tool, cwlTsAuto.NetworkAccess);
+    const [networkaccess, _] = getRequirement(this.tool, cwl.NetworkAccess);
     if (networkaccess == null) {
       return;
     }
@@ -886,7 +843,7 @@ export class CommandLineTool extends Process {
     j.networkaccess = networkaccess_eval;
   }
   async handle_env_var(builder: Builder, debug: boolean): Promise<any> {
-    const [evr, _] = getRequirement(this, cwlTsAuto.EnvVarRequirement);
+    const [evr, _] = getRequirement(this, cwl.EnvVarRequirement);
     if (evr === undefined) {
       return {};
     }
@@ -913,7 +870,7 @@ export class CommandLineTool extends Process {
     return required_env;
   }
   async setup_command_line(builder: Builder, j: JobBase, debug: boolean) {
-    const [shellcmd, _] = getRequirement(this.tool, cwlTsAuto.ShellCommandRequirement);
+    const [shellcmd, _] = getRequirement(this.tool, cwl.ShellCommandRequirement);
     if (shellcmd !== undefined) {
       let cmd: string[] = []; // type: List[str]
       for (const b of builder.bindings) {
@@ -1040,7 +997,7 @@ export class CommandLineTool extends Process {
     output_callbacks: any | OutputCallbackType | null,
     runtimeContext: RuntimeContext,
   ): AsyncGenerator<JobBase> {
-    const [workReuse] = getRequirement(this.tool, WorkReuse);
+    const [workReuse] = getRequirement(this.tool, cwl.WorkReuse);
     const enableReuse = workReuse ? workReuse.enableReuse : true;
 
     const jobname = uniquename(runtimeContext.name || shortname(this.tool.id || 'job'));
@@ -1099,7 +1056,7 @@ export class CommandLineTool extends Process {
       _logger.debug(`[job ${j.name}] command line bindings is ${JSON.stringify(builder.bindings, null, 4)}`);
     }
 
-    const [dockerReq] = getRequirement(this.tool, DockerRequirement);
+    const [dockerReq] = getRequirement(this.tool, cwl.DockerRequirement);
     if (dockerReq && runtimeContext.use_container) {
       j.outdir = runtimeContext.getOutdir();
       j.tmpdir = runtimeContext.getTmpdir();
@@ -1110,7 +1067,7 @@ export class CommandLineTool extends Process {
       j.stagedir = builder.stagedir;
     }
 
-    const [inplaceUpdateReq, _] = getRequirement(this.tool, InplaceUpdateRequirement);
+    const [inplaceUpdateReq, _] = getRequirement(this.tool, cwl.InplaceUpdateRequirement);
     if (inplaceUpdateReq) {
       j.inplace_update = inplaceUpdateReq['inplaceUpdate'];
     }
@@ -1253,18 +1210,20 @@ export class CommandLineTool extends Process {
             ...sorted_glob_result.map((g) => {
               const decoded_basename = path.basename(g);
               return fs_access.isfile(g)
-                ? new cwlTsAuto.File({
+                ? {
+                    class: 'File',
                     location: g,
                     path: fs_access.join(builder.outdir, decodeURIComponent(g.substring(prefix[0].length + 1))),
                     basename: decoded_basename,
                     nameroot: splitext(decoded_basename)[0],
                     nameext: splitext(decoded_basename)[1],
-                  })
-                : new cwlTsAuto.Directory({
+                  }
+                : {
+                    class: 'Directory',
                     location: g,
                     path: fs_access.join(builder.outdir, decodeURIComponent(g.substring(prefix[0].length + 1))),
                     basename: decoded_basename,
-                  });
+                  };
             }),
           );
         } catch (e) {

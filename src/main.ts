@@ -1,31 +1,27 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import * as cwlTsAuto from 'cwl-ts-auto';
 import fsExtra from 'fs-extra/esm';
-import ivm from 'isolated-vm';
 import yaml from 'js-yaml';
-import jsYaml from 'js-yaml';
-import { createLogger, format, transports } from 'winston';
-import { CommandLineTool } from './command_line_tool.js';
 import { LoadingContext, RuntimeContext } from './context.js';
+import { Directory, File } from './cwltypes.js';
 import { SingleJobExecutor } from './executors.js';
 import { loadDocument } from './loader.js';
 import { _logger } from './loghandler.js';
 import { shortname, type Process, add_sizes } from './process.js';
 import { SecretStore } from './secrets.js';
-import { StdFsAccess } from './stdfsaccess.js';
 import {
   visit_class,
   type CWLObjectType,
   normalizeFilesDirs,
-  urlJoin,
   filePathToURI,
   type CWLOutputType,
   trim_listing,
-  adjustDirObjs,
   isString,
   visitFileDirectory,
+  isFile,
+  isFileOrDirectory,
 } from './utils.js';
 import { default_make_tool } from './workflow.js';
 
@@ -89,17 +85,15 @@ function load_job_order(basedir: string | undefined, job_order_file: string): [C
   if (job_order_object == null) {
     input_basedir = basedir ? basedir : process.cwd();
   }
-  function _normalizeFileDir(val) {
-    if (['File', 'Directory'].includes(val['class'])) {
-      if (val['location']) {
-        val['location'] = convertToAbsPath(val['location'] as string, input_basedir);
-      }
-      if (val['path']) {
-        val['path'] = convertToAbsPath(val['path'] as string, input_basedir);
-      }
+  function _normalizeFileDir(val: File | Directory) {
+    if (val.location) {
+      val.location = convertToAbsPath(val.location, input_basedir);
+    }
+    if (val.path) {
+      val.path = convertToAbsPath(val.path, input_basedir);
     }
   }
-  visit_class(job_order_object, ['File', 'Directory'], _normalizeFileDir);
+  visitFileDirectory(job_order_object, _normalizeFileDir);
   if (job_order_object != null && !(job_order_object instanceof Object)) {
     _logger.error(
       'CWL input object at %s is not formatted correctly, it should be a ' +
@@ -114,34 +108,36 @@ function load_job_order(basedir: string | undefined, job_order_file: string): [C
 
   return [job_order_object, input_basedir];
 }
-export const convertObjectToFileDirectory = (obj: unknown): cwlTsAuto.File | cwlTsAuto.Directory | undefined => {
+export const convertObjectToFileDirectory = (obj: unknown): File | Directory | undefined => {
   if ('object' !== typeof obj) {
     return undefined;
   }
-  if (obj['class'] === 'File') {
-    return new cwlTsAuto.File({
-      location: obj['location'],
-      basename: obj['basename'],
-      dirname: obj['dirname'],
-      checksum: obj['checksum'],
-      size: obj['size'],
-      secondaryFiles: obj['secondaryFiles'],
-      format: obj['format'],
-      path: obj['path'],
-      contents: obj['contents'],
-    });
-  } else if (obj['class'] === 'Directory') {
-    return new cwlTsAuto.Directory({
-      location: obj['location'],
-      path: obj['path'],
-      basename: obj['basename'],
-      listing: obj['listing'],
-    });
+  if (obj instanceof cwlTsAuto.File) {
+    return {
+      class: 'File',
+      location: obj.location,
+      basename: obj.basename,
+      dirname: obj.dirname,
+      checksum: obj.checksum,
+      size: obj.size,
+      secondaryFiles: (obj.secondaryFiles || []).map(convertObjectToFileDirectory),
+      format: obj.format,
+      path: obj.path,
+      contents: obj.contents,
+    };
+  } else if (obj instanceof cwlTsAuto.Directory) {
+    return {
+      class: 'Directory',
+      location: obj.location,
+      path: obj.path,
+      basename: obj.basename,
+      listing: (obj.listing || []).map(convertObjectToFileDirectory),
+    };
   }
   return undefined;
 };
 export const convertDictToFileDirectory = (obj: unknown) => {
-  if (obj instanceof cwlTsAuto.File || obj instanceof cwlTsAuto.Directory) {
+  if (isFileOrDirectory(obj)) {
     return obj;
   } else if (obj instanceof Array) {
     return obj.map(convertDictToFileDirectory);
@@ -178,11 +174,11 @@ function init_job_order(
 
   const namespaces = process.tool.loadingOptions.namespaces;
   const fs_access = runtime_context.make_fs_access(input_basedir);
-  function path_to_loc(p: cwlTsAuto.File | cwlTsAuto.Directory): void {
+  function path_to_loc(p: File | Directory): void {
     if (!p.location && p.path) {
       p.location = p.path;
     }
-    if (p instanceof cwlTsAuto.File) {
+    if (isFile(p)) {
       add_sizes(fs_access, p);
       if (namespaces) {
         const format = p.format;
@@ -223,7 +219,7 @@ function loadData(filePath: string): any {
       throw new Error(`Unexpected file extention ${fileExtention}`);
   }
 }
-function equals(expected: any, actual: any, basedir: string): boolean {
+function equals(expected: unknown, actual: unknown, basedir: string): boolean {
   if (expected instanceof Array) {
     if (!(actual instanceof Array)) {
       return false;
@@ -284,11 +280,6 @@ export interface Args {
 export async function main(args: Args): Promise<number> {
   const [output, status] = await exec(args.tool_path, args.job_path, args.outdir);
   if (status === 'success') {
-    visitFileDirectory(output, (f) => {
-      f.loadingOptions = undefined;
-      f.extensionFields = undefined;
-      f['class'] = f.constructor.name;
-    });
     process.stdout.write(`${JSON.stringify(output)}\n`);
     return new Promise((resolve) => {
       process.stdout.end(() => {

@@ -1,17 +1,10 @@
-import * as fs from 'node:fs';
 import * as cp from 'node:child_process';
-import {
-  CopyCommand,
-  MkdirCommand,
-  RelinkCommand,
-  StagingCommand,
-  SymlinkCommand,
-  WriteFileContentCommand,
-} from './staging.js';
-import { st } from 'rdflib';
-import { ensureWritable } from './utils.js';
+import * as fs from 'node:fs';
+import { Stream } from 'node:stream';
 import fsExtra from 'fs-extra/esm';
 import { removeIgnorePermissionError } from './fileutils.js';
+import { StagingCommand } from './staging.js';
+import { ensureWritable, str } from './utils.js';
 export interface JobExec {
   staging: StagingCommand[];
   commands: string[];
@@ -26,7 +19,6 @@ async function prepareStagingDir(StagingCommand: StagingCommand[]): Promise<void
   for (const command of StagingCommand) {
     switch (command.command) {
       case 'writeFileContent': {
-        const c = command as WriteFileContentCommand;
         if (!fs.existsSync(command.target)) {
           fs.writeFileSync(command.target, command.content, { mode: command.mode });
           if (command.options.ensureWritable) {
@@ -36,21 +28,21 @@ async function prepareStagingDir(StagingCommand: StagingCommand[]): Promise<void
         break;
       }
       case 'symlink': {
-        const c = command as SymlinkCommand;
+        const c = command;
         if (!fs.existsSync(c.target) && fs.existsSync(c.resolved)) {
           await fs.promises.symlink(c.resolved, c.target);
         }
         break;
       }
       case 'mkdir': {
-        const c = command as MkdirCommand;
+        const c = command;
         if (!fs.existsSync(c.resolved)) {
           await fs.promises.mkdir(c.resolved, { recursive: c.recursive });
         }
         break;
       }
       case 'copy': {
-        const c = command as CopyCommand;
+        const c = command;
         if (!fs.existsSync(c.target)) {
           await fsExtra.copy(c.resolved, c.target);
           if (c.options.ensureWritable) {
@@ -60,7 +52,7 @@ async function prepareStagingDir(StagingCommand: StagingCommand[]): Promise<void
         break;
       }
       case 'relink': {
-        const c = command as RelinkCommand;
+        const c = command;
         const resolved = c.resolved;
         const host_outdir_tgt = c.target;
         const stat = fs.existsSync(host_outdir_tgt) ? fs.lstatSync(host_outdir_tgt) : undefined;
@@ -81,7 +73,10 @@ async function prepareStagingDir(StagingCommand: StagingCommand[]): Promise<void
             if (e.code !== 'EEXIST') throw e;
           }
         }
+        break;
       }
+      default:
+        throw new Error(`Unknown staging command: ${str(command)}`);
     }
   }
 }
@@ -96,9 +91,9 @@ export async function executeJob({
   timelimit,
 }: JobExec): Promise<number> {
   await prepareStagingDir(staging);
-  let stdin: any = 'pipe';
-  let stdout: any = process.stderr;
-  let stderr: any = process.stderr;
+  let stdin: number | Stream = process.stdin;
+  let stdout: number | Stream = process.stderr;
+  let stderr: number | Stream = process.stderr;
 
   if (stdin_path !== undefined) {
     stdin = fs.openSync(stdin_path, 'r');

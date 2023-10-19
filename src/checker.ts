@@ -1,14 +1,10 @@
 import { ValidationException } from 'cwl-ts-auto';
 import * as cwlTsAuto from 'cwl-ts-auto';
-import { _logger } from './loghandler.js';
-import { shortname } from './process.js';
-import { aslist, str, type MutableMapping, isString } from './utils.js';
 import {
   CommandInputArraySchema,
   CommandOutputParameter,
-  ToolType,
+  IOType,
   WorkflowStepInput,
-  ArrayTypeEnum,
   WorkflowStepOutput,
   IWorkflowStep,
   WorkflowInputParameter,
@@ -17,7 +13,11 @@ import {
   isIOArraySchema,
   isIORecordSchema,
   IORecordSchema,
+  ArrayType,
 } from './cwltypes.js';
+import { _logger } from './loghandler.js';
+import { shortname } from './process.js';
+import { aslist, str, type MutableMapping, isString } from './utils.js';
 
 // const _get_type = (tp: WorkflowStepInput | cwlTsAuto.WorkflowOutputParameter): any => {
 //   if (tp.type instanceof Map) {
@@ -27,7 +27,7 @@ import {
 //   }
 //   return tp;
 // };
-export function canAssignSrcToSinkType(src: ToolType, sink?: ToolType, strict = false): boolean {
+export function canAssignSrcToSinkType(src: IOType, sink?: IOType, strict = false): boolean {
   // Check for identical type specifications, ignoring extra keys like inputBinding.
   //
   // In non-strict comparison, at least one source type must match one sink type,
@@ -104,18 +104,18 @@ export function canAssignSrcToSink(
 
   return canAssignSrcToSinkType(src.type, sink.type, strict);
 }
-const merge_flatten_type = (src: ToolType): ToolType => {
+const merge_flatten_type = (src: IOType): IOType => {
   /* "Return the merge flattened type of the source type."*/
   if (isIOArraySchema(src)) {
     return src;
   }
 
   if (src instanceof Array) {
-    return src.map((t) => merge_flatten_type(t)) as ToolType;
+    return src.map((t) => merge_flatten_type(t)) as IOType;
   }
   const schema: CommandInputArraySchema = {
     items: src,
-    type: 'array' as ArrayTypeEnum,
+    type: ArrayType,
   };
   return schema;
 };
@@ -145,7 +145,7 @@ const check_types = (
   }
   const srcType =
     linkMerge === cwlTsAuto.LinkMergeMethod.MERGE_NESTED
-      ? { items: srctype.type, type: 'array' as ArrayTypeEnum }
+      ? { items: srctype.type, type: ArrayType }
       : merge_flatten_type(srctype.type);
   if (canAssignSrcToSinkType(srcType, sinktype.type, true)) {
     return 'pass';
@@ -156,8 +156,8 @@ const check_types = (
   }
 };
 
-function _compareRecords(src: IORecordSchema<any>, sink: IORecordSchema<any>, strict = false): boolean {
-  function _rec_fields(rec: IORecordSchema<any>): MutableMapping<ToolType> {
+function _compareRecords(src: IORecordSchema, sink: IORecordSchema, strict = false): boolean {
+  function _rec_fields(rec: IORecordSchema): MutableMapping<IOType> {
     const out = {};
     for (const field of rec.fields) {
       const name = shortname(field.name);
@@ -184,7 +184,7 @@ function _compareRecords(src: IORecordSchema<any>, sink: IORecordSchema<any>, st
   return true;
 }
 
-function missing_subset(fullset: any[], subset: any[]): any[] {
+function missing_subset(fullset: unknown[], subset: unknown[]): unknown[] {
   const missing = [];
   for (const i of subset) {
     if (!fullset.includes(i)) {
@@ -201,13 +201,13 @@ function bullets(textlist: string[], bul: string): string {
 }
 
 export function static_checker(
-  workflow_inputs: cwlTsAuto.WorkflowInputParameter[],
-  workflow_outputs: cwlTsAuto.WorkflowOutputParameter[],
+  workflow_inputs: WorkflowInputParameter[],
+  workflow_outputs: WorkflowOutputParameter[],
   step_inputs: WorkflowStepInput[],
   step_outputs: WorkflowStepOutput[],
   param_to_step: { [id: string]: IWorkflowStep },
 ): void {
-  const src_dict: { [id: string]: cwlTsAuto.WorkflowInputParameter | WorkflowStepOutput } = {};
+  const src_dict: { [id: string]: WorkflowInputParameter | WorkflowStepOutput } = {};
   for (const param of workflow_inputs) {
     src_dict[param['id'].toString()] = param;
   }
@@ -350,14 +350,14 @@ export function check_all_step_input_types(
               message: 'Source is from conditional step, but pickValue is not used',
             });
           }
-
-          if (is_all_output_method_loop_step(param_to_step, parm_id)) {
-            const src = src_dict[parm_id];
-            src.type = {
-              type: 'array' as ArrayTypeEnum,
-              items: src_dict[parm_id]['type'],
-            };
-          }
+          // Loop is not supported
+          // if (is_all_output_method_loop_step(param_to_step, parm_id)) {
+          //   const src = src_dict[parm_id];
+          //   src.type = {
+          //     type: ArrayType,
+          //     items: src_dict[parm_id]['type'],
+          //   };
+          // }
         }
       } else {
         const parm_id = sink.source;
@@ -397,13 +397,13 @@ export function check_all_step_input_types(
 
           srcs_of_sink[0]['type'] = src_typ;
         }
-
-        if (is_all_output_method_loop_step(param_to_step, parm_id)) {
-          src_dict[parm_id].type = {
-            type: 'array' as ArrayTypeEnum,
-            items: src_dict[parm_id]['type'],
-          };
-        }
+        // Loop is not supported
+        // if (is_all_output_method_loop_step(param_to_step, parm_id)) {
+        //   src_dict[parm_id].type = {
+        //     type: ArrayType,
+        //     items: src_dict[parm_id]['type'],
+        //   };
+        // }
       }
 
       for (const src of srcs_of_sink) {
@@ -419,26 +419,29 @@ export function check_all_step_input_types(
   return validation;
 }
 export function check_all_workflow_output_types(
-  src_dict: { [id: string]: cwlTsAuto.WorkflowInputParameter | CommandOutputParameter },
-  sinks: cwlTsAuto.WorkflowOutputParameter[],
+  src_dict: { [id: string]: WorkflowInputParameter | CommandOutputParameter },
+  sinks: WorkflowOutputParameter[],
   param_to_step: { [key: string]: IWorkflowStep },
 ): { [key: string]: SrcSink[] } {
   const validation: { [key: string]: SrcSink[] } = { warning: [], exception: [] };
   for (const sink of sinks) {
     if (sink.outputSource) {
-      const pickValue = sink.pickValue as string | undefined;
+      const pickValue = sink.pickValue;
 
       let extra_message: string | null = null;
       if (pickValue !== undefined) {
         extra_message = `pickValue is: ${pickValue}`;
       }
 
-      const srcs_of_sink: (cwlTsAuto.WorkflowInputParameter | CommandOutputParameter)[] = [];
+      const srcs_of_sink: (WorkflowInputParameter | CommandOutputParameter)[] = [];
       let linkMerge: cwlTsAuto.LinkMergeMethod | null = null;
       if (Array.isArray(sink.outputSource)) {
         linkMerge = sink.linkMerge || (sink.outputSource.length > 1 ? cwlTsAuto.LinkMergeMethod.MERGE_NESTED : null);
 
-        if (pickValue === 'first_non_null' || pickValue === 'the_only_non_null') {
+        if (
+          pickValue === cwlTsAuto.PickValueMethod.FIRST_NON_NULL ||
+          pickValue === cwlTsAuto.PickValueMethod.THE_ONLY_NON_NULL
+        ) {
           linkMerge = null;
         }
 
@@ -455,7 +458,7 @@ export function check_all_workflow_output_types(
 
           if (is_all_output_method_loop_step(param_to_step, parm_id)) {
             const t = src_dict[parm_id];
-            t.type = { items: t.type, type: 'array' as ArrayTypeEnum } as CommandOutputArraySchema;
+            t.type = { items: t.type, type: ArrayType } as CommandOutputArraySchema;
           }
         }
       } else {
@@ -502,7 +505,7 @@ export function check_all_workflow_output_types(
 
           src.type = {
             items: src_dict[parm_id].type,
-            type: 'array' as ArrayTypeEnum,
+            type: ArrayType,
           } as CommandOutputArraySchema;
         }
       }

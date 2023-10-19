@@ -1,13 +1,11 @@
 import * as cwlTsAuto from 'cwl-ts-auto';
-import { Dictionary } from 'cwl-ts-auto/dist/util/Dict.js';
-import * as lodash from 'lodash';
 import { FormatGraph } from './formatgraph.js';
 import { PathMapper } from './pathmapper.js';
 import { Process } from './process.js';
 import { SecretStore } from './secrets.js';
 import { StdFsAccess } from './stdfsaccess.js';
 import type { ToolRequirement } from './types.js';
-import { DEFAULT_TMP_PREFIX, type CWLObjectType, mkdtemp, type CommentedMap, splitPath } from './utils.js';
+import { DEFAULT_TMP_PREFIX, type CWLObjectType, mkdtemp, splitPath, MutableMapping } from './utils.js';
 
 class ContextBase {
   constructor(kwargs: { [key: string]: any } | null = null) {
@@ -79,7 +77,7 @@ export class LoadingContext extends ContextBase {
   user_provenance = false;
   prov_obj: any | null = null;
   do_update: boolean | null = null;
-  jobdefaults: CommentedMap | null = null;
+  jobdefaults: MutableMapping<unknown> | null = null;
   doc_cache = true;
   relax_path_checks = true;
   singularity = false;
@@ -144,7 +142,6 @@ export class RuntimeContext extends ContextBase {
   toplevel = false;
   mutation_manager?: any = undefined;
   path_mapper = PathMapper;
-  builder?: any = undefined;
   docker_outdir = '';
   docker_tmpdir = '';
   docker_stagedir = '';

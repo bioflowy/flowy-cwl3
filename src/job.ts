@@ -3,33 +3,26 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { DockerRequirement, ShellCommandRequirement } from 'cwl-ts-auto';
-import * as cwl from 'cwl-ts-auto';
-import fsExtra, { outputFileSync } from 'fs-extra';
-import { glob } from 'glob';
-import { remove } from 'lodash';
 import { v4 as uuidv4 } from 'uuid';
 import { executeJob } from './JobExecutor.js';
 import { Builder } from './builder.js';
 import { RuntimeContext } from './context.js';
-import { Tool } from './cwltypes.js';
+import { Directory, File, Tool } from './cwltypes.js';
 import { UnsupportedRequirement, ValueError, WorkflowException } from './errors.js';
 import { removeIgnorePermissionError } from './fileutils.js';
 import { _logger } from './loghandler.js';
-import { MapperEnt, PathMapper } from './pathmapper.js';
+import { MakePathMapper, MapperEnt, PathMapper } from './pathmapper.js';
 import { stage_files } from './process.js';
 import { SecretStore } from './secrets.js';
 import { LazyStaging } from './staging.js';
-import type { ToolRequirement } from './types.js';
 import {
   type CWLObjectType,
-  type DirectoryType,
   type OutputCallbackType,
   createTmpDir,
   ensureWritable,
   ensure_non_writable,
   getRequirement,
-  aslist,
-  isStringOrStringArray,
+  str,
 } from './utils.js';
 // ... and so on for other modules
 const needsShellQuotingRe = /(^$|[\s|&;()<>\'"$@])/;
@@ -133,12 +126,7 @@ export abstract class JobBase {
   staging: LazyStaging = new LazyStaging();
   base_path_logs: string;
   joborder: CWLObjectType;
-  make_path_mapper: (
-    param1: (cwl.File | cwl.Directory)[],
-    param2: string,
-    param3: RuntimeContext,
-    param4: boolean,
-  ) => PathMapper;
+  make_path_mapper: MakePathMapper;
   tool: Tool;
   name: string;
   stdin?: string;
@@ -155,7 +143,7 @@ export abstract class JobBase {
   outdir: string;
   tmpdir: string;
   environment: { [key: string]: string };
-  generatefiles: cwl.Directory = new cwl.Directory({ listing: [], basename: '' });
+  generatefiles: Directory = { listing: [], basename: '', class: 'Directory' };
   stagedir?: string;
   inplace_update: boolean;
   prov_obj?: any; // ProvenanceProfile;
@@ -168,7 +156,7 @@ export abstract class JobBase {
     builder: Builder,
     joborder: CWLObjectType,
     make_path_mapper: (
-      param1: (cwl.File | cwl.Directory)[],
+      param1: (File | Directory)[],
       param2: string,
       param3: RuntimeContext,
       param4: boolean,
@@ -607,18 +595,23 @@ export abstract class ContainerCommandLineJob extends JobBase {
     tmp_outdir_prefix: string,
   ): Promise<string | undefined>;
 
-  abstract create_runtime(env: { [key: string]: string }, runtime_context: any): [string[], any];
+  abstract create_runtime(env: { [key: string]: string }, runtime_context: RuntimeContext): [string[], string | null];
 
   abstract append_volume(runtime: string[], source: string, target: string, writable: boolean): void;
 
-  abstract add_file_or_directory_volume(runtime: string[], volume: any, host_outdir_tgt: any): void;
+  abstract add_file_or_directory_volume(runtime: string[], volume: MapperEnt, host_outdir_tgt: string | null): void;
 
-  abstract add_writable_file_volume(runtime: string[], volume: any, host_outdir_tgt: any, tmpdir_prefix: string): void;
+  abstract add_writable_file_volume(
+    runtime: string[],
+    volume: MapperEnt,
+    host_outdir_tgt: string | undefined,
+    tmpdir_prefix: string,
+  ): void;
 
   abstract add_writable_directory_volume(
     runtime: string[],
-    volume: any,
-    host_outdir_tgt: any,
+    volume: MapperEnt,
+    host_outdir_tgt: string | undefined,
     tmpdir_prefix: string,
   ): void;
 
@@ -638,7 +631,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
     runtime: string[],
     volume: MapperEnt,
     host_outdir_tgt: string,
-    secret_store: any,
+    secret_store: SecretStore,
     tmpdir_prefix: string,
   ): string {
     let new_file = '';
@@ -682,7 +675,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
         throw new WorkflowException(
           `No mandatory DockerRequirement, yet path is outside ` +
             `the designated output directory, also know as ` +
-            `${runtime.join(', ')}: ${vol}`,
+            `${runtime.join(', ')}: ${str(vol)}`,
         );
       }
       if (vol.type === 'File' || vol.type === 'Directory') {
@@ -697,7 +690,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
       }
     }
   }
-  async run(runtimeContext: any, tmpdir_lock?: any): Promise<void> {
+  async run(runtimeContext: RuntimeContext, tmpdir_lock?: any): Promise<void> {
     const debug = runtimeContext.debug;
     if (tmpdir_lock) {
       tmpdir_lock(() => {

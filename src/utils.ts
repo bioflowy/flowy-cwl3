@@ -4,16 +4,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as url from 'node:url';
 
-import type { WorkflowInputParameter } from 'cwl-ts-auto';
 import * as cwl from 'cwl-ts-auto';
-import fsExtra from 'fs-extra/esm';
 import { v4 as uuidv4 } from 'uuid';
-import { CallbackJob, ExpressionJob } from './command_line_tool.js';
-import { ValidationException, WorkflowException } from './errors.js';
+import { ExpressionJob } from './command_line_tool.js';
+import { Directory, File, WorkflowInputParameter } from './cwltypes.js';
+import { ValidationException } from './errors.js';
 import { CommandLineJob, JobBase } from './job.js';
-import { _logger } from './loghandler.js';
-import { MapperEnt, PathMapper } from './pathmapper.js';
-import { SecretStore } from './secrets.js';
 import { StdFsAccess } from './stdfsaccess.js';
 import type { ToolRequirement } from './types.js';
 import type { WorkflowJob } from './workflow_job.js';
@@ -24,8 +20,6 @@ export const CONTENT_LIMIT = 64 * 1024;
 
 export const DEFAULT_TMP_PREFIX = os.tmpdir() + path.sep;
 
-export type CommentedMap = { [key: string]: any };
-
 export type MutableSequence<T> = T[];
 export type MutableMapping<T> = {
   [key: string]: T;
@@ -35,8 +29,8 @@ export type CWLOutputAtomType =
   | boolean
   | string
   | number
-  | cwl.File
-  | cwl.Directory
+  | File
+  | Directory
   | MutableSequence<undefined | boolean | string | number | MutableSequence<any> | MutableMapping<any>>
   | MutableMapping<undefined | boolean | string | number | MutableSequence<any> | MutableMapping<any>>;
 
@@ -44,13 +38,13 @@ export type CWLOutputType =
   | boolean
   | string
   | number
-  | cwl.File
-  | cwl.Directory
+  | File
+  | Directory
   | MutableSequence<CWLOutputAtomType>
   | MutableMapping<CWLOutputAtomType>;
 export type CWLObjectType = MutableMapping<CWLOutputType | undefined>;
 
-export type JobsType = CommandLineJob | JobBase | ExpressionJob | CallbackJob | WorkflowJob | undefined; //  ;
+export type JobsType = CommandLineJob | JobBase | ExpressionJob | WorkflowJob | undefined; //  ;
 export type JobsGeneratorType = AsyncGenerator<JobsType, void>;
 export type OutputCallbackType = (arg1: CWLObjectType, arg2: string) => void;
 // type ResolverType = (Loader, string)=>string?;
@@ -85,10 +79,10 @@ export class WorkflowStateItem {
     this.success = success;
   }
 }
-export function isString(value: any): value is string {
+export function isString(value: unknown): value is string {
   return typeof value === 'string';
 }
-export function isStringOrStringArray(value: any): value is string | string[] {
+export function isStringOrStringArray(value: unknown): value is string | string[] {
   if (Array.isArray(value)) {
     return value.every((v) => typeof v === 'string');
   } else {
@@ -104,7 +98,7 @@ export type StepType = CWLObjectType;
 
 export type LoadListingType = 'no_listing' | 'shallow_listing' | 'deep_listing';
 export async function which(cmd: string): Promise<string | null> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     exec(`which ${cmd}`, (error, stdout) => {
       if (error) {
         resolve(null);
@@ -259,7 +253,7 @@ export function copytree_with_merge(src: string, dst: string): void {
  * @param obj - The object to be converted.
  * @returns The JSON-formatted string.
  */
-export function josonStringifyLikePython(obj: any): string {
+export function josonStringifyLikePython(obj: unknown): string {
   if (obj === undefined) {
     return 'null';
   }
@@ -286,38 +280,40 @@ export function isInstanceOfAny(input: unknown, constructors: { new (...args: un
   }
   return false;
 }
-export function visitClass<T>(
-  input: unknown,
-  callback: (arg: T) => void,
-  ...targetClass: { new (...args: unknown[]): unknown }[]
-) {
+export function visitClass<T>(input: unknown, isT: (value: unknown) => value is T, callback: (arg: T) => void) {
   if (Array.isArray(input)) {
-    input.forEach((item) => visitClass(item, callback, ...targetClass));
-  } else if (typeof input === 'object' && input !== null) {
-    if (isInstanceOfAny(input, targetClass)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      callback(input as any);
-    } else {
+    input.forEach((item) => visitClass(item, isT, callback));
+  } else {
+    if (isT(input)) {
+      callback(input);
+    }
+    if (typeof input === 'object' && input !== null) {
       for (const key in input) {
+        // eslint-disable-next-line no-prototype-builtins
         if (input.hasOwnProperty(key)) {
-          visitClass(input[key], callback, ...targetClass);
+          visitClass(input[key], isT, callback);
         }
       }
     }
   }
 }
-export const visitFile = (rec: unknown, callback: (f: cwl.File) => void) =>
-  visitClass<cwl.File>(rec, callback, cwl.File);
-export const visitFileDirectory = (rec: unknown, callback: (f: cwl.File | cwl.Directory) => void) =>
-  visitClass<cwl.File>(
-    rec,
-    (v) => {
-      v.loadingOptions = undefined;
-      callback(v);
-    },
-    cwl.File,
-    cwl.Directory,
+export function isFile(value: unknown): value is File {
+  return value && typeof value === 'object' && 'class' in value && value['class'] === 'File';
+}
+export function isDirectory(value: unknown): value is Directory {
+  return value && typeof value === 'object' && 'class' in value && value['class'] === 'Directory';
+}
+export function isFileOrDirectory(value: unknown): value is File | Directory {
+  return (
+    value &&
+    typeof value === 'object' &&
+    'class' in value &&
+    ('Directory' === value['class'] || 'File' === value['class'])
   );
+}
+export const visitFile = (rec: unknown, callback: (f: File) => void) => visitClass<File>(rec, isFile, callback);
+export const visitFileDirectory = (rec: unknown, callback: (f: File | Directory) => void) =>
+  visitClass(rec, isFileOrDirectory, callback);
 
 export function visit_class(rec: any, cls: any[], op: (...args: any[]) => any): void {
   if (typeof rec === 'object' && rec !== null) {
@@ -377,9 +373,9 @@ export function random_outdir(): string {
   return __random_outdir;
 }
 
-export const adjustFileObjs = (rec: unknown, op: (dir: cwl.File) => void) => visitClass(rec, op, cwl.File);
+export const adjustFileObjs = (rec: unknown, op: (dir: File) => void) => visitClass(rec, isFile, op);
 
-export const adjustDirObjs = (rec: unknown, op: (dir: cwl.Directory) => void) => visitClass(rec, op, cwl.Directory);
+export const adjustDirObjs = (rec: unknown, op: (dir: Directory) => void) => visitClass(rec, isDirectory, op);
 const _find_unsafe = /[^a-zA-Z0-9@%+=:,./-]/;
 export function quote(s: string): string {
   /** Return a shell-escaped version of the string *s*. */
@@ -411,7 +407,7 @@ export function urlJoin(...parts: string[]): string {
   }, '');
 }
 
-export function dedup(listing: (cwl.File | cwl.Directory)[]): (cwl.File | cwl.Directory)[] {
+export function dedup(listing: (File | Directory)[]): (File | Directory)[] {
   const marksub = new Set();
 
   for (const entry of listing) {
@@ -423,7 +419,7 @@ export function dedup(listing: (cwl.File | cwl.Directory)[]): (cwl.File | cwl.Di
     }
   }
 
-  const dd: (cwl.File | cwl.Directory)[] = [];
+  const dd: (File | Directory)[] = [];
   const markdup = new Set();
 
   for (const r of listing) {
@@ -446,9 +442,9 @@ function url2pathname(url: string): string {
   }
 }
 
-export function get_listing(fs_access: StdFsAccess, rec: any, recursive = true) {
-  if (rec instanceof cwl.Directory) {
-    const finddirs: cwl.Directory[] = [];
+export function get_listing(fs_access: StdFsAccess, rec: unknown, recursive = true) {
+  if (!isDirectory(rec)) {
+    const finddirs: Directory[] = [];
     adjustDirObjs(rec, (val) => finddirs.push(val));
     for (let _i = 0, finddirs_1 = finddirs; _i < finddirs_1.length; _i++) {
       const f = finddirs_1[_i];
@@ -456,16 +452,16 @@ export function get_listing(fs_access: StdFsAccess, rec: any, recursive = true) 
     }
     return;
   }
-  if (rec['listing']) {
+  if (rec.listing) {
     return;
   }
-  const listing: CWLOutputAtomType[] = [];
-  const loc = rec['location'];
+  const listing: (File | Directory)[] = [];
+  const loc = rec.location;
   for (let _a = 0, _b = fs_access.listdir(loc); _a < _b.length; _a++) {
     const ld = _b[_a];
     const bn = path.basename(url2pathname(ld));
     if (fs_access.isdir(ld)) {
-      const ent = {
+      const ent: Directory = {
         class: 'Directory',
         location: ld,
         basename: bn,
@@ -478,7 +474,7 @@ export function get_listing(fs_access: StdFsAccess, rec: any, recursive = true) 
       listing.push({ class: 'File', location: ld, basename: bn });
     }
   }
-  rec['listing'] = listing;
+  rec.listing = listing;
 }
 export function isMissingOrNull(obj: object, key: string) {
   return !(key in obj) || obj[key] === null;
@@ -555,7 +551,7 @@ export function ensureWritable(targetPath: string, includeRoot = false): void {
     addWritableFlag(targetPath);
   }
 }
-export function trim_listing(obj: cwl.Directory) {
+export function trim_listing(obj: Directory) {
   //
   // Remove 'listing' field from Directory objects that are file references.
   //
@@ -606,12 +602,12 @@ export function splitext(p: string): [string, string] {
   return [base, ext];
 }
 export function normalizeFilesDirs(job: unknown) {
-  function addLocation(d: cwl.File | cwl.Directory) {
+  function addLocation(d: File | Directory) {
     if (!d.location) {
-      if (d instanceof cwl.File && !d.contents) {
+      if (isFile(d) && !d.contents) {
         throw new ValidationException("Anonymous file object must have 'contents' and 'basename' fields.");
       }
-      if (d instanceof cwl.Directory && (d.listing === undefined || d.basename === undefined)) {
+      if (isDirectory(d) && (d.listing === undefined || d.basename === undefined)) {
         throw new ValidationException("Anonymous directory object must have 'listing' and 'basename' fields.");
       }
       d.location = `_:${uuidv4()}`;
