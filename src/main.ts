@@ -12,7 +12,6 @@ import { _logger } from './loghandler.js';
 import { shortname, type Process, add_sizes } from './process.js';
 import { SecretStore } from './secrets.js';
 import {
-  visit_class,
   type CWLObjectType,
   normalizeFilesDirs,
   filePathToURI,
@@ -136,15 +135,15 @@ export const convertObjectToFileDirectory = (obj: unknown): File | Directory | u
   }
   return undefined;
 };
-export const convertDictToFileDirectory = (obj: unknown) => {
+export function convertDictToFileDirectory<T>(obj: T): T {
   if (isFileOrDirectory(obj)) {
     return obj;
   } else if (obj instanceof Array) {
-    return obj.map(convertDictToFileDirectory);
+    return obj.map(convertDictToFileDirectory) as T;
   } else if (obj instanceof Object) {
     const rslt = convertObjectToFileDirectory(obj);
     if (rslt) {
-      return rslt;
+      return rslt as T;
     } else {
       for (const key of Object.keys(obj)) {
         obj[key] = convertDictToFileDirectory(obj[key]);
@@ -153,7 +152,7 @@ export const convertDictToFileDirectory = (obj: unknown) => {
     }
   }
   return obj;
-};
+}
 
 function init_job_order(
   job_order_object: CWLObjectType | null,

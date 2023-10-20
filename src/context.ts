@@ -65,7 +65,6 @@ export class LoadingContext extends ContextBase {
     this._requirements = value;
   }
   hints: ToolRequirement = [];
-  disable_js_validation = false;
   js_hint_options_file: string | null = null;
   do_validate = true;
   enable_dev = false;
@@ -140,13 +139,11 @@ export class RuntimeContext extends ContextBase {
   part_of = '';
   basedir = '';
   toplevel = false;
-  mutation_manager?: any = undefined;
   path_mapper = PathMapper;
   docker_outdir = '';
   docker_tmpdir = '';
   docker_stagedir = '';
   js_console = false;
-  job_script_provider?: any = undefined;
   eval_timeout = 60;
   postScatterEval?: (io: CWLObjectType) => Promise<CWLObjectType | undefined>;
   on_error: 'stop' | 'continue' = 'stop';
@@ -160,7 +157,6 @@ export class RuntimeContext extends ContextBase {
   orcid = '';
   cwl_full_name = '';
   process_run_id?: string = undefined;
-  prov_obj: Object | undefined = undefined;
   default_stdout?: any = undefined;
   default_stderr?: any = undefined;
 

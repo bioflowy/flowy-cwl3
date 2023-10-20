@@ -312,43 +312,11 @@ export function isFileOrDirectory(value: unknown): value is File | Directory {
   );
 }
 export const visitFile = (rec: unknown, callback: (f: File) => void) => visitClass<File>(rec, isFile, callback);
+export const visitDirectory = (rec: unknown, callback: (f: Directory) => void) =>
+  visitClass<Directory>(rec, isDirectory, callback);
 export const visitFileDirectory = (rec: unknown, callback: (f: File | Directory) => void) =>
   visitClass(rec, isFileOrDirectory, callback);
 
-export function visit_class(rec: any, cls: any[], op: (...args: any[]) => any): void {
-  if (typeof rec === 'object' && rec !== null) {
-    if ('class' in rec && cls.includes(rec['class'])) {
-      op(rec);
-    }
-    for (const key in rec) {
-      visit_class(rec[key], cls, op);
-    }
-  }
-}
-export function visit_class_promise<T>(rec: any, cls: any[], op: (...args: any[]) => Promise<T>): Promise<T>[] {
-  const promises: Promise<T>[] = [];
-  if (typeof rec === 'object' && rec !== null) {
-    if ('class' in rec && cls.includes(rec['class'])) {
-      promises.push(op(rec));
-    }
-    for (const key in rec) {
-      const promises2 = visit_class_promise(rec[key], cls, op);
-      promises.push(...promises2);
-    }
-  }
-  return promises;
-}
-
-function visit_field(rec: any, field: string, op: (...args: any[]) => any): void {
-  if (typeof rec === 'object' && rec !== null) {
-    if (field in rec) {
-      rec[field] = op(rec[field]);
-    }
-    for (const key in rec) {
-      visit_field(rec[key], field, op);
-    }
-  }
-}
 export function filePathToURI(filePath: string): string {
   let flag: string | undefined = undefined;
   const splits = filePath.split('#');
@@ -356,7 +324,7 @@ export function filePathToURI(filePath: string): string {
     filePath = splits[0];
     flag = splits[1];
   }
-  const pathName = path.resolve(filePath).replace(/\\/g, '/');
+  const pathName = path.resolve(filePath).replace(/\\/gu, '/');
   return url.format({
     protocol: 'file',
     slashes: true,
@@ -376,7 +344,7 @@ export function random_outdir(): string {
 export const adjustFileObjs = (rec: unknown, op: (dir: File) => void) => visitClass(rec, isFile, op);
 
 export const adjustDirObjs = (rec: unknown, op: (dir: Directory) => void) => visitClass(rec, isDirectory, op);
-const _find_unsafe = /[^a-zA-Z0-9@%+=:,./-]/;
+const _find_unsafe = /[^a-zA-Z0-9@%+=:,./-]/u;
 export function quote(s: string): string {
   /** Return a shell-escaped version of the string *s*. */
   if (!s) {
@@ -388,7 +356,7 @@ export function quote(s: string): string {
 
   // use single quotes, and put single quotes into double quotes
   // the string $'b is then quoted as '$'"'"'b'
-  return `'${s.replace(/'/g, "'\"'\"'")}'`;
+  return `'${s.replace(/'/gu, "'\"'\"'")}'`;
 }
 export function urlJoin(...parts: string[]): string {
   return parts.reduce((accumulator, part) => {
@@ -479,7 +447,7 @@ export function get_listing(fs_access: StdFsAccess, rec: unknown, recursive = tr
 export function isMissingOrNull(obj: object, key: string) {
   return !(key in obj) || obj[key] === null;
 }
-export function downloadHttpFile(httpurl: string): [string, Date] {
+export function downloadHttpFile(_httpurl: string): [string, Date] {
   // TODO
   // let cache_session = null;
   // let directory;
@@ -604,7 +572,7 @@ export function splitext(p: string): [string, string] {
 export function normalizeFilesDirs(job: unknown) {
   function addLocation(d: File | Directory) {
     if (!d.location) {
-      if (isFile(d) && !d.contents) {
+      if (isFile(d) && d.contents === undefined) {
         throw new ValidationException("Anonymous file object must have 'contents' and 'basename' fields.");
       }
       if (isDirectory(d) && (d.listing === undefined || d.basename === undefined)) {
@@ -637,7 +605,7 @@ export function normalizeFilesDirs(job: unknown) {
       }
     }
 
-    if (d instanceof cwl.File) {
+    if (isFile(d)) {
       const [nr, ne] = splitext(d.basename);
       if (d.nameroot !== nr) {
         d.nameroot = String(nr);

@@ -159,6 +159,7 @@ export interface Directory {
   location?: undefined | string;
   path?: undefined | string;
   basename?: undefined | string;
+  dirname?: undefined | string;
   listing?: undefined | (File | Directory)[];
   writable?: undefined | boolean;
 }

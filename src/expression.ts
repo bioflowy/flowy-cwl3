@@ -1,4 +1,3 @@
-import exp from 'node:constants';
 import type { InlineJavascriptRequirement } from 'cwl-ts-auto';
 import IsolatedVM from 'isolated-vm';
 import { JavascriptException, SubstitutionError, WorkflowException } from './errors.js';
@@ -98,7 +97,7 @@ function scanner(scan: string): [number, number] | null {
   return null;
 }
 interface JSEngine {
-  eval(scan: string, jslib: string, rootvars: { [key: string]: any }): Promise<CWLOutputType>;
+  eval(scan: string, jslib: string, rootvars: { [key: string]: unknown }): Promise<CWLOutputType>;
 }
 class JSEngine1 implements JSEngine {
   code_fragment_to_js(jscript: string, jslib = ''): string {
@@ -112,7 +111,7 @@ class JSEngine1 implements JSEngine {
     return `"use strict";\n${jslib}\nJSON.stringify((function()${inner_js})())`;
   }
 
-  async eval(expr: string, jslib: string, rootvars: { [key: string]: any }): Promise<CWLOutputType> {
+  async eval(expr: string, jslib: string, rootvars: { [key: string]: unknown }): Promise<CWLOutputType> {
     const isolate = new IsolatedVM.Isolate({ memoryLimit: 128 });
 
     // 新しいContextを作成する
@@ -183,7 +182,7 @@ export function regex_eval(
           remaining_string.substring(m[1].length),
           current_value[key as string],
         );
-      } catch (err: any) {
+      } catch (err) {
         _logger.error(err.message);
         throw new WorkflowException(`'${parsed_string}' doesn't have property '${key}'.`);
       }
@@ -194,7 +193,7 @@ export function regex_eval(
           remaining_string.substring(m[1].length),
           current_value[key],
         );
-      } catch (err: any) {
+      } catch (err) {
         _logger.error(err.message);
         throw new WorkflowException(`'${parsed_string}' doesn't have property '${key}'.`);
       }
@@ -342,7 +341,7 @@ function jshead(engine_config: string[]): string {
   return engine_config.join('\n');
 }
 
-export function needs_parsing(snippet: any): boolean {
+export function needs_parsing(snippet: unknown): boolean {
   return typeof snippet === 'string' && (snippet.includes('$(') || snippet.includes('${'));
 }
 export async function do_eval(

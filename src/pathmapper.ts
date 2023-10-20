@@ -92,7 +92,7 @@ export class PathMapper {
   }
 
   private visit(obj: File | Directory, stagedir: string, basedir: string, copy: boolean, staged: boolean): void {
-    stagedir = (obj['dirname'] as string | null) || stagedir;
+    stagedir = obj.dirname ?? stagedir;
 
     const tgt: string = path.join(stagedir, obj.basename);
 
@@ -121,7 +121,7 @@ export class PathMapper {
       const path1: string = obj.location;
       const ab: string = abspath(path1, basedir);
 
-      if (obj.contents && path1.startsWith('_:')) {
+      if (obj.contents !== undefined && path1.startsWith('_:')) {
         this._pathmap[path1] = new MapperEnt(obj.contents, tgt, copy ? 'CreateWritableFile' : 'CreateFile', staged);
       } else {
         let deref: string = ab;
@@ -141,7 +141,7 @@ export class PathMapper {
         this._pathmap[path1] = new MapperEnt(deref, tgt, copy ? 'WritableFile' : 'File', staged);
       }
 
-      this.visitlisting(obj.secondaryFiles || [], stagedir, basedir, copy, staged);
+      this.visitlisting(obj.secondaryFiles ?? [], stagedir, basedir, copy, staged);
     }
   }
   setup(referenced_files: (File | Directory)[], basedir: string): void {

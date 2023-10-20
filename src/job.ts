@@ -23,9 +23,8 @@ import {
   ensure_non_writable,
   getRequirement,
   str,
+  quote,
 } from './utils.js';
-// ... and so on for other modules
-const needsShellQuotingRe = /(^$|[\s|&;()<>\'"$@])/;
 
 function relink_initialworkdir_lazy(
   staging: LazyStaging,
@@ -34,7 +33,7 @@ function relink_initialworkdir_lazy(
   container_outdir: string,
   inplace_update = false,
 ) {
-  for (const [key, vol] of pathmapper.items_exclude_children()) {
+  for (const [_key, vol] of pathmapper.items_exclude_children()) {
     if (!vol.staged) {
       continue;
     }
@@ -56,7 +55,7 @@ async function relink_initialworkdir(
   container_outdir: string,
   inplace_update = false,
 ): Promise<void> {
-  for (const [key, vol] of pathmapper.items_exclude_children()) {
+  for (const [_key, vol] of pathmapper.items_exclude_children()) {
     if (!vol.staged) {
       continue;
     }
@@ -90,9 +89,6 @@ async function relink_initialworkdir(
   }
 }
 
-const neverquote = (string: string, pos = 0, endpos = 0): any => {
-  return null;
-};
 export async function _job_popen(
   staging: LazyStaging,
   commands: string[],
@@ -102,7 +98,6 @@ export async function _job_popen(
   env: { [key: string]: string },
   cwd: string,
   make_job_dir: () => string,
-  job_script_contents: string | null = null,
   timelimit: number | undefined = undefined,
   name: string | undefined = undefined,
   monitor_function: ((sproc: any) => void) | null = null,
@@ -255,11 +250,7 @@ export abstract class JobBase {
   ) {
     const scr = getRequirement(this.tool, ShellCommandRequirement)[0];
 
-    const shouldquote = neverquote;
-    // needsShellQuotingRe.search;
-    // if (scr !== null) {
-    //     shouldquote = neverquote;
-    // }
+    const shouldquote = scr !== null;
     // TODO mpi not supported
     // if (this.mpi_procs) {
     //   const menv = runtimeContext.mpi_config;
@@ -270,7 +261,7 @@ export abstract class JobBase {
     // }
     const command_line = runtime
       .concat(this.command_line)
-      .map((arg) => (shouldquote(arg.toString()) ? arg.toString() : arg.toString())) // TODO
+      .map((arg) => (shouldquote ? quote(arg.toString()) : arg.toString())) // TODO
       .join(' \\\n');
     const tmp2 = [
       this.stdin ? ` < ${this.stdin}` : '',
@@ -278,22 +269,6 @@ export abstract class JobBase {
       this.stderr ? ` 2> ${path.join(this.base_path_logs, this.stderr)}` : '',
     ];
     _logger.info(`[job ${this.name}] %${this.outdir}$ ${command_line} ${tmp2[0]} ${tmp2[1]} ${tmp2[2]}`);
-    if (this.joborder !== null && runtimeContext.research_obj !== undefined) {
-      const job_order = this.joborder;
-      if (
-        runtimeContext.process_run_id !== null &&
-        runtimeContext.prov_obj !== undefined &&
-        (job_order instanceof Array || job_order instanceof Object)
-      ) {
-        // TODO
-        // runtimeContext.prov_obj.used_artefacts(job_order, runtimeContext.process_run_id, this.name.toString());
-      } else {
-        _logger.warn(
-          `research_obj set but one of process_run_id ` +
-            `or prov_obj is missing from runtimeContext: ${runtimeContext.toString()}`,
-        );
-      }
-    }
     let outputs: any = {};
     let processStatus = '';
     try {
@@ -330,11 +305,6 @@ export abstract class JobBase {
         env = runtimeContext.secret_store.retrieve(env as any) as { [id: string]: string };
       }
 
-      let job_script_contents: string | null = null;
-      const builder: any = this.builder ? this.builder : null;
-      if (builder !== null) {
-        job_script_contents = builder.build_job_script(commands);
-      }
       const rcode = await _job_popen(
         this.staging,
         commands,
@@ -344,7 +314,6 @@ export abstract class JobBase {
         env,
         this.outdir,
         () => runtimeContext.createOutdir(),
-        job_script_contents,
         this.timelimit,
         this.name,
         monitor_function,
@@ -705,7 +674,6 @@ export abstract class ContainerCommandLineJob extends JobBase {
     }
 
     const [docker_req, docker_is_req] = getRequirement(this.tool, DockerRequirement);
-    this.prov_obj = runtimeContext.prov_obj;
     let img_id: any = undefined;
     const user_space_docker_cmd = runtimeContext.user_space_docker_cmd;
     if (docker_req !== undefined && user_space_docker_cmd) {
@@ -738,14 +706,6 @@ export abstract class ContainerCommandLineJob extends JobBase {
             runtimeContext.tmp_outdir_prefix,
           );
         }
-        if (img_id === undefined) {
-          if (this.builder.find_default_container) {
-            const default_container = this.builder.find_default_container();
-            if (default_container) {
-              img_id = String(default_container);
-            }
-          }
-        }
         if (docker_req !== undefined && img_id === undefined && runtimeContext.use_container) {
           throw new Error('Docker image not available');
         }
@@ -757,7 +717,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
           });
           this.prov_obj.document.wasAssociatedWith(runtimeContext.process_run_id, container_agent);
         }
-      } catch (err: any) {
+      } catch (err) {
         const container = runtimeContext.singularity ? 'Singularity' : 'Docker';
         _logger.debug(`${container} error`, err);
         if (docker_is_req) {
@@ -813,7 +773,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
       }
       try {
         cid = fs.readFileSync(cidfile, 'utf8').trim();
-      } catch (err) {
+      } catch {
         cid = null;
       }
     }

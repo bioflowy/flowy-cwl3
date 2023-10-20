@@ -2,14 +2,11 @@
  * Classes and methods relevant for all CWL Process types.
  */
 import * as crypto from 'node:crypto';
-import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import cwlTsAuto, {
   LoadListingEnum,
-  enum_d062602be0b4b8fd33e69e29a841317b6ab665bc as ArrayTypeEnum,
   enum_d9cba076fca539106791a4f46d198c7fcfbdb779 as RecordTypeEnum,
-  enum_d961d79c225752b9fadb617367615ab176b47d77 as EnumTypeEnum,
 } from 'cwl-ts-auto';
 import fsExtra from 'fs-extra';
 import { cloneDeep } from 'lodash-es';
@@ -21,7 +18,6 @@ import {
   CommandInputParameter,
   CommandInputRecordField,
   CommandOutputRecordField,
-  CommandOutputType,
   Directory,
   File,
   IOType,
@@ -46,55 +42,24 @@ import { StdFsAccess } from './stdfsaccess.js';
 import { compareInputBinding, CommandLineBinded, type ToolRequirement } from './types.js';
 import {
   type CWLObjectType,
-  type CWLOutputAtomType,
   type CWLOutputType,
   type JobsGeneratorType,
-  type MutableSequence,
   type OutputCallbackType,
   aslist,
   get_listing,
   normalizeFilesDirs,
   random_outdir,
-  urlJoin,
-  urldefrag,
-  visit_class,
   getRequirement,
   adjustDirObjs,
   uriFilePath,
   fileUri,
   ensureWritable,
-  visit_class_promise,
   isString,
   visitFileDirectory,
+  visitFile,
+  isFile,
 } from './utils.js';
 import { validate } from './validate.js';
-
-const _logger_validation_warnings = _logger;
-
-const supportedProcessRequirements = [
-  'DockerRequirement',
-  'SchemaDefRequirement',
-  'EnvVarRequirement',
-  'ScatterFeatureRequirement',
-  'SubworkflowFeatureRequirement',
-  'MultipleInputFeatureRequirement',
-  'InlineJavascriptRequirement',
-  'ShellCommandRequirement',
-  'StepInputExpressionRequirement',
-  'ResourceRequirement',
-  'InitialWorkDirRequirement',
-  'ToolTimeLimit',
-  'WorkReuse',
-  'NetworkAccess',
-  'InplaceUpdateRequirement',
-  'LoadListingRequirement',
-  'http://commonwl.org/cwltool#TimeLimit',
-  'http://commonwl.org/cwltool#WorkReuse',
-  'http://commonwl.org/cwltool#NetworkAccess',
-  'http://commonwl.org/cwltool#LoadListingRequirement',
-  'http://commonwl.org/cwltool#InplaceUpdateRequirement',
-  'http://commonwl.org/cwltool#CUDARequirement',
-];
 
 export function shortname(inputid: string): string {
   try {
@@ -121,7 +86,7 @@ interface StageFilesOptions {
 export function stage_files_for_outputs(
   pathmapper: PathMapper,
   stage_func?: (src: string, dest: string) => void,
-  { ignore_writable = false, symlink = true, fix_conflicts = false, secret_store = undefined }: StageFilesOptions = {},
+  { ignore_writable = false, symlink = true, fix_conflicts = false }: StageFilesOptions = {},
 ): void {
   let items: [string, MapperEnt][] = symlink ? pathmapper.items_exclude_children() : pathmapper.items();
   const targets: { [key: string]: MapperEnt } = {};
@@ -191,7 +156,7 @@ export function stage_files(
   staging: LazyStaging,
   pathmapper: PathMapper,
   stage_func?: (src: string, dest: string) => void,
-  { ignore_writable = false, symlink = true, fix_conflicts = false, secret_store = undefined }: StageFilesOptions = {},
+  { ignore_writable = false, symlink = true, fix_conflicts = false }: StageFilesOptions = {},
 ): void {
   let items: [string, MapperEnt][] = symlink ? pathmapper.items_exclude_children() : pathmapper.items();
   const targets: { [key: string]: MapperEnt } = {};
@@ -365,7 +330,8 @@ export async function relocateOutputs(
   visitFileDirectory(outputObj, _check_adjust);
 
   if (compute_checksum) {
-    const promises = visit_class_promise(outputObj, ['File'], async (vals) => compute_checksums(fs_access, vals));
+    const promises: Promise<void>[] = [];
+    visitFile(outputObj, (vals) => promises.push(compute_checksums(fs_access, vals)));
     await Promise.all(promises);
   }
   return outputObj;
@@ -391,7 +357,7 @@ export function add_sizes(fsaccess: StdFsAccess, obj: File): void {
   }
   // best effort
 }
-function fill_in_defaults(inputs: CommandInputParameter[], job: CWLObjectType, fsaccess: StdFsAccess): void {
+function fill_in_defaults(inputs: CommandInputParameter[], job: CWLObjectType): void {
   for (let e = 0; e < inputs.length; e++) {
     const inp = inputs[e];
     const fieldname = shortname(inp.id);
@@ -431,18 +397,6 @@ function avroizeType(fieldType: IOType | null, namePrefix = '') {
   }
 }
 
-function getOverrides(overrides: MutableSequence<CWLObjectType>, toolId: string): CWLObjectType {
-  const req: CWLObjectType = {};
-  if (!Array.isArray(overrides)) {
-    throw new Error(`Expected overrides to be a list, but was ${typeof overrides}`);
-  }
-  for (const ov of overrides) {
-    if (ov['overrideTarget'] === toolId) {
-      Object.assign(req, ov);
-    }
-  }
-  return req;
-}
 const _VAR_SPOOL_ERROR = `
     Non-portable reference to /var/spool/cwl detected: '{}'.
     To fix, replace /var/spool/cwl with $(runtime.outdir) or add
@@ -450,7 +404,7 @@ const _VAR_SPOOL_ERROR = `
     'dockerOutputDirectory: /var/spool/cwl'.
 `;
 
-function var_spool_cwl_detector(obj: unknown, item: any = null, obj_key: any = null): boolean {
+function var_spool_cwl_detector(obj: unknown, _item: unknown = null, obj_key: unknown = null): boolean {
   let r = false;
   if (typeof obj === 'string') {
     if (obj.includes('var/spool/cwl') && obj_key != 'dockerOutputDirectory') {
@@ -491,16 +445,11 @@ async function eval_resource(builder: Builder, resource_req: string | number): P
 const FILE_COUNT_WARNING = 5000;
 export abstract class Process {
   metadata: CWLObjectType;
-  provenance_object: any | null;
-  parent_wf: any | null;
-  names: any;
   tool: Tool;
   requirements: ToolRequirement = [];
   hints: ToolRequirement = [];
   original_requirements: ToolRequirement;
   original_hints: ToolRequirement;
-  doc_loader: any;
-  doc_schema: any;
   formatgraph: FormatGraph;
   schemaDefs: {
     [key: string]:
@@ -516,18 +465,7 @@ export abstract class Process {
   }
   init(loadingContext: LoadingContext) {
     this.metadata = getDefault(loadingContext.metadata, {});
-    this.provenance_object = null;
-    this.parent_wf = null;
 
-    // if (SCHEMA_FILE === null || SCHEMA_ANY === null || SCHEMA_DIR === null) {
-    //     get_schema("v1.0");
-    //     SCHEMA_ANY = SCHEMA_CACHE["v1.0"][3].idx["https://w3id.org/cwl/salad#Any"];
-    //     SCHEMA_FILE = SCHEMA_CACHE["v1.0"][3].idx["https://w3id.org/cwl/cwl#File"];
-    //     SCHEMA_DIR = SCHEMA_CACHE["v1.0"][3].idx["https://w3id.org/cwl/cwl#Directory"];
-    // }
-
-    // this.names = make_avro_schema([SCHEMA_FILE, SCHEMA_DIR, SCHEMA_ANY], new Loader({}));
-    const debug = loadingContext.debug;
     this.requirements = getDefault(loadingContext.requirements, []);
     const tool_requirements = this.tool.requirements || [];
 
@@ -542,12 +480,6 @@ export abstract class Process {
     if (!this.tool.id) {
       this.tool['id'] = `_:${v4()}`;
     }
-    // overrides not supported
-    // this.requirements = this.requirements.concat(
-    //     getOverrides(getDefault(loadingContext.overrides_list, []), this.tool["id"]).get(
-    //         "requirements", []
-    //     )
-    // );
 
     this.hints = [...getDefault(loadingContext.hints, [])];
     const tool_hints = this.tool.hints || [];
@@ -559,14 +491,12 @@ export abstract class Process {
     this.hints.push(...tool_hints);
     this.original_requirements = this.requirements;
     this.original_hints = this.hints;
-    // this.doc_loader = loadingContext.loader;
-    // this.doc_schema = loadingContext.avsc_names;
     if (loadingContext.formatGraph) {
       this.formatgraph = loadingContext.formatGraph;
     }
 
-    this.checkRequirements(this.tool as any, supportedProcessRequirements);
-    this.validate_hints(undefined, this.tool['hints'] || [], getDefault(loadingContext.strict, false));
+    // this.checkRequirements(this.tool as any, supportedProcessRequirements);
+    // this.validate_hints(undefined, this.tool['hints'] || [], getDefault(loadingContext.strict, false));
 
     this.schemaDefs = {};
 
@@ -628,34 +558,6 @@ export abstract class Process {
       this.container_engine = 'singularity';
     }
 
-    if (!getDefault(loadingContext.disable_js_validation, false)) {
-      let validate_js_options: { [key: string]: string[] | string | number } | null = null;
-      if (loadingContext.js_hint_options_file) {
-        try {
-          // Note: Reading files in TypeScript/JavaScript, especially in browsers, doesn't use 'open'. You'd typically use something like the File API, or fs in Node.js.
-          const options_file = fs.readFileSync(loadingContext.js_hint_options_file, 'utf8');
-          validate_js_options = JSON.parse(options_file);
-        } catch (e) {
-          _logger.error(`Failed to read options file ${loadingContext.js_hint_options_file}`);
-          throw e;
-        }
-      }
-      if (this.doc_schema) {
-        // const classname = toolpath_object['class'];
-        // const avroname = classname;
-        // if (this.doc_loader && this.doc_loader.vocab[classname]) {
-        //     avroname = avro_type_name(this.doc_loader.vocab[classname]);
-        // }
-        // validate_js_expressions(
-        //     toolpath_object,
-        //     this.doc_schema.names[avroname],
-        //     validate_js_options,
-        //     this.container_engine,
-        //     loadingContext.eval_timeout
-        // );
-      }
-    }
-
     const [dockerReq, is_req] = getRequirement(this, cwlTsAuto.DockerRequirement);
 
     if (dockerReq && dockerReq.dockerOutputDirectory && is_req) {
@@ -700,10 +602,10 @@ export abstract class Process {
 
     const [load_listing_req] = getRequirement(this.tool, cwlTsAuto.LoadListingRequirement);
 
-    const load_listing = load_listing_req != null ? load_listing_req.loadListing : 'no_listing';
+    const load_listing = load_listing_req != null ? load_listing_req.loadListing : cwlTsAuto.LoadListingEnum.NO_LISTING;
     // Validate job order
     try {
-      fill_in_defaults(this.tool.inputs, job, fs_access);
+      fill_in_defaults(this.tool.inputs, job);
       convertDictToFileDirectory(job);
       normalizeFilesDirs(job);
       const schema = this.inputs_record_schema;
@@ -712,31 +614,26 @@ export abstract class Process {
       }
       validate(schema.type, job, false);
 
-      if (load_listing != 'no_listing') {
+      if (load_listing != cwlTsAuto.LoadListingEnum.NO_LISTING) {
         get_listing(fs_access, job, load_listing === LoadListingEnum.DEEP_LISTING);
       }
 
-      visit_class(job, ['File'], (x: any): void => add_sizes(fs_access, x));
+      visitFile(job, (x): void => add_sizes(fs_access, x));
 
-      if (load_listing == 'deep_listing') {
-        this.tool['inputs'].forEach((inparm: any) => {
-          const k = shortname(inparm['id']);
+      if (load_listing == LoadListingEnum.DEEP_LISTING) {
+        this.tool.inputs.forEach((inparm) => {
+          const k = shortname(inparm.id);
           if (!(k in job)) {
             return;
           }
           const v = job[k];
-          const dircount = [0];
+          let dircount = 0;
+          let filecount = 0;
 
-          const inc = function (d: number[]): void {
-            d[0]++;
-          };
-
-          visit_class(v, ['Directory'], (x: any): void => inc(dircount));
-          if (dircount[0] == 0) {
+          visitFileDirectory(v, (x) => (isFile(x) ? filecount++ : dircount++));
+          if (dircount == 0) {
             return;
           }
-          const filecount = [0];
-          visit_class(v, ['File'], (x: any): void => inc(filecount));
           if (filecount[0] > FILE_COUNT_WARNING) {
             _logger.warn(`Recursive directory listing has resulted in a large number of File objects (${filecount[0]}) passed to the input parameter '${k}'.  This may negatively affect workflow performance and memory use.
 
@@ -805,11 +702,9 @@ hints:
       this.requirements,
       this.hints,
       {},
-      runtime_context.mutation_manager,
       this.formatgraph,
       StdFsAccess,
       fs_access,
-      runtime_context.job_script_provider,
       runtime_context.eval_timeout,
       runtime_context.debug,
       runtime_context.js_console,
@@ -874,7 +769,7 @@ hints:
     return builder;
   }
   async evalResources(builder: Builder, runtimeContext: RuntimeContext): Promise<{ [key: string]: number }> {
-    let [resourceReq, _] = getRequirement(this.tool, cwlTsAuto.ResourceRequirement);
+    let [resourceReq] = getRequirement(this.tool, cwlTsAuto.ResourceRequirement);
 
     if (resourceReq === undefined) {
       resourceReq = new cwlTsAuto.ResourceRequirement({});
@@ -936,65 +831,6 @@ hints:
     return defaultReq;
   }
 
-  checkRequirements(
-    rec: MutableSequence<CWLObjectType> | CWLObjectType | CWLOutputType | null,
-    supported_process_requirements: Iterable<string>,
-  ): void {
-    // TODO
-    //   if (rec instanceof MutableMapping) {
-    //     if ("requirements" in rec) {
-    //       const debug = _logger.isDebugEnabled()
-    //       for (let i = 0 ; i < rec["requirements"].length ; i++ ) {
-    //         const entry = rec["requirements"][i] as CWLObjectType;
-    //         const sl = new SourceLine(rec["requirements"], i, UnsupportedRequirement, debug);
-    //         if ((entry["class"] as string) not in supported_process_requirements) {
-    //           throw new UnsupportedRequirement(
-    //             `Unsupported requirement ${entry['class']}.`
-    //           );
-    //         }
-    //       }
-    //     }
-    //   }
-  }
-
-  validate_hints(avsc_names: any, hints: any[], strict: boolean): void {
-    // TODO
-    //   if (this.doc_loader === null) {
-    //     return;
-    //   }
-    //   const debug = _logger.isDebugEnabled()
-    //   for (let i = 0; i < hints.length; i++) {
-    //     const r = hints[i];
-    //     const sl = new SourceLine(hints, i, ValidationException, debug);
-    //     const classname = r["class"] as string
-    //     if (classname === "http://commonwl.org/cwltool#Loop") {
-    //       throw new ValidationException(
-    //         "http://commonwl.org/cwltool#Loop is valid only under requirements."
-    //       );
-    //     }
-    //     let avroname = classname;
-    //     if (classname in this.doc_loader.vocab) {
-    //       avroname = avro_type_name(this.doc_loader.vocab[classname]);
-    //     }
-    //     if (avsc_names.get_name(avroname, null) !== null) {
-    //       const plain_hint = {
-    //         ...r,
-    //         ...{[key]: r[key] for (let key in r) if (key not in this.doc_loader.identifiers} // strip identifiers
-    //       };
-    //       validate_ex(
-    //         avsc_names.get_name(avroname, null) as Schema,
-    //         plain_hint,
-    //         strict,
-    //         this.doc_loader.vocab,
-    //       );
-    //     } else if ((r["class"] as string) in ["NetworkAccess", "LoadListingRequirement"]) {
-    //       continue;
-    //     } else {
-    //       _logger.info(sl.makeError(`Unknown hint ${r["class"]}`));
-    //     }
-    //   }
-  }
-
   abstract job(
     job_order: CWLObjectType,
     output_callbacks: OutputCallbackType | null,
@@ -1021,235 +857,6 @@ export function uniquename(stem: string, names?: Set<string>): string {
   return u;
 }
 
-function nestdir(base: string, deps: CWLObjectType): CWLObjectType {
-  const dirname = `${path.dirname(base)}/`;
-  const subid = deps['location'] as string;
-  if (subid.startsWith(dirname)) {
-    const s2 = subid.slice(dirname.length);
-    const sp = s2.split('/');
-    sp.pop();
-    while (sp.length > 0) {
-      const loc = dirname + sp.join('/');
-      const nx = sp.pop();
-      deps = {
-        class: 'Directory',
-        basename: nx,
-        listing: [deps],
-        location: loc,
-      };
-    }
-  }
-  return deps;
-}
-
-function mergedirs(listing: CWLObjectType[]): CWLObjectType[] {
-  const r: CWLObjectType[] = [];
-  const ents: { [key: string]: CWLObjectType } = {};
-  for (const e of listing) {
-    const basename = e['basename'] as string;
-    if (basename in ents == false) {
-      ents[basename] = e;
-    } else if (e['location'] != ents[basename]['location']) {
-      throw new ValidationException(
-        `Conflicting basename in listing or secondaryFiles, ${basename} used by both ${e['location']} and ${ents[basename]['location']}`,
-      );
-    } else if (e['class'] == 'Directory') {
-      if (e['listing']) {
-        (ents[basename]['listing'] as CWLObjectType[]).push(...(e['listing'] as CWLObjectType[]));
-      }
-    }
-  }
-
-  for (const e of Object.values(ents)) {
-    if (e['class'] == 'Directory' && 'listing' in e) {
-      e['listing'] = mergedirs(e['listing'] as CWLObjectType[]);
-    }
-  }
-
-  r.push(...Object.values(ents));
-  return r;
-}
-
-const CWL_IANA = 'https://www.iana.org/assignments/media-types/application/cwl';
-function scandeps_file_dir(
-  base: string,
-  doc: CWLObjectType,
-  reffields: Set<string>,
-  urlfields: Set<string>,
-  loadref: (arg1: string, arg2: string) => Object | any[] | string | null,
-  urljoin: (arg1: string, arg2: string) => string,
-  nestdirs: boolean,
-): CWLObjectType[] {
-  let r: CWLObjectType[] = [];
-  const u = (doc['location'] || doc['path']) as string;
-  if (u && !u.startsWith('_:')) {
-    let deps: CWLObjectType = {
-      class: doc['class'],
-      location: urljoin(base, u),
-    };
-    if (doc['basename']) {
-      deps['basename'] = doc['basename'];
-    }
-    if (doc['class'] == 'Directory' && doc['listing']) {
-      deps['listing'] = doc['listing'];
-    }
-    if (doc['class'] == 'File' && doc['secondaryFiles']) {
-      deps['secondaryFiles'] = scandeps(
-        base,
-        doc['secondaryFiles'] as CWLObjectType | CWLObjectType[],
-        reffields,
-        urlfields,
-        loadref,
-        urljoin,
-        nestdirs,
-      ) as CWLOutputAtomType;
-    }
-    if (nestdirs) {
-      deps = nestdir(base, deps);
-    }
-    r.push(deps);
-  } else {
-    if (doc['class'] == 'Directory' && doc['listing']) {
-      r = r.concat(scandeps(base, doc['listing'] as CWLObjectType[], reffields, urlfields, loadref, urljoin, nestdirs));
-    } else if (doc['class'] == 'File' && doc['secondaryFiles']) {
-      r = r.concat(
-        scandeps(base, doc['secondaryFiles'] as CWLObjectType[], reffields, urlfields, loadref, urljoin, nestdirs),
-      );
-    }
-  }
-  return r;
-}
-function scandeps_item(
-  base: string,
-  doc: CWLObjectType,
-  reffields: Set<string>,
-  urlfields: Set<string>,
-  loadref: (param1: string, param2: string) => Object | any[] | string | null,
-  urljoin: (param1: string, param2: string) => string,
-  nestdirs: boolean,
-  key: string,
-  v: CWLOutputType,
-): CWLObjectType[] {
-  const r: CWLObjectType[] = [];
-  if (reffields.has(key)) {
-    for (const u2 of aslist(v)) {
-      if (u2 instanceof Map) {
-        r.push(...scandeps(base, u2 as unknown as CWLObjectType, reffields, urlfields, loadref, urljoin, nestdirs));
-      }
-      if (isString(u2)) {
-        const subid = urljoin(base, u2);
-        const basedf = new URL(base).hash;
-        const subiddf = new URL(subid).hash;
-        if (basedf == subiddf) {
-          continue;
-        }
-        const sub = loadref(base, u2);
-        let deps2: CWLObjectType = {
-          class: 'File',
-          location: subid,
-          format: CWL_IANA,
-        };
-        const sf = scandeps(
-          subid,
-          sub as CWLObjectType | CWLObjectType[],
-          reffields,
-          urlfields,
-          loadref,
-          urljoin,
-          nestdirs,
-        );
-        if (sf.length > 0) {
-          deps2['secondaryFiles'] = mergedirs(sf);
-        }
-        if (nestdirs) {
-          deps2 = nestdir(base, deps2);
-        }
-        r.push(deps2);
-      } else {
-        throw new Error('Unexpected');
-      }
-    }
-  } else if (urlfields.has(key) && key != 'location') {
-    for (const u3 of aslist(v)) {
-      if (!isString(u3)) {
-        throw new Error(`u3 must be string but ${typeof u3}`);
-      }
-      let deps: CWLObjectType = { class: 'File', location: urljoin(base, u3) };
-      if (nestdirs) {
-        deps = nestdir(base, deps);
-      }
-      r.push(deps);
-    }
-  } else if ((doc['class'] == 'File' || doc['class'] == 'Directory') && (key == 'listing' || key == 'secondaryFiles')) {
-    // should be handled earlier.
-  } else {
-    r.push(...scandeps(base, v as CWLObjectType | CWLObjectType[], reffields, urlfields, loadref, urljoin, nestdirs));
-  }
-  return r;
-}
-export function scandeps(
-  base: string,
-  doc: CWLObjectType | CWLObjectType[],
-  reffields: Set<string>,
-  urlfields: Set<string>,
-  loadref: (a: string, b: string) => Object | any[] | string | null,
-  urljoin2: (a: string, b: string) => string = urlJoin,
-  nestdirs = true,
-): CWLObjectType[] {
-  let r: CWLObjectType[] = [];
-  if (typeof doc === 'object' && doc !== null && !Array.isArray(doc)) {
-    if ('id' in doc) {
-      if (typeof doc['id'] === 'string' && doc['id'].startsWith('file://')) {
-        const df = urldefrag(doc['id']).url;
-        if (base !== df) {
-          r.push({ class: 'File', location: df, format: CWL_IANA });
-          base = df;
-        }
-      }
-    }
-
-    if ((doc['class'] as string) in ['File', 'Directory'] && 'location' in urlfields) {
-      r = r.concat(scandeps_file_dir(base, doc, reffields, urlfields, loadref, urljoin2, nestdirs));
-    }
-
-    for (const k in doc) {
-      if (doc.hasOwnProperty(k)) {
-        const v = doc[k];
-        if (v) {
-          r = r.concat(scandeps_item(base, doc, reffields, urlfields, loadref, urljoin2, nestdirs, k, v));
-        }
-      }
-    }
-  } else if (Array.isArray(doc)) {
-    for (const d of doc) {
-      r = r.concat(scandeps(base, d, reffields, urlfields, loadref, urljoin2, nestdirs));
-    }
-  }
-
-  if (r.length) {
-    normalizeFilesDirs(r);
-  }
-
-  return r;
-}
-async function calculateSHA1(filePath: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const hash = createHash('sha1');
-    const stream = fs.createReadStream(filePath);
-
-    stream.on('data', (chunk) => {
-      hash.update(chunk);
-    });
-
-    stream.on('end', () => {
-      resolve(hash.digest('hex'));
-    });
-
-    stream.on('error', (err) => {
-      reject(err);
-    });
-  });
-}
 export async function compute_checksums(fsAccess: StdFsAccess, fileobj: File): Promise<void> {
   if (!fileobj.checksum) {
     const checksum = crypto.createHash('sha1');

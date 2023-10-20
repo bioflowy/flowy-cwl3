@@ -28,7 +28,6 @@ import {
   aslist,
   get_listing,
   normalizeFilesDirs,
-  visit_class,
   isString,
   getRequirement,
   get_filed_name,
@@ -107,23 +106,20 @@ export class Builder {
   requirements?: undefined | ToolRequirement;
   hints?: undefined | ToolRequirement;
   resources: { [key: string]: number };
-  mutation_manager: any | null;
   formatgraph: FormatGraph;
   make_fs_access: any;
   fs_access: StdFsAccess;
-  job_script_provider: any | null;
   timeout: number;
   debug: boolean;
   js_console: boolean;
   force_docker_pull: boolean;
-  loadListing: any;
+  loadListing: cwlTsAuto.LoadListingEnum;
   outdir: string;
   tmpdir: string;
   stagedir: string;
   cwlVersion: string;
   container_engine: string;
   pathmapper: PathMapper | null;
-  find_default_container: any | null;
 
   // eslint-disable-next-line max-params
   constructor(
@@ -136,16 +132,14 @@ export class Builder {
     requirements: ToolRequirement,
     hints: ToolRequirement,
     resources: { [key: string]: number },
-    mutation_manager: any | null,
     formatgraph: FormatGraph,
     make_fs_access: any,
     fs_access: any,
-    job_script_provider: any | null,
     timeout: number,
     debug: boolean,
     js_console: boolean,
     force_docker_pull: boolean,
-    loadListing: any,
+    loadListing: cwlTsAuto.LoadListingEnum,
     outdir: string,
     tmpdir: string,
     stagedir: string,
@@ -159,11 +153,9 @@ export class Builder {
     this.requirements = requirements;
     this.hints = hints;
     this.resources = resources;
-    this.mutation_manager = mutation_manager;
     this.formatgraph = formatgraph;
     this.make_fs_access = make_fs_access;
     this.fs_access = fs_access;
-    this.job_script_provider = job_script_provider;
     this.timeout = timeout;
     this.debug = debug;
     this.js_console = js_console;
@@ -174,16 +166,9 @@ export class Builder {
     this.stagedir = stagedir;
     this.cwlVersion = cwlVersion;
     this.pathmapper = null;
-    this.find_default_container = null;
     this.container_engine = container_engine;
   }
 
-  build_job_script(commands: string[]): string | null {
-    if (this.job_script_provider) {
-      return this.job_script_provider.build_job_script(this, commands);
-    }
-    return null;
-  }
   async handle_union(
     schema: CommandInputParameter,
     datum: CWLOutputType,
@@ -299,7 +284,7 @@ export class Builder {
       }
 
       if (schema.type == 'Any') {
-        visit_class(datum, ['File', 'Directory'], _capture_files);
+        visitFileDirectory(datum, _capture_files);
       }
     }
     if (binding) {
@@ -420,7 +405,7 @@ export class Builder {
     }
 
     if (schema.secondaryFiles) {
-      return this.handleSecondaryFile(schema, datum, discoverSecondaryFiles, debug);
+      await this.handleSecondaryFile(schema, datum, discoverSecondaryFiles, debug);
     }
 
     if (schema.format) {
@@ -499,7 +484,7 @@ export class Builder {
           throw new WorkflowException(
             `The result of a expression in the field 'required' must be a bool or None, not a ${typeof required_result}. Expression ${
               sf_entry.required
-            } resulted in ${required_result}.`,
+            } resulted in ${str(required_result)}.`,
           );
         }
         sf_required = required_result as boolean;
@@ -532,7 +517,7 @@ export class Builder {
         return;
       }
     }
-    this.files.push(newsf);
+    files.push(newsf);
   }
   handle_secondary_path(
     schema: CommandInputParameter,
@@ -580,9 +565,9 @@ export class Builder {
 
     if (!found) {
       if (typeof sfname === 'object') {
-        this.addsf(datum.secondaryFiles || [], sfname);
+        this.addsf(datum.secondaryFiles ?? [], sfname);
       } else if (discover_secondaryFiles && this.fs_access.exists(sf_location)) {
-        this.addsf(datum.secondaryFiles || [], {
+        this.addsf(datum.secondaryFiles ?? [], {
           class: 'File',
           location: sf_location,
           basename: sfname,

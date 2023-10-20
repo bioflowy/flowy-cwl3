@@ -245,7 +245,7 @@ export function static_checker(
     const missing = missing_subset(srcsf, sinksf);
     let msg = '';
     if (missing) {
-      const msg1 = `Parameter '${shortname(sink['id'])}' requires secondaryFiles ${missing} but`;
+      const msg1 = `Parameter '${shortname(sink['id'])}' requires secondaryFiles ${str(missing)} but`;
       const msg3 = `source '${shortname(src['id'])}' does not provide those secondaryFiles.`;
       const msg4 = `To resolve, add missing secondaryFiles patterns to definition of '${shortname(src['id'])}' or`;
       const msg5 = `mark missing secondaryFiles in definition of '${shortname(sink['id'])}' as optional.`;
@@ -253,11 +253,7 @@ export function static_checker(
     } else if (sink['not_connected']) {
       if (!sink['used_by_step']) {
         const msg1 = str(param_to_step[sink['id']].run);
-        const msg2 = str(
-          param_to_step[sink['id']]['inputs']
-            .filter((s: any) => !s.get('not_connected'))
-            .map((s: any) => shortname(s['id'])),
-        );
+        const msg2 = str(param_to_step[sink['id']].inputs.filter((s) => !s.not_connected).map((s) => shortname(s.id)));
         msg = `'${shortname(sink['id'])}' is not an input parameter of ${msg1}, expected ${msg2}`;
       } else {
         msg = '';
@@ -604,7 +600,7 @@ function is_conditional_step(param_to_step: { [key: string]: IWorkflowStep }, pa
   }
   return false;
 }
-function is_all_output_method_loop_step(param_to_step: { [key: string]: any }, parm_id: string): boolean {
+function is_all_output_method_loop_step(param_to_step: { [key: string]: IWorkflowStep }, parm_id: string): boolean {
   const source_step = param_to_step[parm_id];
   if (source_step !== undefined) {
     for (const requirement of source_step['requirements'] || []) {

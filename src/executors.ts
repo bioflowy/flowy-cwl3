@@ -2,7 +2,6 @@ import * as path from 'node:path';
 import type { Logger } from 'winston';
 import { RuntimeContext, getDefault } from './context.js';
 import { ValidationException, WorkflowException } from './errors.js';
-import { JobBase } from './job.js';
 import { _logger } from './loghandler.js';
 import { Process, cleanIntermediate, relocateOutputs } from './process.js';
 import { createRequirements } from './types.js';
@@ -102,25 +101,6 @@ abstract class JobExecutor {
     }
 
     if (this.final_output && this.final_status) {
-      if (
-        runtime_context.research_obj !== null &&
-        (process instanceof JobBase || process instanceof Process) &&
-        // ||
-        // process instanceof WorkflowJobStep ||
-        // process instanceof WorkflowJob
-        process.parent_wf
-      ) {
-        const process_run_id: string | null = null;
-        const name = 'primary';
-        process.parent_wf.generate_output_prov(this.final_output[0], process_run_id, name);
-        process.parent_wf.document.wasEndedBy(
-          process.parent_wf.workflow_run_uri,
-          null,
-          process.parent_wf.engine_uuid,
-          new Date(),
-        );
-        process.parent_wf.finalize_prov_profile(null);
-      }
       return [this.final_output[0], this.final_status[0]];
     }
     return [null, 'permanentFail'];

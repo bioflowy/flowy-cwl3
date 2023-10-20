@@ -239,11 +239,11 @@ export class WorkflowStep extends Process {
     //     }
     // }
   }
-  override checkRequirements(_rec: unknown, _supported_process_requirements: Iterable<string>): void {
-    // supported_process_requirements = [...supported_process_requirements];
-    // supported_process_requirements.push('http://commonwl.org/cwltool#Loop');
-    // super.checkRequirements(rec, supported_process_requirements);
-  }
+  // override checkRequirements(_rec: unknown, _supported_process_requirements: Iterable<string>): void {
+  // supported_process_requirements = [...supported_process_requirements];
+  // supported_process_requirements.push('http://commonwl.org/cwltool#Loop');
+  // super.checkRequirements(rec, supported_process_requirements);
+  // }
 
   receive_output(output_callback: OutputCallbackType, jobout: CWLObjectType, processStatus: string): void {
     const output: { [key: string]: CWLOutputType } = {};

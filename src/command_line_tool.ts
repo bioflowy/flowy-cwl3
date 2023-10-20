@@ -1,51 +1,36 @@
 import * as path from 'node:path';
 import * as cwl from 'cwl-ts-auto';
 import { cloneDeep } from 'lodash-es';
-import { Builder, contentLimitRespectedReadBytes, substitute } from './builder.js';
+import { Builder } from './builder.js';
+import { collect_output_ports } from './collect_outputs.js';
 import { LoadingContext, RuntimeContext, getDefault } from './context.js';
-import {
-  CommandInputParameter,
-  CommandOutputBinding,
-  CommandOutputParameter,
-  Directory,
-  File,
-  Tool,
-} from './cwltypes.js';
+import { CommandInputParameter, CommandOutputParameter, Directory, File, Tool } from './cwltypes.js';
 import { DockerCommandLineJob, PodmanCommandLineJob } from './docker.js';
-import { UnsupportedRequirement, ValidationException, WorkflowException } from './errors.js';
+import { UnsupportedRequirement, WorkflowException } from './errors.js';
 import { pathJoin } from './fileutils.js';
 import { CommandLineJob, JobBase } from './job.js';
 import { _logger } from './loghandler.js';
-import { convertDictToFileDirectory, convertObjectToFileDirectory } from './main.js';
+import { convertObjectToFileDirectory } from './main.js';
 import { PathMapper } from './pathmapper.js';
-import { Process, compute_checksums, shortname, uniquename } from './process.js';
-import { StdFsAccess } from './stdfsaccess.js';
+import { Process, shortname, uniquename } from './process.js';
 import { type ToolRequirement } from './types.js';
 import {
   type CWLObjectType,
   type CWLOutputType,
   type JobsGeneratorType,
-  type MutableMapping,
   type OutputCallbackType,
-  adjustFileObjs,
   aslist,
-  fileUri,
-  get_listing,
   isString,
   normalizeFilesDirs,
   quote,
-  splitext,
-  uriFilePath,
   getRequirement,
   josonStringifyLikePython,
-  isStringOrStringArray,
   visitFileDirectory,
   str,
   isDirectory,
   isFileOrDirectory,
   isFile,
 } from './utils.js';
-import { validate } from './validate.js';
 
 interface Dirent {
   entryname?: string;
@@ -61,7 +46,6 @@ export class ExpressionJob {
   hints: ToolRequirement;
   outdir: string | null;
   tmpdir: string | null;
-  prov_obj: any | null;
 
   constructor(
     builder: Builder,
@@ -79,19 +63,18 @@ export class ExpressionJob {
     this.outdir = outdir;
     this.tmpdir = tmpdir;
     this.script = script;
-    this.prov_obj = null;
   }
 
   async run(runtimeContext: RuntimeContext, tmpdir_lock: any | null = null) {
     try {
       normalizeFilesDirs(this.builder.job);
       const ev = await this.builder.do_eval(this.script);
-      normalizeFilesDirs(ev as any);
+      normalizeFilesDirs(ev);
 
       if (this.output_callback) {
         this.output_callback(ev as CWLObjectType, 'success');
       }
-    } catch (err: any) {
+    } catch (err) {
       _logger.warn('Failed to evaluate expression:\n%s', err.toString(), { exc_info: runtimeContext.debug });
 
       if (this.output_callback) {
@@ -121,66 +104,10 @@ export class ExpressionTool extends Process {
   ): JobsGeneratorType {
     const builder = await this._init_job(job_order, runtimeContext);
     const job = new ExpressionJob(builder, this.tool['expression'], output_callbacks, this.requirements, this.hints);
-    job.prov_obj = runtimeContext.prov_obj;
     yield job;
   }
 }
 
-function remove_path(f: File | Directory): void {
-  if (f.path) {
-    f.path = undefined;
-  }
-}
-function revmap_file(builder: Builder, outdir: string, f: File | Directory): File | Directory | null {
-  if (outdir.startsWith('/')) {
-    outdir = fileUri(outdir);
-  }
-  if (f.location && !f.path) {
-    const location: string = f.location;
-    if (location.startsWith('file://')) {
-      f.path = uriFilePath(location);
-    } else {
-      f.location = builder.fs_access.join(outdir, f.location);
-      return f;
-    }
-  }
-  if (f['dirname']) {
-    delete f['dirname'];
-  }
-  if (f.path) {
-    const path1 = builder.fs_access.join(builder.outdir, f.path);
-    const uripath = fileUri(path1);
-    f.path = undefined;
-    if (!f.basename) {
-      f.basename = path.basename(path1);
-    }
-    if (!builder.pathmapper) {
-      throw new Error("Do not call revmap_file using a builder that doesn't have a pathmapper.");
-    }
-    const revmap_f = builder.pathmapper.reversemap(path1);
-    if (revmap_f && !builder.pathmapper.mapper(revmap_f[0]).type.startsWith('Writable')) {
-      f.location = revmap_f[1];
-    } else if (uripath == outdir || uripath.startsWith(outdir + path.sep) || uripath.startsWith(`${outdir}/`)) {
-      f.location = uripath;
-    } else if (
-      path1 == builder.outdir ||
-      path1.startsWith(builder.outdir + path.sep) ||
-      path1.startsWith(`${builder.outdir}/`)
-    ) {
-      const joined_path = builder.fs_access.join(
-        outdir,
-        encodeURIComponent(path1.substring(builder.outdir.length + 1)),
-      );
-      f.location = joined_path;
-    } else {
-      throw new WorkflowException(
-        `Output file path ${path1} must be within designated output directory ${builder.outdir} or an input file pass through.`,
-      );
-    }
-    return f;
-  }
-  throw new WorkflowException(`Output File object is missing both 'location' and 'path' fields: ${f}`);
-}
 function make_path_mapper(
   reffiles: (File | Directory)[],
   stagedir: string,
@@ -222,19 +149,6 @@ function checkAdjust(acceptRe: RegExp, builder: Builder, fileO: File | Directory
   }
   return fileO;
 }
-
-function checkValidLocations(fsAccess: StdFsAccess, ob: Directory | File): void {
-  const location = ob.location;
-  if (location.startsWith('_:')) {
-    return;
-  }
-  if (isFile(ob) && !fsAccess.isfile(location)) {
-    throw new Error(`Does not exist or is not a File: '${location}'`);
-  }
-  if (isDirectory(ob) && !fsAccess.isdir(location)) {
-    throw new Error(`Does not exist or is not a Directory: '${location}'`);
-  }
-}
 class PathCheckingMode {
   /**
    * What characters are allowed in path names.
@@ -271,9 +185,6 @@ class PathCheckingMode {
 
   static RELAXED = new RegExp('.*');
   /** Accept anything. */
-}
-interface OutputPortsType {
-  [key: string]: CWLOutputType | undefined;
 }
 
 class ParameterOutputWorkflowException extends WorkflowException {
@@ -403,17 +314,15 @@ export class CommandLineTool extends Process {
           //   );
           // }
           for (const entry2 of entry) {
-            const result = convertObjectToFileDirectory(entry2);
-            if (!result) {
-              fail = `an array with an item ('${entry2}') that is not a File nor a Directory object.`;
+            if (isFileOrDirectory(entry2)) {
+              results.push(entry2);
             } else {
-              results.push(result);
+              fail = `an array with an item ('${str(entry2)}') that is not a File nor a Directory object.`;
             }
           }
         } else {
-          const rslt = convertObjectToFileDirectory(entry);
-          if (rslt) {
-            results.push(rslt);
+          if (isFileOrDirectory(entry)) {
+            results.push(entry);
           } else if (entry instanceof Object && 'entry' in entry) {
             results.push(entry as Dirent);
           } else {
@@ -442,7 +351,7 @@ export class CommandLineTool extends Process {
     for (const t of listing) {
       if (Array.isArray(t)) {
         ls.push(...t.map(convertObjectToFileDirectory));
-      } else if (isFileOrDirectory(t)) {
+      } else if (t instanceof cwl.File || t instanceof cwl.Directory) {
         ls.push(convertObjectToFileDirectory(t));
       } else if (isString(t)) {
         const initwd_item = await builder.do_eval(t);
@@ -450,15 +359,14 @@ export class CommandLineTool extends Process {
           continue;
         }
         for (const item of aslist(initwd_item)) {
-          const rslt = convertObjectToFileDirectory(item);
-          if (rslt) {
-            ls.push(rslt);
+          if (isFileOrDirectory(item)) {
+            ls.push(item);
           } else {
-            ls.push({ ...rslt } as Dirent);
+            ls.push(item as Dirent);
           }
         }
       } else {
-        const dirent: Dirent = t as Dirent;
+        const dirent: Dirent = t;
         const entry_field = dirent.entry;
         const entry = await builder.do_eval(entry_field, undefined, false, false);
         if (entry === null) {
@@ -470,22 +378,15 @@ export class CommandLineTool extends Process {
           continue;
         }
         if (entry instanceof Array) {
-          let filelist = true;
-          for (const e of entry) {
-            if (!(e instanceof Object) || !['File', 'Directory'].includes(e['class'])) {
-              filelist = false;
-              break;
-            }
-          }
+          const filelist = entry.every(isFileOrDirectory);
           if (filelist) {
             if (dirent.entryname) {
               throw new WorkflowException("'entryname' is invalid when 'entry' returns list of File or Directory");
             }
             for (const e of entry) {
-              const ec: CWLObjectType = e as CWLObjectType;
-              ec['writable'] = t['writable'] || false;
+              e.writable = t['writable'] || false;
+              ls.push(e);
             }
-            ls.push(convertDictToFileDirectory(entry));
             continue;
           }
         }
@@ -604,9 +505,7 @@ export class CommandLineTool extends Process {
         const basename = entry.basename;
         entry.basename = path.basename(basename);
         dirname = pathJoin(builder.outdir, path.dirname(basename));
-        if (isFile(entry)) {
-          entry.dirname = dirname;
-        }
+        entry.dirname = dirname;
       }
       normalizeFilesDirs(entry);
       this.updatePathmap(dirname || builder.outdir, builder.pathmapper, entry);
@@ -646,154 +545,7 @@ export class CommandLineTool extends Process {
     j.generatefiles.listing = ls2;
     this.setup_output_items(initialWorkdir, builder, ls2);
   }
-  cache_context(runtimeContext: RuntimeContext): (arg1: CWLObjectType, arg2: string) => void {
-    return (arg1: CWLObjectType, arg2: string) => {};
-    // TODO cache not implemented
-    // let cachecontext = runtimeContext.copy();
-    // cachecontext.outdir = "/out";
-    // cachecontext.tmpdir = "/tmp"; // nosec
-    // cachecontext.stagedir = "/stage";
-    // let cachebuilder = this._init_job(job_order, cachecontext);
-    // cachebuilder.pathmapper = new PathMapper(
-    //     cachebuilder.files,
-    //     runtimeContext.basedir,
-    //     cachebuilder.stagedir,
-    //     false
-    // );
-    // let _check_adjust = partial(check_adjust, this.path_check_mode.value, cachebuilder);
-    // let _checksum = partial(
-    //     compute_checksums,
-    //     runtimeContext.make_fs_access(runtimeContext.basedir),
-    // );
-    // visit_class(
-    //     [cachebuilder.files, cachebuilder.bindings],
-    //     ["File", "Directory"],
-    //     _check_adjust,
-    // );
-    // visit_class([cachebuilder.files, cachebuilder.bindings], ["File"], _checksum);
-    // let cmdline = flatten(list(map(cachebuilder.generate_arg, cachebuilder.bindings)));
-    // let [docker_req, ] = this.get_requirement("cwl.DockerRequirement");
-    // let dockerimg;
-    // if (docker_req !== undefined && runtimeContext.use_container) {
-    //     dockerimg = docker_req["dockerImageId"] || docker_req["dockerPull"];
-    // } else if (runtimeContext.default_container !== null && runtimeContext.use_container) {
-    //     dockerimg = runtimeContext.default_container;
-    // } else {
-    //     dockerimg = null;
-    // }
-    // if (dockerimg !== null) {
-    //     cmdline = ["docker", "run", dockerimg].concat(cmdline);
-    //     // not really run using docker, just for hashing purposes
-    // }
-    // let keydict: { [key: string]: any } = {
-    //     "cmdline": cmdline
-    // };
-    // for (let shortcut of ["stdin", "stdout", "stderr"]) {
-    //     if (shortcut in this.tool) {
-    //         keydict[shortcut] = this.tool[shortcut];
-    //     }
-    // }
-    // let calc_checksum = (location: string): string | undefined => {
-    //     for (let e of cachebuilder.files) {
-    //         if (
-    //             "location" in e &&
-    //             e["location"] === location &&
-    //             "checksum" in e &&
-    //             e["checksum"] != "sha1$hash"
-    //         ) {
-    //             return e["checksum"] as string;
-    //         }
-    //     }
-    //     return undefined;
-    // }
-    // let remove_prefix = (s: string, prefix: string): string => {
-    //     return s.startsWith(prefix) ? s.slice(prefix.length) : s;
-    // }
-    // for (let [location, fobj] of Object.entries(cachebuilder.pathmapper)) {
-    //     if (fobj.type === "File") {
-    //         let checksum = calc_checksum(location);
-    //         let fobj_stat = fs.statSync(fobj.resolved);
-    //         let path = remove_prefix(fobj.resolved, runtimeContext.basedir + "/");
-    //         if (checksum !== null) {
-    //             keydict[path] = [fobj_stat.size, checksum];
-    //         } else {
-    //             keydict[path] = [
-    //                 fobj_stat.size,
-    //                 Math.round(fobj_stat.mtimeMs),
-    //             ];
-    //         }
-    //     }
-    // }
-    // let interesting = new Set([
-    //     "cwl.DockerRequirement",
-    //     "EnvVarRequirement",
-    //     "cwl.InitialWorkDirRequirement",
-    //     "ShellCommandRequirement",
-    //     "NetworkAccess",
-    // ]);
-    // for (let rh of [this.original_requirements, this.original_hints]) {
-    //     for (let r of rh.slice().reverse()) {
-    //         let cls = r["class"] as string
-    //         if (interesting.has(cls) && !(cls in keydict)) {
-    //             keydict[cls] = r;
-    //         }
-    //     }
-    // }
-    // let keydictstr = json_dumps(keydict, { separators: (",", ":"), sort_keys: true });
-    // let cachekey = hashlib.md5(keydictstr.encode("utf-8")).hexdigest(); // nosec
-    // _logger.debug(`[job ${jobname}] keydictstr is ${keydictstr} -> ${cachekey}`);
-    // let jobcache = path.join(runtimeContext.cachedir, cachekey);
-    // // Create a lockfile to manage cache status.
-    // let jobcachepending = `${jobcache}.status`;
-    // let jobcachelock = null;
-    // let jobstatus = null;
-    // // Opens the file for read/write, or creates an empty file.
-    // jobcachelock = open(jobcachepending, "a+");
-    // // get the shared lock to ensure no other process is trying
-    // // to write to this cache
-    // shared_file_lock(jobcachelock);
-    // jobcachelock.seek(0);
-    // jobstatus = jobcachelock.read();
-    // if (os.path.isdir(jobcache) && jobstatus === "success") {
-    //     if (docker_req && runtimeContext.use_container) {
-    //         cachebuilder.outdir = runtimeContext.docker_outdir || random_outdir();
-    //     } else {
-    //         cachebuilder.outdir = jobcache;
-    //     }
-    //     _logger.info(`[job ${jobname}] Using cached output in ${jobcache}`);
-    //     yield new CallbackJob(this, output_callbacks, cachebuilder, jobcache);
-    //     // we're done with the cache so release lock
-    //     jobcachelock.close();
-    //     return null;
-    // } else {
-    //     _logger.info(`[job ${jobname}] Output of job will be cached in ${jobcache}`);
-    //     // turn shared lock into an exclusive lock since we'll
-    //     // be writing the cache directory
-    //     upgrade_lock(jobcachelock);
-    //     shutil.rmtree(jobcache, true);
-    //     fs.makedir(jobcache);
-    //     runtimeContext = runtimeContext.copy();
-    //     runtimeContext.outdir = jobcache;
-    //     let update_status_output_callback = (
-    //         output_callbacks: OutputCallbackType,
-    //         jobcachelock: TextIO,
-    //         outputs: Optional[CWLObjectType],
-    //         processStatus: string,
-    //     ) => {
-    //         // save status to the lockfile then release the lock
-    //         jobcachelock.seek(0);
-    //         jobcachelock.truncate();
-    //         jobcachelock.write(processStatus);
-    //         jobcachelock.close();
-    //         output_callbacks(outputs, processStatus);
-    //     }
-    //     output_callbacks = partial(
-    //         update_status_output_callback, output_callbacks, jobcachelock
-    //     );
-    //     return output_callbacks;
-    // }
-  }
-  async handle_tool_time_limit(builder: Builder, j: JobBase, debug: boolean): Promise<void> {
+  async handle_tool_time_limit(builder: Builder, j: JobBase): Promise<void> {
     const [timelimit, _] = getRequirement(this, cwl.ToolTimeLimit);
     if (timelimit == undefined) {
       return;
@@ -805,7 +557,7 @@ export class CommandLineTool extends Process {
       if (timelimit_eval && typeof timelimit_eval !== 'number') {
         throw new WorkflowException(
           `'timelimit' expression must evaluate to a long/int. Got 
-                ${timelimit_eval} for expression ${limit_field}.`,
+                ${str(timelimit_eval)} for expression ${limit_field}.`,
         );
       } else {
         timelimit_eval = limit_field;
@@ -819,7 +571,7 @@ export class CommandLineTool extends Process {
     }
   }
 
-  async handle_network_access(builder: Builder, j: JobBase, debug: boolean): Promise<void> {
+  async handle_network_access(builder: Builder, j: JobBase): Promise<void> {
     const [networkaccess, _] = getRequirement(this.tool, cwl.NetworkAccess);
     if (networkaccess == null) {
       return;
@@ -831,7 +583,7 @@ export class CommandLineTool extends Process {
       if (typeof networkaccess_eval !== 'boolean') {
         throw new WorkflowException(
           `'networkAccess' expression must evaluate to a bool. 
-                Got ${networkaccess_eval} for expression ${networkaccess_field}.`,
+                Got ${str(networkaccess_eval)} for expression ${networkaccess_field}.`,
         );
       }
     } else {
@@ -842,7 +594,7 @@ export class CommandLineTool extends Process {
     }
     j.networkaccess = networkaccess_eval;
   }
-  async handle_env_var(builder: Builder, debug: boolean): Promise<any> {
+  async handle_env_var(builder: Builder): Promise<Record<string, string>> {
     const [evr, _] = getRequirement(this, cwl.EnvVarRequirement);
     if (evr === undefined) {
       return {};
@@ -858,7 +610,7 @@ export class CommandLineTool extends Process {
         if (typeof env_value_eval !== 'string') {
           throw new WorkflowException(
             "'envValue expression must evaluate to a str. " +
-              `Got ${env_value_eval} for expression ${env_value_field}.`,
+              `Got ${str(env_value_eval)} for expression ${env_value_field}.`,
           );
         }
         env_value = env_value_eval;
@@ -869,7 +621,7 @@ export class CommandLineTool extends Process {
     }
     return required_env;
   }
-  async setup_command_line(builder: Builder, j: JobBase, debug: boolean) {
+  async setup_command_line(builder: Builder, j: JobBase) {
     const [shellcmd, _] = getRequirement(this.tool, cwl.ShellCommandRequirement);
     if (shellcmd !== undefined) {
       let cmd: string[] = []; // type: List[str]
@@ -893,35 +645,15 @@ export class CommandLineTool extends Process {
     }
   }
 
-  handle_mpi_require(runtimeContext: RuntimeContext, builder: Builder, j: JobBase, debug: boolean) {
-    // TODO mpi not implemented
-    // let mpi;
-    // [mpi, _] = this.get_requirement(MPIRequirementName);
-    // if (mpi === null) {
-    //     return;
-    // }
-    // let np = mpi.get("processes", runtimeContext.mpi_config.default_nproc);
-    // if (typeof np === 'string') {
-    //     let np_eval = builder.do_eval(np);
-    //     if (typeof np_eval !== 'number') {
-    //         throw new SourceLine(mpi, "processes", WorkflowException, debug).makeError(
-    //         `${MPIRequirementName} needs 'processes' expression to ` +
-    //         `evaluate to an int, got ${np_eval} for expression ${np}.`
-    //         );
-    //     }
-    //     np = np_eval;
-    // }
-    // j.mpi_procs = np;
-  }
-  async setup_std_io(builder: any, j: any, reffiles: any[], debug: boolean): Promise<void> {
+  async setup_std_io(builder: Builder, j: JobBase, reffiles: (File | Directory)[]): Promise<void> {
     if (this.tool.stdin) {
       const stdin_eval = await builder.do_eval(this.tool['stdin']);
       if (!(typeof stdin_eval === 'string' || stdin_eval === null)) {
         throw new Error(
-          `'stdin' expression must return a string or null. Got ${stdin_eval} for ${this.tool['stdin']}.`,
+          `'stdin' expression must return a string or null. Got ${str(stdin_eval)} for ${this.tool['stdin']}.`,
         );
       }
-      j.stdin = stdin_eval;
+      j.stdin = stdin_eval as string;
       if (j.stdin) {
         reffiles.push({ class: 'File', path: j.stdin });
       }
@@ -930,7 +662,9 @@ export class CommandLineTool extends Process {
     if (this.tool.stderr) {
       const stderr_eval = await builder.do_eval(this.tool.stderr);
       if (typeof stderr_eval !== 'string') {
-        throw new Error(`'stderr' expression must return a string. Got ${stderr_eval} for ${this.tool['stderr']}.`);
+        throw new Error(
+          `'stderr' expression must return a string. Got ${str(stderr_eval)} for ${this.tool['stderr']}.`,
+        );
       }
       j.stderr = stderr_eval;
       if (j.stderr) {
@@ -943,7 +677,9 @@ export class CommandLineTool extends Process {
     if (this.tool.stdout) {
       const stdout_eval = await builder.do_eval(this.tool.stdout);
       if (typeof stdout_eval !== 'string') {
-        throw new Error(`'stdout' expression must return a string. Got ${stdout_eval} for ${this.tool['stdout']}.`);
+        throw new Error(
+          `'stdout' expression must return a string. Got ${str(stdout_eval)} for ${this.tool['stdout']}.`,
+        );
       }
       j.stdout = stdout_eval;
       if (j.stdout) {
@@ -994,19 +730,20 @@ export class CommandLineTool extends Process {
   }
   async *job(
     job_order: CWLObjectType,
-    output_callbacks: any | OutputCallbackType | null,
+    output_callbacks: OutputCallbackType | null,
     runtimeContext: RuntimeContext,
   ): AsyncGenerator<JobBase> {
-    const [workReuse] = getRequirement(this.tool, cwl.WorkReuse);
-    const enableReuse = workReuse ? workReuse.enableReuse : true;
+    // const [workReuse] = getRequirement(this.tool, cwl.WorkReuse);
+    // const enableReuse = workReuse ? workReuse.enableReuse : true;
 
     const jobname = uniquename(runtimeContext.name || shortname(this.tool.id || 'job'));
-    if (runtimeContext.cachedir && enableReuse) {
-      output_callbacks = this.cache_context(runtimeContext);
-      if (output_callbacks) {
-        return;
-      }
-    }
+    // cache not supported currently
+    // if (runtimeContext.cachedir && enableReuse) {
+    //   output_callbacks = this.cache_context(runtimeContext);
+    //   if (output_callbacks) {
+    //     return;
+    //   }
+    // }
     const builder = await this._init_job(job_order, runtimeContext);
 
     const reffiles = cloneDeep(builder.files);
@@ -1040,7 +777,7 @@ export class CommandLineTool extends Process {
     if (debug) {
       _logger.debug(
         `[job ${j.name}] path mappings is ${JSON.stringify(
-          builder.pathmapper.files().reduce((obj: any, p: string) => {
+          builder.pathmapper.files().reduce((obj, p) => {
             obj[p] = builder.pathmapper.mapper(p);
             return obj;
           }, {}),
@@ -1050,7 +787,7 @@ export class CommandLineTool extends Process {
       );
     }
 
-    await this.setup_std_io(builder, j, reffiles, debug);
+    await this.setup_std_io(builder, j, reffiles);
 
     if (debug) {
       _logger.debug(`[job ${j.name}] command line bindings is ${JSON.stringify(builder.bindings, null, 4)}`);
@@ -1075,361 +812,29 @@ export class CommandLineTool extends Process {
 
     const readers = {}; // this.handle_mutation_manager(builder, j);
 
-    await this.handle_tool_time_limit(builder, j, debug);
+    await this.handle_tool_time_limit(builder, j);
 
-    await this.handle_network_access(builder, j, debug);
+    await this.handle_network_access(builder, j);
 
-    const required_env = await this.handle_env_var(builder, debug);
+    const required_env = await this.handle_env_var(builder);
     j.prepare_environment(runtimeContext, required_env);
 
-    await this.setup_command_line(builder, j, debug);
+    await this.setup_command_line(builder, j);
 
     j.pathmapper = builder.pathmapper;
     j.collect_outputs = async (outdir, rcode) =>
-      this.collect_output_ports(
+      collect_output_ports(
         this.tool.outputs,
+        this.outputs_record_schema.type.fields,
         builder,
         outdir,
         rcode,
         getDefault(runtimeContext.compute_checksum, true),
         jobname,
-        readers,
       );
     j.output_callback = output_callbacks;
 
-    this.handle_mpi_require(runtimeContext, builder, j, debug);
+    // this.handle_mpi_require(runtimeContext, builder, j, debug);
     yield j;
-  }
-  async collect_output_ports(
-    ports: CommandOutputParameter[] | Set<CWLObjectType>,
-    builder: Builder,
-    outdir: string,
-    rcode: number,
-    compute_checksum = true,
-    jobname = '',
-    readers: MutableMapping<CWLObjectType> | null = null,
-  ): Promise<OutputPortsType> {
-    let ret: OutputPortsType = {};
-    const debug = _logger.isDebugEnabled();
-    builder.resources['exitCode'] = rcode;
-
-    try {
-      const fs_access = new builder.make_fs_access(outdir);
-      const custom_output = fs_access.join(outdir, 'cwl.output.json');
-      if (fs_access.exists(custom_output)) {
-        const f = await fs_access.read(custom_output);
-        ret = JSON.parse(f);
-        if (debug) {
-          _logger.debug(`Raw output from ${custom_output}: ${JSON.stringify(ret, null, 4)}`);
-        }
-        convertDictToFileDirectory(ret);
-      } else if (Array.isArray(ports)) {
-        for (let i = 0; i < ports.length; i++) {
-          const port = ports[i];
-          const fragment = shortname(port.id);
-          ret[fragment] = await this.collect_output(port, builder, outdir, fs_access, compute_checksum);
-        }
-      }
-      if (ret) {
-        const revmap = (val) => revmap_file(builder, outdir, val);
-        // adjustDirObjs(ret, trim_listing);
-        visitFileDirectory(ret, revmap);
-        visitFileDirectory(ret, remove_path);
-        normalizeFilesDirs(ret);
-        visitFileDirectory(ret, (val) => checkValidLocations(fs_access, val));
-
-        if (compute_checksum) {
-          adjustFileObjs(ret, async (val) => compute_checksums(fs_access, val));
-        }
-        // const expected_schema = ((this.names.get_name("outputs_record_schema", null)) as Schema);
-        validate(this.outputs_record_schema.type, ret, true);
-        if (ret && builder.mutation_manager) {
-          adjustFileObjs(ret, builder.mutation_manager.set_generation);
-        }
-        return ret || {};
-      }
-    } catch (e) {
-      if (e instanceof ValidationException) {
-        throw new WorkflowException(`Error validating output record. ${e}\n in ${JSON.stringify(ret, null, 4)}`);
-      }
-      throw e;
-    } finally {
-      if (builder.mutation_manager && readers) {
-        for (const r of Object.values(readers)) {
-          builder.mutation_manager.release_reader(jobname, r);
-        }
-      }
-    }
-    return ret;
-  }
-  async glob_output(
-    builder: Builder,
-    binding: CommandOutputBinding,
-    debug: boolean,
-    outdir: string,
-    fs_access: StdFsAccess,
-    compute_checksum: boolean,
-    revmap,
-  ): Promise<[CWLOutputType[], string[]]> {
-    const r: CWLOutputType[] = [];
-    const globpatterns: string[] = [];
-
-    if (!binding.glob) {
-      return [r, globpatterns];
-    }
-
-    try {
-      for (const g of aslist(binding.glob)) {
-        const gb = await builder.do_eval(g);
-        if (gb) {
-          const gb_eval_fail = false;
-          if (isStringOrStringArray(gb)) {
-            globpatterns.push(...aslist(gb));
-          } else {
-            throw new WorkflowException(
-              'Resolved glob patterns must be strings or list of strings, not ' + `${gb} from ${binding.glob}`,
-            );
-          }
-        }
-      }
-
-      for (let gb of globpatterns) {
-        if (gb.startsWith(builder.outdir)) {
-          gb = gb.substring(builder.outdir.length + 1);
-        } else if (gb === '.') {
-          gb = outdir;
-        } else if (gb.startsWith('/')) {
-          throw new WorkflowException("glob patterns must not start with '/'");
-        }
-
-        try {
-          const prefix = fs_access.glob(outdir);
-          const sorted_glob_result = fs_access.glob(fs_access.join(outdir, gb)).sort();
-
-          r.push(
-            ...sorted_glob_result.map((g) => {
-              const decoded_basename = path.basename(g);
-              return fs_access.isfile(g)
-                ? {
-                    class: 'File',
-                    location: g,
-                    path: fs_access.join(builder.outdir, decodeURIComponent(g.substring(prefix[0].length + 1))),
-                    basename: decoded_basename,
-                    nameroot: splitext(decoded_basename)[0],
-                    nameext: splitext(decoded_basename)[1],
-                  }
-                : {
-                    class: 'Directory',
-                    location: g,
-                    path: fs_access.join(builder.outdir, decodeURIComponent(g.substring(prefix[0].length + 1))),
-                    basename: decoded_basename,
-                  };
-            }),
-          );
-        } catch (e) {
-          console.error('Unexpected error from fs_access');
-          throw e;
-        }
-      }
-
-      for (const files of r) {
-        const rfile = { ...(files as any) };
-        revmap(rfile);
-        if (files['class'] === 'Directory') {
-          const ll = binding['loadListing'] || builder.loadListing;
-          if (ll && ll !== 'no_listing') {
-            get_listing(fs_access, files, ll === 'deep_listing');
-          }
-        } else {
-          if (binding['loadContents']) {
-            const f: any = undefined;
-            try {
-              files['contents'] = await contentLimitRespectedReadBytes(rfile['location']);
-            } finally {
-              if (f) {
-                f.close();
-              }
-            }
-          }
-
-          if (compute_checksum) {
-            await compute_checksums(fs_access, rfile);
-            files['checksum'] = rfile['checksum'];
-          }
-
-          files['size'] = fs_access.size(rfile['location'] as string);
-        }
-      }
-
-      return [r, globpatterns];
-    } catch (e) {
-      throw e;
-    }
-  }
-  async collect_secondary_files(
-    schema: CommandOutputParameter,
-    builder: Builder,
-    result: CWLOutputType | null,
-    debug: boolean,
-    fs_access: StdFsAccess,
-    revmap: any,
-  ): Promise<void> {
-    for (const primary of aslist(result)) {
-      if (primary instanceof Object) {
-        if (!primary['secondaryFiles']) {
-          primary['secondaryFiles'] = [];
-        }
-        const pathprefix = primary['path'].substring(0, primary['path'].lastIndexOf(path.sep) + 1);
-        for (const sf of aslist(schema.secondaryFiles)) {
-          let sf_required: boolean;
-          if (sf.required) {
-            const sf_required_eval = await builder.do_eval(sf.required, primary);
-            if (!(typeof sf_required_eval === 'boolean' || sf_required_eval === null)) {
-              throw new WorkflowException(
-                `Expressions in the field 'required' must evaluate to a Boolean (true or false) or None. Got ${sf_required_eval} for ${sf['required']}.`,
-              );
-            }
-            sf_required = (sf_required_eval as boolean) || false;
-          } else {
-            sf_required = false;
-          }
-
-          let sfpath;
-          if (sf['pattern'].includes('$(') || sf['pattern'].includes('${')) {
-            sfpath = await builder.do_eval(sf['pattern'], primary);
-          } else {
-            sfpath = substitute(primary['basename'], sf['pattern']);
-          }
-
-          for (let sfitem of aslist(sfpath)) {
-            if (!sfitem) {
-              continue;
-            }
-            if (typeof sfitem === 'string') {
-              sfitem = { path: pathprefix + sfitem };
-            }
-            const original_sfitem = JSON.parse(JSON.stringify(sfitem));
-            if (!fs_access.exists(revmap(sfitem)['location']) && sf_required) {
-              throw new WorkflowException(`Missing required secondary file '${original_sfitem['path']}'`);
-            }
-            if ('path' in sfitem && !('location' in sfitem)) {
-              revmap(sfitem);
-            }
-            if (fs_access.isfile(sfitem['location'])) {
-              sfitem['class'] = 'File';
-              primary['secondaryFiles'].push(sfitem);
-            } else if (fs_access.isdir(sfitem['location'])) {
-              sfitem['class'] = 'Directory';
-              primary['secondaryFiles'].push(sfitem);
-            }
-          }
-        }
-      }
-    }
-  }
-  async handle_output_format(schema: CommandOutputParameter, builder: Builder, result: CWLOutputType): Promise<void> {
-    if (schema.format) {
-      const format_field: string = schema.format;
-      if (format_field.includes('$(') || format_field.includes('${')) {
-        const results = aslist(result);
-        for (let index = 0; index < results.length; index++) {
-          const primary = results[index];
-          const format_eval: any = await builder.do_eval(format_field, primary);
-          if (typeof format_eval !== 'string') {
-            let message = `'format' expression must evaluate to a string. Got ${format_eval} from ${format_field}.`;
-            if (Array.isArray(result)) {
-              message += ` 'self' had the value of the index ${index} result: ${primary}.`;
-            }
-            throw new WorkflowException(message);
-          }
-          primary['format'] = format_eval;
-        }
-      } else {
-        aslist(result).forEach((primary) => {
-          primary['format'] = format_field;
-        });
-      }
-    }
-  }
-  async collect_output(
-    schema: CommandOutputParameter,
-    builder: Builder,
-    outdir: string,
-    fs_access: StdFsAccess,
-    compute_checksum = true,
-  ): Promise<CWLOutputType | undefined> {
-    const empty_and_optional = false;
-    const debug = _logger.isDebugEnabled();
-    let result: CWLOutputType | undefined = undefined;
-    if (schema.outputBinding) {
-      const binding = schema.outputBinding;
-      const revmap = revmap_file.bind(null, builder, outdir);
-      const [r, globpatterns] = await this.glob_output(
-        builder,
-        binding,
-        debug,
-        outdir,
-        fs_access,
-        compute_checksum,
-        revmap,
-      );
-      let optional = false;
-      let single = false;
-      if (Array.isArray(schema.type)) {
-        if (schema.type.includes('null')) {
-          optional = true;
-        }
-        if (schema.type.includes('File') || schema.type.includes('Directory')) {
-          single = true;
-        }
-      } else if (schema.type === 'File' || schema.type === 'Directory') {
-        single = true;
-      }
-      if (binding.outputEval) {
-        result = await builder.do_eval(binding.outputEval, r);
-      } else {
-        result = r as CWLOutputType;
-      }
-      if (single) {
-        try {
-          if (!result && !optional) {
-            throw new WorkflowException(`Did not find output file with glob pattern: ${globpatterns}.`);
-          } else if (!result && optional) {
-            // Do nothing
-          } else if (Array.isArray(result)) {
-            if (result.length > 1) {
-              throw new WorkflowException('Multiple matches for output item that is a single file.');
-            } else {
-              result = result[0] as CWLOutputType;
-            }
-          }
-        } catch (error) {
-          // Log the error here
-        }
-      }
-      if (schema.secondaryFiles) {
-        await this.collect_secondary_files(schema, builder, result, debug, fs_access, revmap);
-      }
-      await this.handle_output_format(schema, builder, result);
-      adjustFileObjs(result, revmap);
-      if (optional && (!result || (result instanceof Array && result.length === 0))) {
-        return result === 0 || result === '' ? result : null;
-      }
-    }
-    if (!result && !empty_and_optional && typeof schema.type === 'object' && schema.type['type'] === 'record') {
-      const out = {};
-      for (const field of schema['type']['fields'] as CWLObjectType[]) {
-        out[shortname(field['name'] as string)] = await this.collect_output(
-          // todo
-          field as unknown as CommandOutputParameter,
-          builder,
-          outdir,
-          fs_access,
-          compute_checksum,
-        );
-      }
-      return out;
-    }
-    return result;
   }
 }
