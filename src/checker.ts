@@ -1,14 +1,22 @@
 import { ValidationException } from 'cwl-ts-auto';
 import * as cwlTsAuto from 'cwl-ts-auto';
-import { _logger } from './loghandler.js';
-import { shortname } from './process.js';
-import type {
+import {
+  CommandInputArraySchema,
   CommandOutputParameter,
-  IWorkflowStep,
-  ToolType,
+  IOType,
   WorkflowStepInput,
   WorkflowStepOutput,
-} from './types.js';
+  IWorkflowStep,
+  WorkflowInputParameter,
+  WorkflowOutputParameter,
+  CommandOutputArraySchema,
+  isIOArraySchema,
+  isIORecordSchema,
+  IORecordSchema,
+  ArrayType,
+} from './cwltypes.js';
+import { _logger } from './loghandler.js';
+import { shortname } from './process.js';
 import { aslist, str, type MutableMapping, isString } from './utils.js';
 
 // const _get_type = (tp: WorkflowStepInput | cwlTsAuto.WorkflowOutputParameter): any => {
@@ -19,35 +27,7 @@ import { aslist, str, type MutableMapping, isString } from './utils.js';
 //   }
 //   return tp;
 // };
-export function isArraySchema(
-  type: ToolType,
-): type is
-  | cwlTsAuto.CommandInputArraySchema
-  | cwlTsAuto.InputArraySchema
-  | cwlTsAuto.OutputArraySchema
-  | cwlTsAuto.CommandOutputArraySchema {
-  return (
-    type instanceof cwlTsAuto.CommandInputArraySchema ||
-    type instanceof cwlTsAuto.InputArraySchema ||
-    type instanceof cwlTsAuto.CommandOutputArraySchema ||
-    type instanceof cwlTsAuto.OutputArraySchema
-  );
-}
-export function isRecordSchema(
-  type: ToolType,
-): type is
-  | cwlTsAuto.CommandInputRecordSchema
-  | cwlTsAuto.InputRecordSchema
-  | cwlTsAuto.CommandOutputRecordSchema
-  | cwlTsAuto.OutputRecordSchema {
-  return (
-    type instanceof cwlTsAuto.CommandInputRecordSchema ||
-    type instanceof cwlTsAuto.InputRecordSchema ||
-    type instanceof cwlTsAuto.CommandOutputRecordSchema ||
-    type instanceof cwlTsAuto.OutputRecordSchema
-  );
-}
-export function canAssignSrcToSinkType(src: ToolType, sink?: ToolType, strict = false): boolean {
+export function canAssignSrcToSinkType(src: IOType, sink?: IOType, strict = false): boolean {
   // Check for identical type specifications, ignoring extra keys like inputBinding.
   //
   // In non-strict comparison, at least one source type must match one sink type,
@@ -85,19 +65,19 @@ export function canAssignSrcToSinkType(src: ToolType, sink?: ToolType, strict = 
   } else if (isString(src) || isString(sink)) {
     return src === sink;
   } else {
-    if (isArraySchema(src) && isArraySchema(sink)) {
+    if (isIOArraySchema(src) && isIOArraySchema(sink)) {
       return canAssignSrcToSinkType(src.items, sink.items, strict);
     }
 
-    if (isRecordSchema(src) && isRecordSchema(sink)) {
+    if (isIORecordSchema(src) && isIORecordSchema(sink)) {
       return _compareRecords(src, sink, strict);
     }
   }
   return false;
 }
 export function canAssignSrcToSink(
-  src: cwlTsAuto.WorkflowInputParameter | CommandOutputParameter,
-  sink?: WorkflowStepInput | cwlTsAuto.WorkflowOutputParameter,
+  src: WorkflowInputParameter | CommandOutputParameter,
+  sink?: WorkflowStepInput | WorkflowOutputParameter,
   strict = false,
 ): boolean {
   // Check for identical type specifications, ignoring extra keys like inputBinding.
@@ -124,21 +104,25 @@ export function canAssignSrcToSink(
 
   return canAssignSrcToSinkType(src.type, sink.type, strict);
 }
-const merge_flatten_type = (src: ToolType): ToolType => {
+const merge_flatten_type = (src: IOType): IOType => {
   /* "Return the merge flattened type of the source type."*/
-  if (isArraySchema(src)) {
+  if (isIOArraySchema(src)) {
     return src;
   }
 
   if (src instanceof Array) {
-    return src.map((t) => merge_flatten_type(t)) as ToolType;
+    return src.map((t) => merge_flatten_type(t)) as IOType;
   }
-  return new cwlTsAuto.CommandInputArraySchema({ items: src, type: 'array' as any });
+  const schema: CommandInputArraySchema = {
+    items: src,
+    type: ArrayType,
+  };
+  return schema;
 };
 
 const check_types = (
-  srctype: cwlTsAuto.WorkflowInputParameter | CommandOutputParameter,
-  sinktype: WorkflowStepInput | cwlTsAuto.WorkflowOutputParameter,
+  srctype: WorkflowInputParameter | CommandOutputParameter,
+  sinktype: WorkflowStepInput | WorkflowOutputParameter,
   linkMerge?: cwlTsAuto.LinkMergeMethod,
   valueFrom?: string,
 ) => {
@@ -161,7 +145,7 @@ const check_types = (
   }
   const srcType =
     linkMerge === cwlTsAuto.LinkMergeMethod.MERGE_NESTED
-      ? new cwlTsAuto.InputArraySchema({ items: srctype.type, type: 'array' as any })
+      ? { items: srctype.type, type: ArrayType }
       : merge_flatten_type(srctype.type);
   if (canAssignSrcToSinkType(srcType, sinktype.type, true)) {
     return 'pass';
@@ -172,8 +156,8 @@ const check_types = (
   }
 };
 
-function _compareRecords(src: cwlTsAuto.InputRecordSchema, sink: cwlTsAuto.InputRecordSchema, strict = false): boolean {
-  function _rec_fields(rec: cwlTsAuto.InputRecordSchema): MutableMapping<ToolType> {
+function _compareRecords(src: IORecordSchema, sink: IORecordSchema, strict = false): boolean {
+  function _rec_fields(rec: IORecordSchema): MutableMapping<IOType> {
     const out = {};
     for (const field of rec.fields) {
       const name = shortname(field.name);
@@ -200,7 +184,7 @@ function _compareRecords(src: cwlTsAuto.InputRecordSchema, sink: cwlTsAuto.Input
   return true;
 }
 
-function missing_subset(fullset: any[], subset: any[]): any[] {
+function missing_subset(fullset: unknown[], subset: unknown[]): unknown[] {
   const missing = [];
   for (const i of subset) {
     if (!fullset.includes(i)) {
@@ -217,13 +201,13 @@ function bullets(textlist: string[], bul: string): string {
 }
 
 export function static_checker(
-  workflow_inputs: cwlTsAuto.WorkflowInputParameter[],
-  workflow_outputs: cwlTsAuto.WorkflowOutputParameter[],
+  workflow_inputs: WorkflowInputParameter[],
+  workflow_outputs: WorkflowOutputParameter[],
   step_inputs: WorkflowStepInput[],
   step_outputs: WorkflowStepOutput[],
   param_to_step: { [id: string]: IWorkflowStep },
 ): void {
-  const src_dict: { [id: string]: cwlTsAuto.WorkflowInputParameter | WorkflowStepOutput } = {};
+  const src_dict: { [id: string]: WorkflowInputParameter | WorkflowStepOutput } = {};
   for (const param of workflow_inputs) {
     src_dict[param['id'].toString()] = param;
   }
@@ -261,7 +245,7 @@ export function static_checker(
     const missing = missing_subset(srcsf, sinksf);
     let msg = '';
     if (missing) {
-      const msg1 = `Parameter '${shortname(sink['id'])}' requires secondaryFiles ${missing} but`;
+      const msg1 = `Parameter '${shortname(sink['id'])}' requires secondaryFiles ${str(missing)} but`;
       const msg3 = `source '${shortname(src['id'])}' does not provide those secondaryFiles.`;
       const msg4 = `To resolve, add missing secondaryFiles patterns to definition of '${shortname(src['id'])}' or`;
       const msg5 = `mark missing secondaryFiles in definition of '${shortname(sink['id'])}' as optional.`;
@@ -269,11 +253,7 @@ export function static_checker(
     } else if (sink['not_connected']) {
       if (!sink['used_by_step']) {
         const msg1 = str(param_to_step[sink['id']].run);
-        const msg2 = str(
-          param_to_step[sink['id']]['inputs']
-            .filter((s: any) => !s.get('not_connected'))
-            .map((s: any) => shortname(s['id'])),
-        );
+        const msg2 = str(param_to_step[sink['id']].inputs.filter((s) => !s.not_connected).map((s) => shortname(s.id)));
         msg = `'${shortname(sink['id'])}' is not an input parameter of ${msg1}, expected ${msg2}`;
       } else {
         msg = '';
@@ -327,13 +307,13 @@ export function static_checker(
   }
 }
 type SrcSink = {
-  src: cwlTsAuto.WorkflowInputParameter | CommandOutputParameter;
-  sink: WorkflowStepInput | cwlTsAuto.WorkflowOutputParameter;
+  src: WorkflowInputParameter | CommandOutputParameter;
+  sink: WorkflowStepInput | WorkflowOutputParameter;
   linkMerge?: string;
   message?: string;
 };
 export function check_all_step_input_types(
-  src_dict: { [id: string]: cwlTsAuto.WorkflowInputParameter | WorkflowStepOutput },
+  src_dict: { [id: string]: WorkflowInputParameter | WorkflowStepOutput },
   sinks: WorkflowStepInput[],
   param_to_step: { [key: string]: IWorkflowStep },
 ): { [key: string]: SrcSink[] } {
@@ -348,7 +328,7 @@ export function check_all_step_input_types(
         extra_message = `pickValue is: ${pickValue}`;
       }
       let linkMerge: cwlTsAuto.LinkMergeMethod | null = null;
-      const srcs_of_sink: (cwlTsAuto.WorkflowInputParameter | CommandOutputParameter)[] = [];
+      const srcs_of_sink: (WorkflowInputParameter | CommandOutputParameter)[] = [];
       if (Array.isArray(sink.source)) {
         linkMerge = sink.linkMerge || (sink.source.length > 1 ? cwlTsAuto.LinkMergeMethod.MERGE_NESTED : null);
 
@@ -366,13 +346,14 @@ export function check_all_step_input_types(
               message: 'Source is from conditional step, but pickValue is not used',
             });
           }
-
-          if (is_all_output_method_loop_step(param_to_step, parm_id)) {
-            src_dict[parm_id].type = new cwlTsAuto.InputArraySchema({
-              type: 'array' as any,
-              items: src_dict[parm_id]['type'],
-            });
-          }
+          // Loop is not supported
+          // if (is_all_output_method_loop_step(param_to_step, parm_id)) {
+          //   const src = src_dict[parm_id];
+          //   src.type = {
+          //     type: ArrayType,
+          //     items: src_dict[parm_id]['type'],
+          //   };
+          // }
         }
       } else {
         const parm_id = sink.source;
@@ -412,13 +393,13 @@ export function check_all_step_input_types(
 
           srcs_of_sink[0]['type'] = src_typ;
         }
-
-        if (is_all_output_method_loop_step(param_to_step, parm_id)) {
-          src_dict[parm_id].type = new cwlTsAuto.InputArraySchema({
-            type: 'array' as any,
-            items: src_dict[parm_id]['type'],
-          });
-        }
+        // Loop is not supported
+        // if (is_all_output_method_loop_step(param_to_step, parm_id)) {
+        //   src_dict[parm_id].type = {
+        //     type: ArrayType,
+        //     items: src_dict[parm_id]['type'],
+        //   };
+        // }
       }
 
       for (const src of srcs_of_sink) {
@@ -434,26 +415,29 @@ export function check_all_step_input_types(
   return validation;
 }
 export function check_all_workflow_output_types(
-  src_dict: { [id: string]: cwlTsAuto.WorkflowInputParameter | CommandOutputParameter },
-  sinks: cwlTsAuto.WorkflowOutputParameter[],
+  src_dict: { [id: string]: WorkflowInputParameter | CommandOutputParameter },
+  sinks: WorkflowOutputParameter[],
   param_to_step: { [key: string]: IWorkflowStep },
 ): { [key: string]: SrcSink[] } {
   const validation: { [key: string]: SrcSink[] } = { warning: [], exception: [] };
   for (const sink of sinks) {
     if (sink.outputSource) {
-      const pickValue = sink.pickValue as string | undefined;
+      const pickValue = sink.pickValue;
 
       let extra_message: string | null = null;
       if (pickValue !== undefined) {
         extra_message = `pickValue is: ${pickValue}`;
       }
 
-      const srcs_of_sink: (cwlTsAuto.WorkflowInputParameter | CommandOutputParameter)[] = [];
+      const srcs_of_sink: (WorkflowInputParameter | CommandOutputParameter)[] = [];
       let linkMerge: cwlTsAuto.LinkMergeMethod | null = null;
       if (Array.isArray(sink.outputSource)) {
         linkMerge = sink.linkMerge || (sink.outputSource.length > 1 ? cwlTsAuto.LinkMergeMethod.MERGE_NESTED : null);
 
-        if (pickValue === 'first_non_null' || pickValue === 'the_only_non_null') {
+        if (
+          pickValue === cwlTsAuto.PickValueMethod.FIRST_NON_NULL ||
+          pickValue === cwlTsAuto.PickValueMethod.THE_ONLY_NON_NULL
+        ) {
           linkMerge = null;
         }
 
@@ -470,7 +454,7 @@ export function check_all_workflow_output_types(
 
           if (is_all_output_method_loop_step(param_to_step, parm_id)) {
             const t = src_dict[parm_id];
-            t.type = new cwlTsAuto.InputArraySchema({ items: t.type, type: 'array' as any });
+            t.type = { items: t.type, type: ArrayType } as CommandOutputArraySchema;
           }
         }
       } else {
@@ -513,10 +497,12 @@ export function check_all_workflow_output_types(
         }
 
         if (is_all_output_method_loop_step(param_to_step, parm_id)) {
-          src_dict[parm_id].type = new cwlTsAuto.InputArraySchema({
-            items: src_dict[parm_id]['type'],
-            type: 'array' as any,
-          });
+          const src = src_dict[parm_id];
+
+          src.type = {
+            items: src_dict[parm_id].type,
+            type: ArrayType,
+          } as CommandOutputArraySchema;
         }
       }
 
@@ -614,7 +600,7 @@ function is_conditional_step(param_to_step: { [key: string]: IWorkflowStep }, pa
   }
   return false;
 }
-function is_all_output_method_loop_step(param_to_step: { [key: string]: any }, parm_id: string): boolean {
+function is_all_output_method_loop_step(param_to_step: { [key: string]: IWorkflowStep }, parm_id: string): boolean {
   const source_step = param_to_step[parm_id];
   if (source_step !== undefined) {
     for (const requirement of source_step['requirements'] || []) {

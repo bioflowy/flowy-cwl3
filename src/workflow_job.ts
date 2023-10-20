@@ -1,38 +1,28 @@
+/* eslint-disable no-prototype-builtins */
 import * as cwlTsAuto from 'cwl-ts-auto';
+import { cloneDeep } from 'lodash-es';
 import { contentLimitRespectedReadBytes } from './builder.js';
-import { canAssignSrcToSink, canAssignSrcToSinkType } from './checker.js';
+import { canAssignSrcToSinkType } from './checker.js';
 import { RuntimeContext, getDefault, make_default_fs_access } from './context.js';
+import { CommandOutputParameter, IOType, IWorkflowStep, WorkflowStepInput } from './cwltypes.js';
 import { WorkflowException } from './errors.js';
 import { do_eval } from './expression.js';
 import { _logger } from './loghandler.js';
 import { shortname, uniquename } from './process.js';
-import { StdFsAccess } from './stdfsaccess.js';
-import type {
-  CommandInputParameter,
-  CommandOutputParameter,
-  IWorkflowStep,
-  ToolType,
-  WorkflowStepInput,
-} from './types.js';
 import {
   type CWLObjectType,
   type CWLOutputType,
   type JobsGeneratorType,
   type OutputCallbackType,
-  type ParametersType,
-  //   type ScatterDestinationsType,
-  //   type ScatterOutputCallbackType,
-  //   type SinkType,
   WorkflowStateItem,
   adjustDirObjs,
   aslist,
   get_listing,
-  type JobsType,
   getRequirement,
   type ScatterOutputCallbackType,
   type ScatterDestinationsType,
-  type SinkType,
   isMissingOrNull,
+  str,
 } from './utils.js';
 import { Workflow, WorkflowStep } from './workflow.js';
 
@@ -44,8 +34,6 @@ class WorkflowJobStep {
   iterable?: JobsGeneratorType;
   completed: boolean;
   name: string;
-  prov_obj: any;
-  parent_wf: any;
 
   constructor(step: WorkflowStep) {
     this.step = step;
@@ -54,8 +42,6 @@ class WorkflowJobStep {
     this.submitted = false;
     this.completed = false;
     this.name = uniquename(`step ${shortname(this.id)}`);
-    // this.prov_obj = step.prov_obj;
-    this.parent_wf = step.parent_wf;
   }
 
   job(joborder: CWLObjectType, output_callback: OutputCallbackType, runtimeContext: RuntimeContext): JobsGeneratorType {
@@ -87,7 +73,9 @@ class ReceiveScatterOutput {
 
   receive_scatter_output = (index: number, jobout: CWLObjectType, processStatus: string): void => {
     for (const key in jobout) {
-      this.dest[key][index] = jobout[key];
+      if (jobout.hasOwnProperty(key)) {
+        this.dest[key][index] = jobout[key];
+      }
     }
 
     // Release the iterable related to this step to reclaim memory
@@ -125,7 +113,7 @@ async function* nested_crossproduct_scatter(
   runtimeContext: RuntimeContext,
 ): JobsGeneratorType {
   const scatter_key = scatter_keys[0];
-  const jobl = (joborder[scatter_key] as any).length;
+  const jobl = (joborder[scatter_key] as unknown[]).length;
   const output: ScatterDestinationsType = {};
   for (const i of process.tool['outputs']) {
     output[i['id']] = new Array(jobl).fill(null);
@@ -169,10 +157,10 @@ function crossproduct_size(joborder: CWLObjectType, scatter_keys: string[]): num
   let ssum;
 
   if (scatter_keys.length == 1) {
-    ssum = (joborder[scatter_key] as any[]).length;
+    ssum = (joborder[scatter_key] as unknown[]).length;
   } else {
     ssum = 0;
-    for (let _ = 0; _ < (joborder[scatter_key] as any[]).length; _++) {
+    for (let _ = 0; _ < (joborder[scatter_key] as unknown[]).length; _++) {
       ssum += crossproduct_size(joborder, scatter_keys.slice(1));
     }
   }
@@ -188,8 +176,8 @@ async function flat_crossproduct_scatter(
 ): Promise<JobsGeneratorType> {
   const output: ScatterDestinationsType = {};
 
-  for (const i of process.tool['outputs']) {
-    output[i['id']] = Array(crossproduct_size(joborder, scatter_keys)).fill(null);
+  for (const i of process.tool.outputs) {
+    output[i.id] = Array(crossproduct_size(joborder, scatter_keys)).fill(null);
   }
   const callback = new ReceiveScatterOutput(output_callback, output, 0);
   const [steps, total] = await _flat_crossproduct_scatter(process, joborder, scatter_keys, callback, 0, runtimeContext);
@@ -206,12 +194,12 @@ async function _flat_crossproduct_scatter(
   runtimeContext: RuntimeContext,
 ): Promise<[(JobsGeneratorType | undefined)[], number]> {
   const scatter_key = scatter_keys[0];
-  const jobl = (joborder[scatter_key] as any[]).length;
+  const jobl = (joborder[scatter_key] as unknown[]).length;
   let steps: (JobsGeneratorType | undefined)[] = [];
   let put = startindex;
 
   for (let index = 0; index < jobl; index++) {
-    let sjob: CWLObjectType = JSON.parse(JSON.stringify(joborder));
+    let sjob: CWLObjectType = cloneDeep(joborder);
     sjob[scatter_key] = joborder[scatter_key][index];
 
     if (scatter_keys.length == 1) {
@@ -291,6 +279,12 @@ async function* parallel_steps(
     }
   }
 }
+function getArrayLength(a: unknown): number {
+  if (Array.isArray(a)) {
+    return a.length;
+  }
+  throw new Error(`Expected An Array but ${typeof a} founded.`);
+}
 async function dotproduct_scatter(
   process: WorkflowJobStep,
   joborder: CWLObjectType,
@@ -301,8 +295,8 @@ async function dotproduct_scatter(
   let jobl: number | null = null;
   for (const key of scatter_keys) {
     if (jobl === null) {
-      jobl = (joborder[key] as any[]).length; // Assuming joborder[key] is an array
-    } else if (jobl !== (joborder[key] as any[]).length) {
+      jobl = getArrayLength(joborder[key]); // Assuming joborder[key] is an array
+    } else if (jobl !== getArrayLength(joborder[key])) {
       throw new Error('Length of input arrays must be equal when performing dotproduct scatter.');
     }
   }
@@ -322,7 +316,7 @@ async function dotproduct_scatter(
   for (let index = 0; index < jobl; index++) {
     let sjobo: CWLObjectType | null = { ...joborder }; // Shallow copy of the object
     for (const key of scatter_keys) {
-      sjobo[key] = (joborder[key] as any[])[index];
+      sjobo[key] = (joborder[key] as CWLOutputType[])[index];
     }
 
     if (runtimeContext.postScatterEval) {
@@ -341,59 +335,8 @@ async function dotproduct_scatter(
   rc.setTotal(jobl, steps);
   return parallel_steps(steps, rc, runtimeContext); // Assuming parallel_steps is a function you've defined
 }
-// function dotproduct_scatter(
-//   process: WorkflowJobStep,
-//   joborder: CWLObjectType,
-//   scatter_keys: string[],
-//   output_callback: ScatterOutputCallbackType,
-//   runtimeContext: RuntimeContext,
-// ): JobsGeneratorType {
-//   let jobl: number | null = null;
-//   for (const key of scatter_keys) {
-//     if (jobl === null) {
-//       jobl = (joborder[key] as Sized).length;
-//     } else if (jobl !== (joborder[key] as Sized).length) {
-//       throw new WorkflowException('Length of input arrays must be equal when performing ' + 'dotproduct scatter.');
-//     }
-//   }
-//   if (jobl === null) {
-//     throw new Error('Impossible codepath');
-//   }
-
-//   const output: ScatterDestinationsType = {};
-//   for (const i of process.tool['outputs']) {
-//     output[i['id']] = new Array(jobl).fill(null);
-//   }
-
-//   const rc = new ReceiveScatterOutput(output_callback, output, jobl);
-
-//   const steps: (JobsGeneratorType | null)[] = [];
-//   for (let index = 0; index < jobl; index++) {
-//     let sjobo: CWLObjectType | null = JSON.parse(JSON.stringify(joborder));
-//     for (const key of scatter_keys) {
-//       sjobo[key] = (joborder[key] as MutableMapping<number, CWLObjectType>)[index];
-//     }
-
-//     if (runtimeContext.postScatterEval !== null) {
-//       sjobo = runtimeContext.postScatterEval(sjobo);
-//     }
-
-//     const curriedcallback = rc.receive_scatter_output.bind(rc, index);
-
-//     if (sjobo !== null) {
-//       steps.push(process.job(sjobo, curriedcallback, runtimeContext));
-//     } else {
-//       curriedcallback({}, 'skipped');
-//       steps.push(null);
-//     }
-//   }
-
-//   rc.setTotal(jobl, steps);
-
-//   return parallel_steps(steps, rc, runtimeContext);
-// }
 function matchTypes(
-  sinktype: ToolType,
+  sinktype: IOType,
   src: WorkflowStateItem,
   iid: string,
   inputobj: CWLObjectType,
@@ -436,7 +379,7 @@ function matchTypes(
     }
     return true;
   } else if (valueFrom !== null || canAssignSrcToSinkType(src.parameter.type, sinktype) || sinktype === 'Any') {
-    inputobj[iid] = structuredClone(src.value);
+    inputobj[iid] = cloneDeep(src.value);
     return true;
   }
   return false;
@@ -479,8 +422,8 @@ function objectFromState(
             )
           ) {
             throw new WorkflowException(
-              `Type mismatch between source '${src}' (${aState.parameter['type']}) and ` +
-                `sink '${originalId}' (${inp['type']})`,
+              `Type mismatch between source '${src}' (${str(aState.parameter['type'])}) and ` +
+                `sink '${originalId}' (${str(inp['type'])})`,
             );
           }
         } else if (!(src in state)) {
@@ -490,9 +433,9 @@ function objectFromState(
         }
       }
     }
-    if (inp['pickValue'] && Array.isArray(inputobj[iid])) {
+    if (inp.pickValue && Array.isArray(inputobj[iid])) {
       const seq = inputobj[iid] as (CWLOutputType | null)[];
-      if (inp['pickValue'] === 'first_non_null') {
+      if (inp.pickValue === cwlTsAuto.PickValueMethod.FIRST_NON_NULL) {
         let found = false;
         for (const v of seq) {
           if (v !== null) {
@@ -504,13 +447,13 @@ function objectFromState(
         if (!found) {
           throw new WorkflowException(`All sources for '${shortname(originalId)}' are null`);
         }
-      } else if (inp['pickValue'] === 'the_only_non_null') {
+      } else if (inp.pickValue === cwlTsAuto.PickValueMethod.THE_ONLY_NON_NULL) {
         let found = false;
         for (const v of seq) {
           if (v !== null) {
             if (found) {
               throw new WorkflowException(
-                `Expected only one source for '${shortname(originalId)}' to be non-null, got ${seq}`,
+                `Expected only one source for '${shortname(originalId)}' to be non-null, got ${str(seq)}`,
               );
             }
             found = true;
@@ -520,7 +463,7 @@ function objectFromState(
         if (!found) {
           throw new WorkflowException(`All sources for '${shortname(originalId)}' are null`);
         }
-      } else if (inp['pickValue'] === 'all_non_null') {
+      } else if (inp.pickValue === cwlTsAuto.PickValueMethod.ALL_NON_NULL) {
         inputobj[iid] = seq.filter((v) => v !== null);
       }
     }
@@ -546,7 +489,7 @@ export class WorkflowJob {
   processStatus: string;
   did_callback: boolean;
   made_progress: boolean | null;
-  outdir: any;
+  outdir: string;
   name: string;
 
   constructor(workflow: Workflow, runtimeContext: RuntimeContext) {
@@ -558,7 +501,7 @@ export class WorkflowJob {
     //   this.prov_obj = workflow.provenance_object;
     //   this.parent_wf = workflow.parent_wf;
     // }
-    this.steps = workflow.steps.map((s: any) => new WorkflowJobStep(s));
+    this.steps = workflow.steps.map((s) => new WorkflowJobStep(s));
     this.state = {};
     this.processStatus = '';
     this.did_callback = false;
@@ -576,10 +519,10 @@ export class WorkflowJob {
     );
   }
 
-  do_output_callback(final_output_callback: any) {
+  do_output_callback(final_output_callback) {
     const supportsMultipleInput = Boolean(this.workflow.getRequirement(cwlTsAuto.MultipleInputFeatureRequirement)[0]);
 
-    let wo: any | null = null;
+    let wo: CWLOutputType | null = null;
     try {
       wo = objectFromState(this.state, this.tool.outputs, true, supportsMultipleInput, 'outputSource', true);
     } catch (err) {
@@ -616,7 +559,7 @@ export class WorkflowJob {
       if ('id' in i) {
         const iid = i['id'];
         if (iid in jobout) {
-          this.state[iid] = new WorkflowStateItem(i as any, jobout[iid], processStatus);
+          this.state[iid] = new WorkflowStateItem(i, jobout[iid], processStatus);
         } else {
           _logger.error(`[${step.name}] Output is missing expected field ${iid}`);
           processStatus = 'permanentFail';
@@ -716,7 +659,7 @@ export class WorkflowJob {
 
         const valueFromFunc = async (k: string, v: CWLOutputType | null): Promise<CWLOutputType | null> => {
           if (k in valueFrom) {
-            adjustDirObjs(v, (val) => get_listing(val, fs_access, true));
+            adjustDirObjs(v, (val) => get_listing(fs_access, val, true));
             const [inline] = getRequirement(this.workflow, cwlTsAuto.InlineJavascriptRequirement);
             return do_eval(valueFrom[k], shortio, inline, null, null, {}, v);
           }
@@ -781,11 +724,11 @@ export class WorkflowJob {
             )}'.  All outputs will be empty.`,
           );
         }
-        if (!method || method === 'dotproduct') {
+        if (!method || method === cwlTsAuto.ScatterMethod.DOTPRODUCT) {
           jobs = await dotproduct_scatter(step, inputObj, scatter, callback, runtimeContext);
-        } else if (method == 'nested_crossproduct') {
-          jobs = await nested_crossproduct_scatter(step, inputObj, scatter, callback, runtimeContext);
-        } else if (method == 'flat_crossproduct') {
+        } else if (method == cwlTsAuto.ScatterMethod.NESTED_CROSSPRODUCT) {
+          jobs = nested_crossproduct_scatter(step, inputObj, scatter, callback, runtimeContext);
+        } else if (method == cwlTsAuto.ScatterMethod.FLAT_CROSSPRODUCT) {
           jobs = await flat_crossproduct_scatter(step, inputObj, scatter, callback, runtimeContext);
         }
       } else {
@@ -827,7 +770,7 @@ export class WorkflowJob {
     }
     throw new Error('TODO');
   }
-  run(runtimeContext: RuntimeContext): void {
+  run(_runtimeContext: RuntimeContext): void {
     _logger.info(`[${this.name}] start`);
   }
 
@@ -845,7 +788,6 @@ export class WorkflowJob {
 
     runtimeContext = runtimeContext.copy();
     runtimeContext.outdir = undefined;
-    const debug = runtimeContext.debug;
 
     this.tool.inputs.forEach((inp: cwlTsAuto.WorkflowInputParameter) => {
       const inp_id = shortname(inp.id);
@@ -872,7 +814,7 @@ export class WorkflowJob {
         if (!step.submitted) {
           try {
             step.iterable = await this.tryMakeJob(step, output_callback, runtimeContext);
-          } catch (exc: any) {
+          } catch (exc: unknown) {
             if (exc instanceof Error) {
               _logger.error(`[${step.name}] Cannot make job: ${exc.message} ${exc.stack}`);
             }

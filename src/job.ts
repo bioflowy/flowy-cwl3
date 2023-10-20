@@ -3,37 +3,59 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { DockerRequirement, ShellCommandRequirement } from 'cwl-ts-auto';
-import fsExtra from 'fs-extra';
-import { remove } from 'lodash';
 import { v4 as uuidv4 } from 'uuid';
+import { executeJob } from './JobExecutor.js';
 import { Builder } from './builder.js';
 import { RuntimeContext } from './context.js';
+import { Directory, File, Tool } from './cwltypes.js';
 import { UnsupportedRequirement, ValueError, WorkflowException } from './errors.js';
 import { removeIgnorePermissionError } from './fileutils.js';
 import { _logger } from './loghandler.js';
-import { MapperEnt, PathMapper } from './pathmapper.js';
+import { MakePathMapper, MapperEnt, PathMapper } from './pathmapper.js';
 import { stage_files } from './process.js';
 import { SecretStore } from './secrets.js';
-import type { Tool, ToolRequirement } from './types.js';
+import { LazyStaging } from './staging.js';
 import {
   type CWLObjectType,
-  type DirectoryType,
   type OutputCallbackType,
   createTmpDir,
   ensureWritable,
   ensure_non_writable,
   getRequirement,
+  str,
+  quote,
 } from './utils.js';
-// ... and so on for other modules
-const needsShellQuotingRe = /(^$|[\s|&;()<>\'"$@])/;
 
+function relink_initialworkdir_lazy(
+  staging: LazyStaging,
+  pathmapper: PathMapper,
+  host_outdir: string,
+  container_outdir: string,
+  inplace_update = false,
+) {
+  for (const [_key, vol] of pathmapper.items_exclude_children()) {
+    if (!vol.staged) {
+      continue;
+    }
+    if (
+      ['File', 'Directory'].includes(vol.type) ||
+      (inplace_update && ['WritableFile', 'WritableDirectory'].includes(vol.type))
+    ) {
+      if (!vol.target.startsWith(container_outdir)) {
+        continue;
+      }
+      const host_outdir_tgt = path.join(host_outdir, vol.target.substr(container_outdir.length + 1));
+      staging.relink(vol.resolved, host_outdir_tgt);
+    }
+  }
+}
 async function relink_initialworkdir(
   pathmapper: PathMapper,
   host_outdir: string,
   container_outdir: string,
   inplace_update = false,
 ): Promise<void> {
-  for (const [key, vol] of pathmapper.items_exclude_children()) {
+  for (const [_key, vol] of pathmapper.items_exclude_children()) {
     if (!vol.staged) {
       continue;
     }
@@ -67,10 +89,8 @@ async function relink_initialworkdir(
   }
 }
 
-const neverquote = (string: string, pos = 0, endpos = 0): any => {
-  return null;
-};
 export async function _job_popen(
+  staging: LazyStaging,
   commands: string[],
   stdin_path: string | undefined,
   stdout_path: string | undefined,
@@ -78,53 +98,30 @@ export async function _job_popen(
   env: { [key: string]: string },
   cwd: string,
   make_job_dir: () => string,
-  job_script_contents: string | null = null,
   timelimit: number | undefined = undefined,
   name: string | undefined = undefined,
   monitor_function: ((sproc: any) => void) | null = null,
   default_stdout: any = undefined,
   default_stderr: any = undefined,
 ): Promise<number> {
-  let stdin: any = 'pipe';
-  let stdout: any = default_stdout ? default_stdout : process.stderr;
-  let stderr: any = default_stderr ? default_stderr : process.stderr;
-
-  if (stdin_path !== undefined) {
-    stdin = fs.openSync(stdin_path, 'r');
-  }
-  if (stdout_path !== undefined) {
-    stdout = fs.openSync(stdout_path, 'w');
-  }
-  if (stderr_path !== undefined) {
-    stderr = fs.openSync(stderr_path, 'w');
-  }
-  const [cmd, ...args] = commands;
-  return new Promise((resolve, reject) => {
-    const child = cp.spawn(cmd, args, {
-      cwd,
-      env,
-      stdio: [stdin, stdout, stderr],
-      timeout: timelimit !== undefined ? timelimit * 1000 : undefined,
-    });
-    if (monitor_function) {
-      monitor_function(child);
-    }
-    child.on('close', (code) => {
-      resolve(code ?? -1);
-    });
-
-    child.on('error', (error) => {
-      reject(error);
-    });
+  return executeJob({
+    staging: staging.commands,
+    commands,
+    stdin_path,
+    stdout_path,
+    stderr_path,
+    env,
+    cwd,
+    timelimit,
   });
 }
-
 type CollectOutputsType = (str: string, int: number) => Promise<CWLObjectType>; // Assuming functools.partial as any
 export abstract class JobBase {
   builder: Builder;
+  staging: LazyStaging = new LazyStaging();
   base_path_logs: string;
   joborder: CWLObjectType;
-  make_path_mapper: (param1: CWLObjectType[], param2: string, param3: RuntimeContext, param4: boolean) => PathMapper;
+  make_path_mapper: MakePathMapper;
   tool: Tool;
   name: string;
   stdin?: string;
@@ -141,7 +138,7 @@ export abstract class JobBase {
   outdir: string;
   tmpdir: string;
   environment: { [key: string]: string };
-  generatefiles: DirectoryType = { class: 'Directory', listing: [], basename: '' };
+  generatefiles: Directory = { listing: [], basename: '', class: 'Directory' };
   stagedir?: string;
   inplace_update: boolean;
   prov_obj?: any; // ProvenanceProfile;
@@ -153,7 +150,12 @@ export abstract class JobBase {
   constructor(
     builder: Builder,
     joborder: CWLObjectType,
-    make_path_mapper: (param1: CWLObjectType[], param2: string, param3: RuntimeContext, param4: boolean) => PathMapper,
+    make_path_mapper: (
+      param1: (File | Directory)[],
+      param2: string,
+      param3: RuntimeContext,
+      param4: boolean,
+    ) => PathMapper,
     tool: Tool,
     name: string,
   ) {
@@ -222,10 +224,10 @@ export abstract class JobBase {
       }
     }
 
-    if ('listing' in this.generatefiles) {
+    if (this.generatefiles.listing) {
       runtimeContext.outdir = this.outdir;
       this.generatemapper = this.make_path_mapper(
-        this.generatefiles['listing'],
+        this.generatefiles.listing,
         this.builder.outdir,
         runtimeContext,
         false,
@@ -248,11 +250,7 @@ export abstract class JobBase {
   ) {
     const scr = getRequirement(this.tool, ShellCommandRequirement)[0];
 
-    const shouldquote = neverquote;
-    // needsShellQuotingRe.search;
-    // if (scr !== null) {
-    //     shouldquote = neverquote;
-    // }
+    const shouldquote = scr !== null;
     // TODO mpi not supported
     // if (this.mpi_procs) {
     //   const menv = runtimeContext.mpi_config;
@@ -263,7 +261,7 @@ export abstract class JobBase {
     // }
     const command_line = runtime
       .concat(this.command_line)
-      .map((arg) => (shouldquote(arg.toString()) ? arg.toString() : arg.toString())) // TODO
+      .map((arg) => (shouldquote ? quote(arg.toString()) : arg.toString())) // TODO
       .join(' \\\n');
     const tmp2 = [
       this.stdin ? ` < ${this.stdin}` : '',
@@ -271,22 +269,6 @@ export abstract class JobBase {
       this.stderr ? ` 2> ${path.join(this.base_path_logs, this.stderr)}` : '',
     ];
     _logger.info(`[job ${this.name}] %${this.outdir}$ ${command_line} ${tmp2[0]} ${tmp2[1]} ${tmp2[2]}`);
-    if (this.joborder !== null && runtimeContext.research_obj !== undefined) {
-      const job_order = this.joborder;
-      if (
-        runtimeContext.process_run_id !== null &&
-        runtimeContext.prov_obj !== undefined &&
-        (job_order instanceof Array || job_order instanceof Object)
-      ) {
-        // TODO
-        // runtimeContext.prov_obj.used_artefacts(job_order, runtimeContext.process_run_id, this.name.toString());
-      } else {
-        _logger.warn(
-          `research_obj set but one of process_run_id ` +
-            `or prov_obj is missing from runtimeContext: ${runtimeContext.toString()}`,
-        );
-      }
-    }
     let outputs: any = {};
     let processStatus = '';
     try {
@@ -323,12 +305,8 @@ export abstract class JobBase {
         env = runtimeContext.secret_store.retrieve(env as any) as { [id: string]: string };
       }
 
-      let job_script_contents: string | null = null;
-      const builder: any = this.builder ? this.builder : null;
-      if (builder !== null) {
-        job_script_contents = builder.build_job_script(commands);
-      }
       const rcode = await _job_popen(
+        this.staging,
         commands,
         stdin_path,
         stdout_path,
@@ -336,7 +314,6 @@ export abstract class JobBase {
         env,
         this.outdir,
         () => runtimeContext.createOutdir(),
-        job_script_contents,
         this.timelimit,
         this.name,
         monitor_function,
@@ -536,18 +513,24 @@ export class CommandLineJob extends JobBase {
 
     this._setup(runtimeContext);
 
-    stage_files(this.pathmapper, null, {
+    stage_files(this.staging, this.pathmapper, null, {
       ignore_writable: true,
       symlink: true,
       secret_store: runtimeContext.secret_store,
     });
     if (this.generatemapper) {
-      stage_files(this.generatemapper, null, {
+      stage_files(this.staging, this.generatemapper, null, {
         ignore_writable: this.inplace_update,
         symlink: true,
         secret_store: runtimeContext.secret_store,
       });
-      await relink_initialworkdir(this.generatemapper, this.outdir, this.builder.outdir, this.inplace_update);
+      relink_initialworkdir_lazy(
+        this.staging,
+        this.generatemapper,
+        this.outdir,
+        this.builder.outdir,
+        this.inplace_update,
+      );
     }
 
     const monitor_function = this.process_monitor.bind(this);
@@ -581,18 +564,23 @@ export abstract class ContainerCommandLineJob extends JobBase {
     tmp_outdir_prefix: string,
   ): Promise<string | undefined>;
 
-  abstract create_runtime(env: { [key: string]: string }, runtime_context: any): [string[], any];
+  abstract create_runtime(env: { [key: string]: string }, runtime_context: RuntimeContext): [string[], string | null];
 
   abstract append_volume(runtime: string[], source: string, target: string, writable: boolean): void;
 
-  abstract add_file_or_directory_volume(runtime: string[], volume: any, host_outdir_tgt: any): void;
+  abstract add_file_or_directory_volume(runtime: string[], volume: MapperEnt, host_outdir_tgt: string | null): void;
 
-  abstract add_writable_file_volume(runtime: string[], volume: any, host_outdir_tgt: any, tmpdir_prefix: string): void;
+  abstract add_writable_file_volume(
+    runtime: string[],
+    volume: MapperEnt,
+    host_outdir_tgt: string | undefined,
+    tmpdir_prefix: string,
+  ): void;
 
   abstract add_writable_directory_volume(
     runtime: string[],
-    volume: any,
-    host_outdir_tgt: any,
+    volume: MapperEnt,
+    host_outdir_tgt: string | undefined,
     tmpdir_prefix: string,
   ): void;
 
@@ -612,7 +600,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
     runtime: string[],
     volume: MapperEnt,
     host_outdir_tgt: string,
-    secret_store: any,
+    secret_store: SecretStore,
     tmpdir_prefix: string,
   ): string {
     let new_file = '';
@@ -656,7 +644,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
         throw new WorkflowException(
           `No mandatory DockerRequirement, yet path is outside ` +
             `the designated output directory, also know as ` +
-            `${runtime.join(', ')}: ${vol}`,
+            `${runtime.join(', ')}: ${str(vol)}`,
         );
       }
       if (vol.type === 'File' || vol.type === 'Directory') {
@@ -671,7 +659,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
       }
     }
   }
-  async run(runtimeContext: any, tmpdir_lock?: any): Promise<void> {
+  async run(runtimeContext: RuntimeContext, tmpdir_lock?: any): Promise<void> {
     const debug = runtimeContext.debug;
     if (tmpdir_lock) {
       tmpdir_lock(() => {
@@ -686,7 +674,6 @@ export abstract class ContainerCommandLineJob extends JobBase {
     }
 
     const [docker_req, docker_is_req] = getRequirement(this.tool, DockerRequirement);
-    this.prov_obj = runtimeContext.prov_obj;
     let img_id: any = undefined;
     const user_space_docker_cmd = runtimeContext.user_space_docker_cmd;
     if (docker_req !== undefined && user_space_docker_cmd) {
@@ -719,14 +706,6 @@ export abstract class ContainerCommandLineJob extends JobBase {
             runtimeContext.tmp_outdir_prefix,
           );
         }
-        if (img_id === undefined) {
-          if (this.builder.find_default_container) {
-            const default_container = this.builder.find_default_container();
-            if (default_container) {
-              img_id = String(default_container);
-            }
-          }
-        }
         if (docker_req !== undefined && img_id === undefined && runtimeContext.use_container) {
           throw new Error('Docker image not available');
         }
@@ -738,7 +717,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
           });
           this.prov_obj.document.wasAssociatedWith(runtimeContext.process_run_id, container_agent);
         }
-      } catch (err: any) {
+      } catch (err) {
         const container = runtimeContext.singularity ? 'Singularity' : 'Docker';
         _logger.debug(`${container} error`, err);
         if (docker_is_req) {
@@ -794,7 +773,7 @@ export abstract class ContainerCommandLineJob extends JobBase {
       }
       try {
         cid = fs.readFileSync(cidfile, 'utf8').trim();
-      } catch (err) {
+      } catch {
         cid = null;
       }
     }

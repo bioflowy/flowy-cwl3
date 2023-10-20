@@ -1,15 +1,13 @@
-import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Logger } from 'winston';
 import { RuntimeContext, getDefault } from './context.js';
 import { ValidationException, WorkflowException } from './errors.js';
-import { JobBase } from './job.js';
 import { _logger } from './loghandler.js';
 import { Process, cleanIntermediate, relocateOutputs } from './process.js';
 import { createRequirements } from './types.js';
 import { type CWLObjectType, type MutableSequence } from './utils.js';
 
-class JobExecutor {
+abstract class JobExecutor {
   final_output: MutableSequence<CWLObjectType | undefined>;
   final_status: string[];
   output_dirs: string[];
@@ -34,14 +32,13 @@ class JobExecutor {
     this.final_output.push(out);
   }
 
-  async run_jobs(
-    process: Process,
-    job_order_object: CWLObjectType,
-    logger: Logger,
-    runtime_context: RuntimeContext,
-  ): Promise<void> {
-    throw new Error('Method not implemented.');
-  }
+  abstract run_jobs(
+    _process: Process,
+    _job_order_object: CWLObjectType,
+    _logger: Logger,
+    _runtime_context: RuntimeContext,
+  ): Promise<void>;
+
   async execute(
     process: Process,
     job_order_object: CWLObjectType,
@@ -54,14 +51,6 @@ class JobExecutor {
     if (!runtime_context.basedir) {
       throw new WorkflowException("Must provide 'basedir' in runtimeContext");
     }
-
-    const check_for_abstract_op = (tool: CWLObjectType): void => {
-      if (tool['class'] === 'Operation') {
-        throw new WorkflowException('Workflow has unrunnable abstract Operation');
-      }
-    };
-
-    process.visit(check_for_abstract_op);
 
     let finaloutdir: string | null = null;
     const original_outdir = runtime_context.outdir;
@@ -112,25 +101,6 @@ class JobExecutor {
     }
 
     if (this.final_output && this.final_status) {
-      if (
-        runtime_context.research_obj !== null &&
-        (process instanceof JobBase || process instanceof Process) &&
-        // ||
-        // process instanceof WorkflowJobStep ||
-        // process instanceof WorkflowJob
-        process.parent_wf
-      ) {
-        const process_run_id: string | null = null;
-        const name = 'primary';
-        process.parent_wf.generate_output_prov(this.final_output[0], process_run_id, name);
-        process.parent_wf.document.wasEndedBy(
-          process.parent_wf.workflow_run_uri,
-          null,
-          process.parent_wf.engine_uuid,
-          new Date(),
-        );
-        process.parent_wf.finalize_prov_profile(null);
-      }
       return [this.final_output[0], this.final_status[0]];
     }
     return [null, 'permanentFail'];
@@ -143,21 +113,6 @@ export class SingleJobExecutor extends JobExecutor {
     logger: Logger,
     runtime_context: RuntimeContext,
   ): Promise<void> {
-    const process_run_id: string | undefined = undefined;
-
-    // if (!(process instanceof Workflow) && runtime_context.research_obj !== null) {
-    //   process.provenance_object = new ProvenanceProfile(
-    //     runtime_context.research_obj,
-    //     runtime_context.cwl_full_name,
-    //     false,
-    //     false,
-    //     runtime_context.orcid,
-    //     runtime_context.research_obj.ro_uuid,
-    //     runtime_context.make_fs_access(''),
-    //   );
-    //   process.parent_wf = process.provenance_object;
-    // }
-
     const jobiter = process.job(
       job_order_object,
       (out: CWLObjectType | undefined, process_status: string) => this.output_callback(out, process_status),
@@ -167,9 +122,6 @@ export class SingleJobExecutor extends JobExecutor {
     try {
       for await (const job of jobiter) {
         if (job) {
-          if (runtime_context.builder !== undefined && job.hasOwnProperty('builder')) {
-            (job as any).builder = runtime_context.builder;
-          }
           if (job.outdir !== null) {
             this.output_dirs.push(job.outdir);
           }

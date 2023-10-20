@@ -4,17 +4,14 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as url from 'node:url';
 
-import type { WorkflowInputParameter } from 'cwl-ts-auto';
-import fsExtra from 'fs-extra/esm';
+import * as cwl from 'cwl-ts-auto';
 import { v4 as uuidv4 } from 'uuid';
-import { CallbackJob, ExpressionJob } from './command_line_tool.js';
-import { ValidationException, WorkflowException } from './errors.js';
+import { ExpressionJob } from './command_line_tool.js';
+import { Directory, File, WorkflowInputParameter } from './cwltypes.js';
+import { ValidationException } from './errors.js';
 import { CommandLineJob, JobBase } from './job.js';
-import { _logger } from './loghandler.js';
-import { MapperEnt, PathMapper } from './pathmapper.js';
-import { SecretStore } from './secrets.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import type { Tool, ToolRequirement } from './types.js';
+import type { ToolRequirement } from './types.js';
 import type { WorkflowJob } from './workflow_job.js';
 
 let __random_outdir: string | null = null;
@@ -22,8 +19,6 @@ let __random_outdir: string | null = null;
 export const CONTENT_LIMIT = 64 * 1024;
 
 export const DEFAULT_TMP_PREFIX = os.tmpdir() + path.sep;
-
-export type CommentedMap = { [key: string]: any };
 
 export type MutableSequence<T> = T[];
 export type MutableMapping<T> = {
@@ -34,6 +29,8 @@ export type CWLOutputAtomType =
   | boolean
   | string
   | number
+  | File
+  | Directory
   | MutableSequence<undefined | boolean | string | number | MutableSequence<any> | MutableMapping<any>>
   | MutableMapping<undefined | boolean | string | number | MutableSequence<any> | MutableMapping<any>>;
 
@@ -41,11 +38,13 @@ export type CWLOutputType =
   | boolean
   | string
   | number
+  | File
+  | Directory
   | MutableSequence<CWLOutputAtomType>
   | MutableMapping<CWLOutputAtomType>;
 export type CWLObjectType = MutableMapping<CWLOutputType | undefined>;
 
-export type JobsType = CommandLineJob | JobBase | ExpressionJob | CallbackJob | WorkflowJob | undefined; //  ;
+export type JobsType = CommandLineJob | JobBase | ExpressionJob | WorkflowJob | undefined; //  ;
 export type JobsGeneratorType = AsyncGenerator<JobsType, void>;
 export type OutputCallbackType = (arg1: CWLObjectType, arg2: string) => void;
 // type ResolverType = (Loader, string)=>string?;
@@ -80,8 +79,15 @@ export class WorkflowStateItem {
     this.success = success;
   }
 }
-export function isString(value: any): value is string {
+export function isString(value: unknown): value is string {
   return typeof value === 'string';
+}
+export function isStringOrStringArray(value: unknown): value is string | string[] {
+  if (Array.isArray(value)) {
+    return value.every((v) => typeof v === 'string');
+  } else {
+    return typeof value === 'string';
+  }
 }
 export function urldefrag(url: string): { url: string; fragment: string } {
   const [urlWithoutFragment, fragment] = url.split('#');
@@ -92,7 +98,7 @@ export type StepType = CWLObjectType;
 
 export type LoadListingType = 'no_listing' | 'shallow_listing' | 'deep_listing';
 export async function which(cmd: string): Promise<string | null> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     exec(`which ${cmd}`, (error, stdout) => {
       if (error) {
         resolve(null);
@@ -247,7 +253,7 @@ export function copytree_with_merge(src: string, dst: string): void {
  * @param obj - The object to be converted.
  * @returns The JSON-formatted string.
  */
-export function josonStringifyLikePython(obj: any): string {
+export function josonStringifyLikePython(obj: unknown): string {
   if (obj === undefined) {
     return 'null';
   }
@@ -263,40 +269,54 @@ export function josonStringifyLikePython(obj: any): string {
   }
   return JSON.stringify(obj, null, '');
 }
-export function visit_class(rec: any, cls: any[], op: (...args: any[]) => any): void {
-  if (typeof rec === 'object' && rec !== null) {
-    if ('class' in rec && cls.includes(rec['class'])) {
-      op(rec);
+export function isInstanceOf<T>(input: unknown, constructor: { new (...args: unknown[]): T }): input is T {
+  return input instanceof constructor;
+}
+export function isInstanceOfAny(input: unknown, constructors: { new (...args: unknown[]): unknown }[]): boolean {
+  for (const constructor of constructors) {
+    if (input instanceof constructor) {
+      return true;
     }
-    for (const key in rec) {
-      visit_class(rec[key], cls, op);
+  }
+  return false;
+}
+export function visitClass<T>(input: unknown, isT: (value: unknown) => value is T, callback: (arg: T) => void) {
+  if (Array.isArray(input)) {
+    input.forEach((item) => visitClass(item, isT, callback));
+  } else {
+    if (isT(input)) {
+      callback(input);
+    }
+    if (typeof input === 'object' && input !== null) {
+      for (const key in input) {
+        // eslint-disable-next-line no-prototype-builtins
+        if (input.hasOwnProperty(key)) {
+          visitClass(input[key], isT, callback);
+        }
+      }
     }
   }
 }
-export function visit_class_promise<T>(rec: any, cls: any[], op: (...args: any[]) => Promise<T>): Promise<T>[] {
-  const promises: Promise<T>[] = [];
-  if (typeof rec === 'object' && rec !== null) {
-    if ('class' in rec && cls.includes(rec['class'])) {
-      promises.push(op(rec));
-    }
-    for (const key in rec) {
-      const promises2 = visit_class_promise(rec[key], cls, op);
-      promises.push(...promises2);
-    }
-  }
-  return promises;
+export function isFile(value: unknown): value is File {
+  return value && typeof value === 'object' && 'class' in value && value['class'] === 'File';
 }
+export function isDirectory(value: unknown): value is Directory {
+  return value && typeof value === 'object' && 'class' in value && value['class'] === 'Directory';
+}
+export function isFileOrDirectory(value: unknown): value is File | Directory {
+  return (
+    value &&
+    typeof value === 'object' &&
+    'class' in value &&
+    ('Directory' === value['class'] || 'File' === value['class'])
+  );
+}
+export const visitFile = (rec: unknown, callback: (f: File) => void) => visitClass<File>(rec, isFile, callback);
+export const visitDirectory = (rec: unknown, callback: (f: Directory) => void) =>
+  visitClass<Directory>(rec, isDirectory, callback);
+export const visitFileDirectory = (rec: unknown, callback: (f: File | Directory) => void) =>
+  visitClass(rec, isFileOrDirectory, callback);
 
-function visit_field(rec: any, field: string, op: (...args: any[]) => any): void {
-  if (typeof rec === 'object' && rec !== null) {
-    if (field in rec) {
-      rec[field] = op(rec[field]);
-    }
-    for (const key in rec) {
-      visit_field(rec[key], field, op);
-    }
-  }
-}
 export function filePathToURI(filePath: string): string {
   let flag: string | undefined = undefined;
   const splits = filePath.split('#');
@@ -304,7 +324,7 @@ export function filePathToURI(filePath: string): string {
     filePath = splits[0];
     flag = splits[1];
   }
-  const pathName = path.resolve(filePath).replace(/\\/g, '/');
+  const pathName = path.resolve(filePath).replace(/\\/gu, '/');
   return url.format({
     protocol: 'file',
     slashes: true,
@@ -321,16 +341,10 @@ export function random_outdir(): string {
   return __random_outdir;
 }
 
-export function adjustFileObjs(rec: any, op: any): void {
-  // apply update function to each File object in rec
-  visit_class(rec, ['File'], op);
-}
+export const adjustFileObjs = (rec: unknown, op: (dir: File) => void) => visitClass(rec, isFile, op);
 
-export function adjustDirObjs(rec: any, op: any): void {
-  // apply update function to each Directory object in rec
-  visit_class(rec, ['Directory'], op);
-}
-const _find_unsafe = /[^a-zA-Z0-9@%+=:,./-]/;
+export const adjustDirObjs = (rec: unknown, op: (dir: Directory) => void) => visitClass(rec, isDirectory, op);
+const _find_unsafe = /[^a-zA-Z0-9@%+=:,./-]/u;
 export function quote(s: string): string {
   /** Return a shell-escaped version of the string *s*. */
   if (!s) {
@@ -342,7 +356,7 @@ export function quote(s: string): string {
 
   // use single quotes, and put single quotes into double quotes
   // the string $'b is then quoted as '$'"'"'b'
-  return `'${s.replace(/'/g, "'\"'\"'")}'`;
+  return `'${s.replace(/'/gu, "'\"'\"'")}'`;
 }
 export function urlJoin(...parts: string[]): string {
   return parts.reduce((accumulator, part) => {
@@ -361,29 +375,25 @@ export function urlJoin(...parts: string[]): string {
   }, '');
 }
 
-export function dedup(listing: any[]): any[] {
+export function dedup(listing: (File | Directory)[]): (File | Directory)[] {
   const marksub = new Set();
 
-  function mark(d: { [key: string]: string }): void {
-    marksub.add(d['location']);
-  }
-
   for (const entry of listing) {
-    if (entry['class'] === 'Directory') {
-      for (const e of entry['listing'] || []) {
-        adjustFileObjs(e, mark);
-        adjustDirObjs(e, mark);
+    if (entry instanceof cwl.Directory) {
+      for (const e of entry.listing || []) {
+        adjustFileObjs(e, (e) => marksub.add(e.location));
+        adjustDirObjs(e, (e) => marksub.add(e.location));
       }
     }
   }
 
-  const dd: CWLObjectType[] = [];
+  const dd: (File | Directory)[] = [];
   const markdup = new Set();
 
   for (const r of listing) {
-    if (!marksub.has(r['location']) && !markdup.has(r['location'])) {
+    if (!marksub.has(r.location) && !markdup.has(r.location)) {
       dd.push(r);
-      markdup.add(r['location']);
+      markdup.add(r.location);
     }
   }
 
@@ -400,26 +410,26 @@ function url2pathname(url: string): string {
   }
 }
 
-export function get_listing(fs_access: StdFsAccess, rec: any, recursive = true) {
-  if (rec['class'] != 'Directory') {
-    const finddirs: CWLObjectType[] = [];
-    visit_class(rec, ['Directory'], (val) => finddirs.push(val));
+export function get_listing(fs_access: StdFsAccess, rec: unknown, recursive = true) {
+  if (!isDirectory(rec)) {
+    const finddirs: Directory[] = [];
+    adjustDirObjs(rec, (val) => finddirs.push(val));
     for (let _i = 0, finddirs_1 = finddirs; _i < finddirs_1.length; _i++) {
       const f = finddirs_1[_i];
       get_listing(fs_access, f, recursive);
     }
     return;
   }
-  if (rec['listing']) {
+  if (rec.listing) {
     return;
   }
-  const listing: CWLOutputAtomType[] = [];
-  const loc = rec['location'];
+  const listing: (File | Directory)[] = [];
+  const loc = rec.location;
   for (let _a = 0, _b = fs_access.listdir(loc); _a < _b.length; _a++) {
     const ld = _b[_a];
     const bn = path.basename(url2pathname(ld));
     if (fs_access.isdir(ld)) {
-      const ent = {
+      const ent: Directory = {
         class: 'Directory',
         location: ld,
         basename: bn,
@@ -432,12 +442,12 @@ export function get_listing(fs_access: StdFsAccess, rec: any, recursive = true) 
       listing.push({ class: 'File', location: ld, basename: bn });
     }
   }
-  rec['listing'] = listing;
+  rec.listing = listing;
 }
 export function isMissingOrNull(obj: object, key: string) {
   return !(key in obj) || obj[key] === null;
 }
-export function downloadHttpFile(httpurl: string): [string, Date] {
+export function downloadHttpFile(_httpurl: string): [string, Date] {
   // TODO
   // let cache_session = null;
   // let directory;
@@ -509,7 +519,7 @@ export function ensureWritable(targetPath: string, includeRoot = false): void {
     addWritableFlag(targetPath);
   }
 }
-export function trim_listing(obj: object) {
+export function trim_listing(obj: Directory) {
   //
   // Remove 'listing' field from Directory objects that are file references.
   //
@@ -517,9 +527,9 @@ export function trim_listing(obj: object) {
   // objects around if not explicitly needed, so delete the 'listing' field when
   // it is safe to do so.
   //
-  const location = obj['location'];
-  if (isString(location) && location.startsWith('file://') && 'listing' in obj) {
-    delete obj['listing'];
+  const location = obj.location;
+  if (location && location.startsWith('file://') && obj.listing) {
+    obj.listing = undefined;
   }
 }
 
@@ -559,56 +569,54 @@ export function splitext(p: string): [string, string] {
   const base = p.substring(0, p.length - ext.length);
   return [base, ext];
 }
-export function normalizeFilesDirs(
-  job: (MutableSequence<MutableMapping<any>> | MutableMapping<any> | DirectoryType) | undefined,
-) {
-  function addLocation(d: Record<string, any>) {
-    if (!('location' in d)) {
-      if (d['class'] === 'File' && !('contents' in d)) {
+export function normalizeFilesDirs(job: unknown) {
+  function addLocation(d: File | Directory) {
+    if (!d.location) {
+      if (isFile(d) && d.contents === undefined) {
         throw new ValidationException("Anonymous file object must have 'contents' and 'basename' fields.");
       }
-      if (d['class'] === 'Directory' && (!('listing' in d) || !('basename' in d))) {
+      if (isDirectory(d) && (d.listing === undefined || d.basename === undefined)) {
         throw new ValidationException("Anonymous directory object must have 'listing' and 'basename' fields.");
       }
-      d['location'] = `_:${uuidv4()}`;
-      if (!('basename' in d)) {
-        d['basename'] = d['location'].substring(2);
+      d.location = `_:${uuidv4()}`;
+      if (!d.basename) {
+        d.basename = d.location.substring(2);
       }
     }
 
-    let path2 = d['location'];
+    let path2 = d.location;
     try {
-      path2 = fileURLToPath(d['location']);
-    } catch (e) {}
+      path2 = fileURLToPath(d.location);
+    } catch {}
     // strip trailing slash
     if (path2.endsWith('/')) {
-      if (d['class'] !== 'Directory') {
-        throw new ValidationException(`location '${d['location']}' ends with '/' but is not a Directory`);
+      if (!(d instanceof cwl.Directory)) {
+        throw new ValidationException(`location '${d.location}' ends with '/' but is not a Directory`);
       }
-      path2 = d['location'].slice(0, -1);
-      d['location'] = path2;
+      path2 = d.location.slice(0, -1);
+      d.location = path2;
     }
 
-    if (!d['basename']) {
+    if (!d.basename) {
       if (path2.startsWith('_:')) {
-        d['basename'] = path2.substring(2);
+        d.basename = path2.substring(2);
       } else {
-        d['basename'] = path.basename(path2);
+        d.basename = path.basename(path2);
       }
     }
 
-    if (d['class'] === 'File') {
-      const [nr, ne] = splitext(d['basename']);
-      if (d['nameroot'] !== nr) {
-        d['nameroot'] = String(nr);
+    if (isFile(d)) {
+      const [nr, ne] = splitext(d.basename);
+      if (d.nameroot !== nr) {
+        d.nameroot = String(nr);
       }
-      if (d['nameext'] !== ne) {
-        d['nameext'] = String(ne);
+      if (d.nameext !== ne) {
+        d.nameext = String(ne);
       }
     }
   }
 
-  visit_class(job, ['File', 'Directory'], addLocation);
+  visitFileDirectory(job, addLocation);
 }
 function reversed<T>(arrays: T[]): T[] {
   return [...arrays].reverse();

@@ -1,33 +1,39 @@
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as cwlTsAuto from 'cwl-ts-auto';
-import { InlineJavascriptRequirement, SecondaryFileSchema } from 'cwl-ts-auto';
+import { InlineJavascriptRequirement } from 'cwl-ts-auto';
+import {
+  ArrayType,
+  CommandInputArraySchema,
+  CommandInputEnumSchema,
+  CommandInputParameter,
+  CommandInputRecordSchema,
+  Directory,
+  File,
+  SecondaryFileSchema,
+  isCommandInputArraySchema,
+  isCommandInputRecordSchema,
+} from './cwltypes.js';
 import { ValidationException, WorkflowException } from './errors.js';
 import * as expression from './expression.js';
 import { FormatGraph } from './formatgraph.js';
 import { _logger } from './loghandler.js';
 import { PathMapper } from './pathmapper.js';
 import { StdFsAccess } from './stdfsaccess.js';
-import {
-  type CommandInputParameter,
-  type ToolRequirement,
-  CommandLineBinded,
-  type CommandLineBinding,
-} from './types.js';
+import { type ToolRequirement, CommandLineBinded } from './types.js';
 import {
   CONTENT_LIMIT,
   type CWLObjectType,
   type CWLOutputType,
-  type CommentedMap,
-  type MutableSequence,
   aslist,
   get_listing,
   normalizeFilesDirs,
-  visit_class,
   isString,
   getRequirement,
   get_filed_name,
   str,
+  visitFileDirectory,
+  isFileOrDirectory,
 } from './utils.js';
 import { validate } from './validate.js';
 
@@ -55,27 +61,23 @@ export async function contentLimitRespectedReadBytes(filePath: string): Promise<
     });
   });
 }
-async function check_format(
-  actual_file: CWLObjectType | CWLObjectType[],
-  input_formats: string | string[],
-  ontology: FormatGraph,
-) {
+async function check_format(actual_file: File[], input_formats: string | string[], ontology: FormatGraph) {
   // Confirm that the format present is valid for the allowed formats."""
   for (const afile of aslist(actual_file)) {
     if (!afile) {
       continue;
     }
-    if (!afile['format']) {
+    if (!afile.format) {
       throw new ValidationException(`File has no 'format' defined: ${JSON.stringify(afile, null, 4)}`);
     }
     for (const inpf of aslist(input_formats)) {
-      if (afile['format'] === inpf) {
+      if (afile.format === inpf) {
         return;
       } else {
         if (!ontology.isLoaded()) {
           await ontology.loads();
         }
-        if (ontology.isSubClassOf(afile['format'] as string, inpf)) {
+        if (ontology.isSubClassOf(afile.format, inpf)) {
           return;
         }
       }
@@ -94,52 +96,50 @@ export function substitute(value: string, replace: string): string {
   }
   return value + replace;
 }
-
 export class Builder {
   job: CWLObjectType;
-  files: any[];
+  files: (File | Directory)[];
   bindings: CommandLineBinded[];
-  schemaDefs: { [key: string]: any };
+  schemaDefs: {
+    [key: string]: CommandInputArraySchema | CommandInputEnumSchema | CommandInputRecordSchema;
+  };
   requirements?: undefined | ToolRequirement;
   hints?: undefined | ToolRequirement;
   resources: { [key: string]: number };
-  mutation_manager: any | null;
   formatgraph: FormatGraph;
   make_fs_access: any;
   fs_access: StdFsAccess;
-  job_script_provider: any | null;
   timeout: number;
   debug: boolean;
   js_console: boolean;
   force_docker_pull: boolean;
-  loadListing: any;
+  loadListing: cwlTsAuto.LoadListingEnum;
   outdir: string;
   tmpdir: string;
   stagedir: string;
   cwlVersion: string;
   container_engine: string;
   pathmapper: PathMapper | null;
-  find_default_container: any | null;
 
   // eslint-disable-next-line max-params
   constructor(
     job: CWLObjectType,
-    files: any[],
+    files: (File | Directory)[],
     bindings: CommandLineBinded[],
-    schemaDefs: { [key: string]: any },
+    schemaDefs: {
+      [key: string]: CommandInputArraySchema | CommandInputEnumSchema | CommandInputRecordSchema;
+    },
     requirements: ToolRequirement,
     hints: ToolRequirement,
     resources: { [key: string]: number },
-    mutation_manager: any | null,
     formatgraph: FormatGraph,
     make_fs_access: any,
     fs_access: any,
-    job_script_provider: any | null,
     timeout: number,
     debug: boolean,
     js_console: boolean,
     force_docker_pull: boolean,
-    loadListing: any,
+    loadListing: cwlTsAuto.LoadListingEnum,
     outdir: string,
     tmpdir: string,
     stagedir: string,
@@ -153,11 +153,9 @@ export class Builder {
     this.requirements = requirements;
     this.hints = hints;
     this.resources = resources;
-    this.mutation_manager = mutation_manager;
     this.formatgraph = formatgraph;
     this.make_fs_access = make_fs_access;
     this.fs_access = fs_access;
-    this.job_script_provider = job_script_provider;
     this.timeout = timeout;
     this.debug = debug;
     this.js_console = js_console;
@@ -168,16 +166,9 @@ export class Builder {
     this.stagedir = stagedir;
     this.cwlVersion = cwlVersion;
     this.pathmapper = null;
-    this.find_default_container = null;
     this.container_engine = container_engine;
   }
 
-  build_job_script(commands: string[]): string | null {
-    if (this.job_script_provider) {
-      return this.job_script_provider.build_job_script(this, commands);
-    }
-    return null;
-  }
   async handle_union(
     schema: CommandInputParameter,
     datum: CWLOutputType,
@@ -194,7 +185,8 @@ export class Builder {
     for (let t of schema.type) {
       if (isString(t)) {
         if (t in this.schemaDefs) {
-          t = this.schemaDefs[t];
+          const schemaDef = this.schemaDefs[t];
+          t = schemaDef;
         }
       } else if (t.name in this.schemaDefs) {
         t = this.schemaDefs[t.name];
@@ -238,7 +230,7 @@ export class Builder {
     let binding: CommandLineBinded | undefined;
     let value_from_expression = false;
 
-    if (schema.inputBinding && typeof schema.inputBinding === 'object') {
+    if (schema.inputBinding) {
       [binding, value_from_expression] = await this.handle_binding(schema, datum, lead_pos, tail_pos);
     }
 
@@ -273,30 +265,14 @@ export class Builder {
       }
       if (typeof schema.type === 'string') {
         if (schema.type in this.schemaDefs) {
-          schema = this.schemaDefs[schema.type];
+          const schemaDef = this.schemaDefs[schema.type];
+          const binded = await this.bind_inputObject(schemaDef, datum, discover_secondaryFiles, lead_pos, tail_pos);
+          bindings.push(...binded);
         }
       }
 
-      if (schema.type == 'record') {
-        datum = await this.handle_record(schema, datum, discover_secondaryFiles, lead_pos, tail_pos, bindings);
-      }
-
-      if (schema.type == 'array') {
-        await this.handle_array(
-          schema,
-          datum as CWLObjectType[],
-          discover_secondaryFiles,
-          lead_pos,
-          tail_pos,
-          bindings,
-          binding,
-        );
-        binding = undefined;
-      }
-
-      const _capture_files = (f: CWLObjectType): CWLObjectType => {
+      const _capture_files = (f: File | Directory) => {
         this.files.push(f);
-        return f;
       };
 
       if (schema.type == 'File') {
@@ -308,9 +284,61 @@ export class Builder {
       }
 
       if (schema.type == 'Any') {
-        visit_class(datum, ['File', 'Directory'], _capture_files);
+        visitFileDirectory(datum, _capture_files);
       }
     }
+    if (binding) {
+      for (const bi of bindings) {
+        const positions: (string | number)[] = [...binding.positions];
+        positions.push(...bi.positions);
+        bi.positions = positions;
+      }
+      bindings.push(binding);
+    }
+    return bindings;
+  }
+  async bind_inputObject(
+    schema: CommandInputRecordSchema | CommandInputEnumSchema | CommandInputArraySchema,
+    datum: CWLOutputType,
+    discover_secondaryFiles: boolean,
+    lead_pos?: number | number[],
+    tail_pos?: string | number[],
+    parentSchema?: CommandInputParameter,
+  ): Promise<CommandLineBinded[]> {
+    const debug = _logger.isDebugEnabled();
+
+    if (tail_pos === undefined) {
+      tail_pos = [];
+    }
+
+    if (lead_pos === undefined) {
+      lead_pos = [];
+    }
+
+    const bindings: CommandLineBinded[] = [];
+    let binding: CommandLineBinded | undefined;
+    let value_from_expression = false;
+
+    if (schema.inputBinding) {
+      [binding, value_from_expression] = await this.handle_binding(schema, datum, lead_pos, tail_pos);
+    }
+
+    if (isCommandInputRecordSchema(schema)) {
+      datum = await this.handle_record(schema, datum, discover_secondaryFiles, lead_pos, tail_pos, bindings);
+    } else if (isCommandInputArraySchema(schema)) {
+      await this.handle_array(
+        schema,
+        datum as CWLObjectType[],
+        discover_secondaryFiles,
+        lead_pos,
+        tail_pos,
+        bindings,
+        binding,
+        parentSchema,
+      );
+      binding = undefined;
+    }
+
     if (binding) {
       for (const bi of bindings) {
         const positions: (string | number)[] = [...binding.positions];
@@ -333,65 +361,63 @@ export class Builder {
       } else {
         schema.type = 'record';
         const fields = Object.keys(datum).map((field_name) => {
-          const t: CommandInputParameter = new cwlTsAuto.CommandInputParameter({ type: 'Any' });
+          const t: CommandInputParameter = { type: 'Any' };
           t.name = field_name;
           return t;
         });
-        schema.fields['fields'] = fields;
+        (schema as any).fields['fields'] = fields;
       }
     }
   }
 
-  handle_directory(schema: CommandInputParameter, datum: CWLOutputType): CWLObjectType {
-    datum = datum as CWLObjectType;
+  handle_directory(schema: CommandInputParameter, datum: CWLOutputType): Directory {
+    const dir = datum as Directory;
     const ll = schema.loadListing;
     if (ll && ll !== cwlTsAuto.LoadListingEnum.NO_LISTING) {
       get_listing(this.fs_access, datum, ll === cwlTsAuto.LoadListingEnum.DEEP_LISTING);
     }
-    this.files.push(datum);
-    return datum;
+    this.files.push(dir);
+    return dir;
   }
   async handleFile(
     schema: CommandInputParameter,
-    datum: CWLOutputType,
+    datum2: CWLOutputType,
     discoverSecondaryFiles: boolean,
     debug: boolean,
-    binding: { [key: string]: string | number[] } | CommentedMap,
+    binding: CommandLineBinded,
   ): Promise<void> {
-    const _captureFiles = (f: CWLObjectType): CWLObjectType => {
-      this.files.push(f);
-      return f;
-    };
-
-    datum = datum as CWLObjectType;
+    const datum = datum2 as File;
     this.files.push(datum);
 
-    let loadContentsSourceline: { [key: string]: string | number[] } | CommandInputParameter | null = null;
-    if (binding && binding['loadContents']) {
+    let loadContentsSourceline: CommandLineBinded | CommandInputParameter | null = null;
+    if (binding && binding.loadContents) {
       loadContentsSourceline = binding;
     } else if (schema.loadContents) {
       loadContentsSourceline = schema;
     }
 
-    if (loadContentsSourceline && loadContentsSourceline['loadContents']) {
+    if (loadContentsSourceline && loadContentsSourceline.loadContents) {
       try {
-        datum['contents'] = await contentLimitRespectedReadBytes(datum['location'] as string);
+        datum.contents = await contentLimitRespectedReadBytes(datum.location);
       } catch (error) {
         throw new WorkflowException(`Reading ${str(datum['location'])}\n${error}`);
       }
     }
 
     if (schema.secondaryFiles) {
-      return this.handleSecondaryFile(schema, datum, discoverSecondaryFiles, debug);
+      await this.handleSecondaryFile(schema, datum, discoverSecondaryFiles, debug);
     }
 
     if (schema.format) {
       await this.handleFileFormat(schema, datum);
     }
+    const _capture_files = (f: File | Directory) => {
+      this.files.push(f);
+    };
 
-    visit_class(datum['secondaryFiles'] || [], ['File', 'Directory'], _captureFiles);
+    visitFileDirectory(datum.secondaryFiles || [], _capture_files);
   }
-  async handleFileFormat(schema: CommandInputParameter, datum: CWLObjectType | CWLObjectType[]) {
+  async handleFileFormat(schema: CommandInputParameter, datum: File) {
     const eval_format = await this.do_eval(schema.format);
     let evaluated_format: string | string[];
 
@@ -427,7 +453,7 @@ export class Builder {
     }
     // TODO check_format is not implemented
     try {
-      await check_format(datum, evaluated_format, this.formatgraph);
+      await check_format(aslist(datum), evaluated_format, this.formatgraph);
     } catch (ve) {
       throw new WorkflowException(
         `Expected value of ${schema['name']} to have format ${str(schema['format'])} but\n ${ve}`,
@@ -436,13 +462,13 @@ export class Builder {
   }
   async handleSecondaryFile(
     schema: CommandInputParameter,
-    datum: CWLObjectType,
+    datum: File,
     discover_secondaryFiles: boolean,
     debug: boolean,
   ): Promise<void> {
     let sf_schema: SecondaryFileSchema[] = [];
-    if (!datum['secondaryFiles']) {
-      datum['secondaryFiles'] = [];
+    if (!datum.secondaryFiles) {
+      datum.secondaryFiles = [];
       sf_schema = aslist(schema.secondaryFiles);
     } else if (!discover_secondaryFiles) {
       sf_schema = []; // trust the inputs
@@ -458,7 +484,7 @@ export class Builder {
           throw new WorkflowException(
             `The result of a expression in the field 'required' must be a bool or None, not a ${typeof required_result}. Expression ${
               sf_entry.required
-            } resulted in ${required_result}.`,
+            } resulted in ${str(required_result)}.`,
           );
         }
         sf_required = required_result as boolean;
@@ -470,7 +496,7 @@ export class Builder {
         if (pattern.includes('$(') || pattern.includes('${')) {
           sfpath = await this.do_eval(sf_entry.pattern, datum);
         } else {
-          sfpath = substitute(datum['basename'] as string, pattern);
+          sfpath = substitute(datum['basename'], pattern);
         }
       }
 
@@ -482,11 +508,20 @@ export class Builder {
       }
     }
 
-    normalizeFilesDirs(datum['secondaryFiles'] as MutableSequence<CWLObjectType>);
+    normalizeFilesDirs(datum.secondaryFiles || []);
+  }
+  addsf(files: (File | Directory)[], newsf: File): void {
+    for (const f of files) {
+      if (f.location == newsf.location) {
+        f.basename = newsf.basename;
+        return;
+      }
+    }
+    files.push(newsf);
   }
   handle_secondary_path(
     schema: CommandInputParameter,
-    datum: CWLObjectType,
+    datum: File,
     discover_secondaryFiles: boolean,
     debug: boolean,
     sf_entry: any,
@@ -500,7 +535,7 @@ export class Builder {
     let sfbasename: string;
 
     if (typeof sfname === 'string') {
-      d_location = datum['location'] as string;
+      d_location = datum.location;
       if (d_location.indexOf('/') != -1) {
         sf_location = d_location.slice(0, d_location.lastIndexOf('/') + 1) + sfname;
       } else {
@@ -529,23 +564,13 @@ export class Builder {
     }
 
     if (!found) {
-      function addsf(files: CWLObjectType[], newsf: CWLObjectType): void {
-        for (const f of files) {
-          if (f['location'] == newsf['location']) {
-            f['basename'] = newsf['basename'];
-            return;
-          }
-        }
-        files.push(newsf);
-      }
-
       if (typeof sfname === 'object') {
-        addsf(datum['secondaryFiles'] as CWLObjectType[], sfname);
+        this.addsf(datum.secondaryFiles ?? [], sfname);
       } else if (discover_secondaryFiles && this.fs_access.exists(sf_location)) {
-        addsf(datum['secondaryFiles'] as CWLObjectType[], {
+        this.addsf(datum.secondaryFiles ?? [], {
+          class: 'File',
           location: sf_location,
           basename: sfname,
-          class: 'File',
         });
       } else if (sf_required) {
         throw new WorkflowException(
@@ -555,26 +580,27 @@ export class Builder {
     }
   }
   async handle_array(
-    schema: CommandInputParameter,
+    schema: CommandInputArraySchema,
     datum: CWLObjectType[],
     discover_secondaryFiles: boolean,
     lead_pos: number | number[] | undefined,
     tail_pos: string | number[] | undefined,
     bindeds: CommandLineBinded[],
     binded: CommandLineBinded,
+    parentSchema: CommandInputParameter,
   ): Promise<CommandLineBinded> {
     for (const [n, item] of datum.entries()) {
-      let b2: CommandLineBinding | undefined = undefined;
+      let b2: CommandLineBinded | undefined = undefined;
       if (binded) {
         b2 = { ...binded };
-        b2.position = binded.positions;
+        b2.positions = binded.positions;
       }
       const itemschema: CommandInputParameter = {
         type: schema.items,
         inputBinding: b2,
-        format: schema.format,
-        streamable: schema.streamable,
-        secondaryFiles: schema.secondaryFiles,
+        format: parentSchema.format,
+        streamable: parentSchema.streamable,
+        secondaryFiles: parentSchema.secondaryFiles,
       };
       const bs = await this.bind_input(itemschema, item, discover_secondaryFiles, n, tail_pos);
       bindeds.push(...bs);
@@ -582,12 +608,12 @@ export class Builder {
     return { positions: undefined };
   }
   async handle_record(
-    schema: CommandInputParameter,
+    schema: CommandInputRecordSchema,
     datum: CWLOutputType,
     discover_secondaryFiles: boolean,
     lead_pos: number | number[] | undefined,
     tail_pos: string | number[] | undefined,
-    bindings: CommandLineBinding[],
+    bindings: CommandLineBinded[],
   ): Promise<CWLOutputType> {
     if (datum instanceof Object) {
       for (const f of schema.fields) {
@@ -595,12 +621,13 @@ export class Builder {
         if (name in datum && datum[name] !== null) {
           const bs = await this.bind_input(f, datum[name], discover_secondaryFiles, lead_pos, name);
           bindings.push(...bs);
-        } else {
-          datum[name] = f.default_ ?? null;
         }
+        //  else {
+        //   datum[name] = f.default_ ?? null;
+        // }
       }
     } else {
-      throw new WorkflowException(`value for ${schema.id} is not Object(${datum})`);
+      throw new WorkflowException(`value for ${schema.name} is not Object(${datum})`);
     }
     return datum;
   }
@@ -618,7 +645,7 @@ export class Builder {
       throw new Error('Error');
     }
     const st = schema.type;
-    if (binding && !st.inputBinding && st.type === 'array' && binding.itemSeparator === undefined) {
+    if (binding && !st.inputBinding && st.type === ArrayType && binding.itemSeparator === undefined) {
       st.inputBinding = new cwlTsAuto.InputBinding({});
     }
     for (const k of ['secondaryFiles', 'format', 'streamable']) {
@@ -627,9 +654,9 @@ export class Builder {
       }
     }
     if (value_from_expression) {
-      await this.bind_input(st, datum, discover_secondaryFiles, lead_pos, tail_pos);
+      await this.bind_inputObject(st, datum, discover_secondaryFiles, lead_pos, tail_pos, schema);
     } else {
-      const bs = await this.bind_input(st, datum, discover_secondaryFiles, lead_pos, tail_pos);
+      const bs = await this.bind_inputObject(st, datum, discover_secondaryFiles, lead_pos, tail_pos, schema);
       bindings.push(...bs);
     }
   }
@@ -670,11 +697,12 @@ export class Builder {
     return [binded, valueFrom];
   }
   tostr(value: CWLOutputType): string {
-    if (value instanceof Object && ['File', 'Directory'].includes(value['class'] as string)) {
-      if (!value['path']) {
+    if (isFileOrDirectory(value)) {
+      if (!value.path) {
         throw new WorkflowException(`${value['class']} object missing "path": ${value}`);
       }
-      return value['path'] as string;
+      return value.path;
+
       // TODO
       // } else if (value instanceof ScalarFloat) {
       //     let rep = new RoundTripRepresenter();
@@ -716,7 +744,7 @@ export class Builder {
       } else {
         return [];
       }
-    } else if (value instanceof Object && ['File', 'Directory'].includes(value['class'] as string)) {
+    } else if (isFileOrDirectory(value)) {
       argl = [value];
     } else if (value instanceof Object) {
       return prefix ? [prefix] : [];

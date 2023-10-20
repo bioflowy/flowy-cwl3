@@ -1,8 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
+import { RuntimeContext } from './context.js';
+import { Directory, File } from './cwltypes.js';
 import { abspath } from './stdfsaccess.js';
-import { type CWLObjectType, uriFilePath, dedup, downloadHttpFile } from './utils.js';
+import { uriFilePath, dedup, downloadHttpFile, isFile, isDirectory } from './utils.js';
+
 export class MapperEnt {
   resolved: string;
   target: string;
@@ -49,22 +52,22 @@ export class PathMapper {
   private stagedir: string;
   private separateDirs: boolean;
 
-  constructor(referenced_files: CWLObjectType[], basedir: string, stagedir: string, separateDirs = true) {
+  constructor(referenced_files: (File | Directory)[], basedir: string, stagedir: string, separateDirs = true) {
     this._pathmap = {};
     this.stagedir = stagedir;
     this.separateDirs = separateDirs;
     this.setup(dedup(referenced_files), basedir);
   }
 
-  public visitlisting(listing: CWLObjectType[], stagedir: string, basedir: string, copy = false, staged = false): void {
+  public visitlisting(
+    listing: (File | Directory)[],
+    stagedir: string,
+    basedir: string,
+    copy = false,
+    staged = false,
+  ): void {
     for (const ld of listing) {
-      this.visit(
-        ld,
-        stagedir,
-        basedir,
-        (copy = ld.hasOwnProperty('writable') ? (ld['writable'] as boolean) : copy),
-        staged,
-      );
+      this.visit(ld, stagedir, basedir, (copy = ld.writable ?? copy), staged);
     }
   }
   update(key: string, resolved: string, target: string, type: string, staged: boolean): MapperEnt {
@@ -88,17 +91,17 @@ export class PathMapper {
     return undefined;
   }
 
-  private visit(obj: CWLObjectType, stagedir: string, basedir: string, copy: boolean, staged: boolean): void {
-    stagedir = (obj['dirname'] as string | null) || stagedir;
+  private visit(obj: File | Directory, stagedir: string, basedir: string, copy: boolean, staged: boolean): void {
+    stagedir = obj.dirname ?? stagedir;
 
-    const tgt: string = path.join(stagedir, obj['basename'] as string);
+    const tgt: string = path.join(stagedir, obj.basename);
 
-    if ((obj['location'] as string) in this._pathmap) {
+    if (obj.location in this._pathmap) {
       return;
     }
 
-    if (obj['class'] === 'Directory') {
-      const location: string = obj['location'] as string;
+    if (isDirectory(obj)) {
+      const location: string = obj.location;
       let resolved: string;
 
       if (location.startsWith('file://')) {
@@ -113,18 +116,13 @@ export class PathMapper {
         staged = false;
       }
 
-      this.visitlisting((obj['listing'] as CWLObjectType[]) || [], tgt, basedir, copy, staged);
-    } else if (obj['class'] === 'File') {
-      const path1: string = obj['location'] as string;
+      this.visitlisting(obj.listing || [], tgt, basedir, copy, staged);
+    } else if (isFile(obj)) {
+      const path1: string = obj.location;
       const ab: string = abspath(path1, basedir);
 
-      if ('contents' in obj && path1.startsWith('_:')) {
-        this._pathmap[path1] = new MapperEnt(
-          obj['contents'] as string,
-          tgt,
-          copy ? 'CreateWritableFile' : 'CreateFile',
-          staged,
-        );
+      if (obj.contents !== undefined && path1.startsWith('_:')) {
+        this._pathmap[path1] = new MapperEnt(obj.contents, tgt, copy ? 'CreateWritableFile' : 'CreateFile', staged);
       } else {
         let deref: string = ab;
 
@@ -143,16 +141,16 @@ export class PathMapper {
         this._pathmap[path1] = new MapperEnt(deref, tgt, copy ? 'WritableFile' : 'File', staged);
       }
 
-      this.visitlisting((obj['secondaryFiles'] as CWLObjectType[]) || [], stagedir, basedir, copy, staged);
+      this.visitlisting(obj.secondaryFiles ?? [], stagedir, basedir, copy, staged);
     }
   }
-  setup(referenced_files: CWLObjectType[], basedir: string): void {
+  setup(referenced_files: (File | Directory)[], basedir: string): void {
     let stagedir = this.stagedir;
     for (const fob of referenced_files) {
       if (this.separateDirs) {
         stagedir = path.join(this.stagedir, `stg${uuidv4()}`);
       }
-      const copy = (fob['writable'] as boolean | undefined) || false;
+      const copy = fob.writable || false;
       this.visit(fob, stagedir, basedir, copy, true);
     }
   }
@@ -190,3 +188,9 @@ export class PathMapper {
     return Object.entries(newitems);
   }
 }
+export type MakePathMapper = (
+  param1: (File | Directory)[],
+  param2: string,
+  param3: RuntimeContext,
+  param4: boolean,
+) => PathMapper;
