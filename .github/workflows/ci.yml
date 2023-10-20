@@ -28,4 +28,4 @@ jobs:
           path: flowy-cwl3
       - run: cd flowy-cwl3 && npm install
       - run: cd flowy-cwl3 && npm run build
-      - run: ./flowy-cwl3/work/conformance_test.sh
+      - run: ./flowy-cwl3/conformance_test.sh
