@@ -49,6 +49,7 @@ tests/
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
+test_work/
 # TypeScript cache
 *.tsbuildinfo
 

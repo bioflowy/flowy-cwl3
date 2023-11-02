@@ -382,6 +382,9 @@ export async function do_eval(
       );
       return ret;
     } catch (e) {
+      if (e instanceof Error) {
+        _logger.warn(`Expression evaluation error:\n${e.stack}`);
+      }
       throw new WorkflowException(`Expression evaluation error:\n${e.message}`);
     }
   } else {

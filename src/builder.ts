@@ -107,7 +107,7 @@ export class Builder {
   hints?: undefined | ToolRequirement;
   resources: { [key: string]: number };
   formatgraph: FormatGraph;
-  make_fs_access: any;
+  make_fs_access: new (string) => StdFsAccess;
   fs_access: StdFsAccess;
   timeout: number;
   debug: boolean;

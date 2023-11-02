@@ -4,10 +4,18 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { DockerRequirement, ShellCommandRequirement } from 'cwl-ts-auto';
 import { v4 as uuidv4 } from 'uuid';
-import { executeJob } from './JobExecutor.js';
+import { executeCommand, executeJob } from './JobExecutor.js';
 import { Builder } from './builder.js';
 import { RuntimeContext } from './context.js';
-import { Directory, File, Tool } from './cwltypes.js';
+import {
+  CommandOutputParameter,
+  Directory,
+  File,
+  OutputBinding,
+  Tool,
+  isCommandOutputRecordSchema,
+  isIORecordSchema,
+} from './cwltypes.js';
 import { UnsupportedRequirement, ValueError, WorkflowException } from './errors.js';
 import { removeIgnorePermissionError } from './fileutils.js';
 import { _logger } from './loghandler.js';
@@ -24,6 +32,8 @@ import {
   getRequirement,
   str,
   quote,
+  aslist,
+  isStringOrStringArray,
 } from './utils.js';
 
 function relink_initialworkdir_lazy(
@@ -49,45 +59,6 @@ function relink_initialworkdir_lazy(
     }
   }
 }
-async function relink_initialworkdir(
-  pathmapper: PathMapper,
-  host_outdir: string,
-  container_outdir: string,
-  inplace_update = false,
-): Promise<void> {
-  for (const [_key, vol] of pathmapper.items_exclude_children()) {
-    if (!vol.staged) {
-      continue;
-    }
-    if (
-      ['File', 'Directory'].includes(vol.type) ||
-      (inplace_update && ['WritableFile', 'WritableDirectory'].includes(vol.type))
-    ) {
-      if (!vol.target.startsWith(container_outdir)) {
-        continue;
-      }
-      const host_outdir_tgt = path.join(host_outdir, vol.target.substr(container_outdir.length + 1));
-      const stat = fs.existsSync(host_outdir_tgt) ? fs.lstatSync(host_outdir_tgt) : undefined;
-      if (stat && (stat.isSymbolicLink() || stat.isFile())) {
-        // eslint-disable-next-line no-useless-catch
-        try {
-          await fs.promises.unlink(host_outdir_tgt);
-        } catch (e) {
-          if (!(e.code !== 'EPERM' || e.code !== 'EACCES')) throw e;
-        }
-      } else if (stat && stat.isDirectory() && !vol.resolved.startsWith('_:')) {
-        await removeIgnorePermissionError(host_outdir_tgt);
-      }
-      if (!vol.resolved.startsWith('_:')) {
-        try {
-          fs.symlinkSync(vol.resolved, host_outdir_tgt);
-        } catch (e) {
-          if (e.code !== 'EEXIST') throw e;
-        }
-      }
-    }
-  }
-}
 
 export async function _job_popen(
   staging: LazyStaging,
@@ -97,14 +68,17 @@ export async function _job_popen(
   stderr_path: string | undefined,
   env: { [key: string]: string },
   cwd: string,
+  builder: Builder,
+  outputBindings: OutputBinding[],
+  vols: MapperEnt[],
   make_job_dir: () => string,
+  inplace_update: boolean,
   timelimit: number | undefined = undefined,
-  name: string | undefined = undefined,
-  monitor_function: ((sproc: any) => void) | null = null,
-  default_stdout: any = undefined,
-  default_stderr: any = undefined,
-): Promise<number> {
-  return executeJob({
+): Promise<[number, { [key: string]: (File | Directory)[] }]> {
+  const id = uuidv4();
+  return executeCommand({
+    id,
+    evaluator: async (id, ex, context) => builder.do_eval(ex, context),
     staging: staging.commands,
     commands,
     stdin_path,
@@ -112,10 +86,18 @@ export async function _job_popen(
     stderr_path,
     env,
     cwd,
+    builderOutdir: builder.outdir,
+    outputBindings,
+    vols,
     timelimit,
+    inplace_update,
   });
 }
-type CollectOutputsType = (str: string, int: number) => Promise<CWLObjectType>; // Assuming functools.partial as any
+type CollectOutputsType = (
+  str: string,
+  int: number,
+  fileMap: { [key: string]: (File | Directory)[] },
+) => Promise<CWLObjectType>; // Assuming functools.partial as any
 export abstract class JobBase {
   builder: Builder;
   staging: LazyStaging = new LazyStaging();
@@ -304,8 +286,16 @@ export abstract class JobBase {
         commands = runtimeContext.secret_store.retrieve(commands as any) as string[];
         env = runtimeContext.secret_store.retrieve(env as any) as { [id: string]: string };
       }
-
-      const rcode = await _job_popen(
+      const vols: MapperEnt[] = [];
+      if (this.generatefiles.listing) {
+        if (this.generatemapper) {
+          vols.push(...this.generatemapper.items_exclude_children().map(([_key, value]) => value));
+        } else {
+          throw new ValueError(`'listing' in self.generatefiles but no generatemapper was setup.`);
+        }
+      }
+      const outputBindings = await createOutputBinding(this.tool.outputs, this.builder);
+      const [rcode, fileMap] = await _job_popen(
         this.staging,
         commands,
         stdin_path,
@@ -313,12 +303,12 @@ export abstract class JobBase {
         stderr_path,
         env,
         this.outdir,
+        this.builder,
+        outputBindings,
+        vols,
         () => runtimeContext.createOutdir(),
+        this.inplace_update,
         this.timelimit,
-        this.name,
-        monitor_function,
-        runtimeContext.default_stdout,
-        runtimeContext.default_stderr,
       );
       if (this.successCodes.includes(rcode)) {
         processStatus = 'success';
@@ -340,15 +330,8 @@ export abstract class JobBase {
         }
       }
 
-      if (this.generatefiles.listing) {
-        if (this.generatemapper) {
-          await relink_initialworkdir(this.generatemapper, this.outdir, this.builder.outdir, this.inplace_update);
-        } else {
-          throw new ValueError(`'listing' in self.generatefiles but no generatemapper was setup.`);
-        }
-      }
       runtimeContext.log_dir_handler(this.outdir, this.base_path_logs, stdout_path, stderr_path);
-      outputs = await this.collect_outputs(this.outdir, rcode);
+      outputs = await this.collect_outputs(this.outdir, rcode, fileMap);
       // outputs = bytes2str_in_dicts(outputs);
       // } catch (e) {
       //     if (e.errno == 2) {
@@ -496,6 +479,43 @@ export abstract class JobBase {
     // }
   }
 }
+async function createOutputBinding(outputs: CommandOutputParameter[], builder: Builder): Promise<OutputBinding[]> {
+  const outputBindings: OutputBinding[] = [];
+  for (const output of outputs) {
+    const outputType = output.type;
+    if (isCommandOutputRecordSchema(outputType)) {
+      const obs = await createOutputBinding(outputType.fields, builder);
+      outputBindings.push(...obs);
+    }
+    if (output.outputBinding) {
+      const globpatterns: string[] = [];
+      for (const glob of aslist(output.outputBinding.glob)) {
+        const gb = await builder.do_eval(glob);
+        if (gb) {
+          if (isStringOrStringArray(gb)) {
+            globpatterns.push(...aslist(gb));
+          } else {
+            throw new WorkflowException(
+              'Resolved glob patterns must be strings or list of strings, not ' +
+                `${str(gb)} from ${str(output.outputBinding.glob)}`,
+            );
+          }
+        }
+      }
+      const binding: OutputBinding = {
+        name: output.name,
+        glob: globpatterns,
+        secondaryFiles: aslist(output.secondaryFiles),
+        outputEval: output.outputBinding.outputEval,
+        loadListing: output.outputBinding.loadListing,
+        loadContents: output.outputBinding.loadContents ?? false,
+      };
+      outputBindings.push(binding);
+    }
+  }
+  return outputBindings;
+}
+
 export class CommandLineJob extends JobBase {
   async run(runtimeContext: RuntimeContext, tmpdir_lock?: any): Promise<void> {
     if (tmpdir_lock) {
