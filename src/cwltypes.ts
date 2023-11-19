@@ -86,6 +86,7 @@ export interface CommandOutputRecordField extends IORecordField {
   type: CommandOutputType;
   streamable?: undefined | boolean;
   format?: undefined | string;
+  outputBinding?: undefined | CommandOutputBinding;
 }
 export interface OutputRecordField extends IORecordField {
   type: OutputType;
@@ -130,13 +131,21 @@ export interface CommandOutputParameter {
   doc?: undefined | string | string[];
   format?: undefined | string;
   type: CommandOutputType | cwl.stdout | cwl.stderr;
-  outputBinding?: undefined | cwl.CommandOutputBinding;
+  outputBinding?: undefined | CommandOutputBinding;
 }
 export interface CommandOutputBinding {
   extensionFields?: Dictionary<unknown>;
   loadContents?: undefined | boolean;
   loadListing?: undefined | cwl.LoadListingEnum;
   glob?: undefined | string | string[];
+  outputEval?: undefined | string;
+}
+export interface OutputBinding {
+  name: string;
+  secondaryFiles: SecondaryFileSchema[];
+  loadContents?: boolean;
+  loadListing?: undefined | cwl.LoadListingEnum;
+  glob?: string[];
   outputEval?: undefined | string;
 }
 export interface File {
@@ -349,6 +358,9 @@ export function isCommandInputArraySchema(t: CommandInputParameter): t is Comman
   return t instanceof Object && t['type'] === 'array';
 }
 export function isIORecordSchema(t: unknown): t is IORecordSchema {
+  return t instanceof Object && t['type'] === 'record';
+}
+export function isCommandOutputRecordSchema(t: CommandOutputType): t is CommandOutputRecordSchema {
   return t instanceof Object && t['type'] === 'record';
 }
 export function isIOArraySchema(t: unknown): t is IOArraySchema {
