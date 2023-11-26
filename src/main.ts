@@ -11,6 +11,7 @@ import { loadDocument } from './loader.js';
 import { _logger } from './loghandler.js';
 import { shortname, type Process, add_sizes } from './process.js';
 import { SecretStore } from './secrets.js';
+import { getServer } from './server.js';
 import {
   type CWLObjectType,
   normalizeFilesDirs,
@@ -277,6 +278,8 @@ export interface Args {
   quiet?: boolean;
 }
 export async function main(args: Args): Promise<number> {
+  const server = getServer();
+  await server.start();
   const [output, status] = await exec(args.tool_path, args.job_path, args.outdir);
   if (status === 'success') {
     process.stdout.write(`${JSON.stringify(output)}\n`);
@@ -286,6 +289,7 @@ export async function main(args: Args): Promise<number> {
       });
     });
   } else {
+    await server.close();
     return 1;
   }
 }

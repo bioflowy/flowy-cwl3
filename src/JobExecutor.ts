@@ -1,18 +1,22 @@
 import * as cp from 'node:child_process';
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import path from 'node:path';
 import { Stream } from 'node:stream';
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import * as cwl from 'cwl-ts-auto';
 import fsExtra from 'fs-extra/esm';
 import { cloneDeep } from 'lodash-es';
+import { z } from 'zod';
 import { contentLimitRespectedReadBytes, substitute } from './builder.js';
-import { File, Directory, OutputBinding } from './cwltypes.js';
+import { File, Directory } from './cwltypes.js';
 import { WorkflowException } from './errors.js';
 import { removeIgnorePermissionError } from './fileutils.js';
-import { MapperEnt } from './pathmapper.js';
-import { compute_checksums } from './process.js';
-import { StagingCommand } from './staging.js';
+import { _logger } from './loghandler.js';
+import { MapperEnt, MapperEntSchema } from './pathmapper.js';
+import { StagingCommand, StagingCommandSchema } from './staging.js';
 import { StdFsAccess } from './stdfsaccess.js';
+
 import {
   CWLOutputType,
   aslist,
@@ -25,37 +29,83 @@ import {
   str,
   uriFilePath,
 } from './utils.js';
+extendZodWithOpenApi(z);
 
-type Evaluator = (id: string, ex: CWLOutputType | undefined, context) => Promise<CWLOutputType>;
-export interface JobExec {
-  id: string;
-  staging: StagingCommand[];
-  commands: string[];
-  stdin_path: string | undefined;
-  stdout_path: string | undefined;
-  stderr_path: string | undefined;
-  evaluator: Evaluator;
-  env: { [key: string]: string };
-  /**
-   *
-   */
-  cwd: string;
-  /**
-   *
-   */
-  builderOutdir: string;
-  timelimit: number | undefined;
-  outputBindings: OutputBinding[];
-  vols: MapperEnt[];
-  inplace_update: boolean;
+type Evaluator = (
+  id: string,
+  ex: CWLOutputType | undefined,
+  context: CWLOutputType | undefined,
+) => Promise<CWLOutputType>;
+
+export async function fastifyEvaluator(
+  url: string,
+  id: string,
+  ex: CWLOutputType | undefined,
+  context: CWLOutputType | undefined,
+): Promise<CWLOutputType> {
+  const postData = JSON.stringify({ id, ex, context });
+  const res = await fetch('http://localhost:3000/api/do_eval', {
+    method: 'POST',
+    body: postData,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+  const json: JSON = await res.json();
+  if ('string_value' in json) {
+    return json['string_value'] as string;
+  } else {
+    return json['json_value'];
+  }
 }
+const LoadListingEnumSchema = z.enum(['no_listing', 'shallow_listing', 'deep_listing']).openapi('LoadListingEnum');
+export const SecondaryFileSchema = z.object({
+  pattern: z.string(),
+  // Separate required property into two values of type string and type boolean
+  // because oapi-codegen, golang's open-api code generator, has a bug in generating union type.
+  requiredBoolean: z.boolean().optional(),
+  requiredString: z.string().optional(),
+});
+// OutputBinding Schema
+const OutputBindingSchema = z
+  .object({
+    name: z.string(),
+    secondaryFiles: z.array(SecondaryFileSchema),
+    loadContents: z.boolean().optional(),
+    loadListing: LoadListingEnumSchema.optional(),
+    glob: z.array(z.string()).optional(),
+    outputEval: z.string().optional(),
+  })
+  .openapi('OutputBinding');
+export type OutputBinding = z.infer<typeof OutputBindingSchema>;
+
+export type OutputSecondaryFile = z.infer<typeof SecondaryFileSchema>;
+
+// JobExec Schema
+export const JobExecSchema = z.object({
+  id: z.string(),
+  staging: z.array(StagingCommandSchema),
+  commands: z.array(z.string()),
+  stdin_path: z.string().optional(),
+  stdout_path: z.string().optional(),
+  stderr_path: z.string().optional(),
+  env: z.record(z.string()),
+  cwd: z.string(),
+  builderOutdir: z.string(),
+  timelimit: z.number().int().optional(),
+  outputBindings: z.array(OutputBindingSchema),
+  vols: z.array(MapperEntSchema),
+  inplace_update: z.boolean(),
+});
+export type JobExec = z.infer<typeof JobExecSchema>;
+
 async function prepareStagingDir(StagingCommand: StagingCommand[]): Promise<void> {
   for (const command of StagingCommand) {
     switch (command.command) {
       case 'writeFileContent': {
         if (!fs.existsSync(command.target)) {
           fs.writeFileSync(command.target, command.content, { mode: command.mode });
-          if (command.options.ensureWritable) {
+          if (command.ensureWritable) {
             ensureWritable(command.target);
           }
         }
@@ -79,7 +129,7 @@ async function prepareStagingDir(StagingCommand: StagingCommand[]): Promise<void
         const c = command;
         if (!fs.existsSync(c.target)) {
           await fsExtra.copy(c.resolved, c.target);
-          if (c.options.ensureWritable) {
+          if (c.ensureWritable) {
             ensureWritable(c.target);
           }
         }
@@ -142,14 +192,6 @@ function revmap_file(
     if (!f.basename) {
       f.basename = path.basename(path1);
     }
-    // if (!builder.pathmapper) {
-    //   throw new Error("Do not call revmap_file using a builder that doesn't have a pathmapper.");
-    // }
-    // const revmap_f = builder.pathmapper.reversemap(path1);
-    // if (revmap_f && !builder.pathmapper.mapper(revmap_f[0]).type.startsWith('Writable')) {
-    //   // If the file is not writable, then we need to copy it to the output directory
-    //   f.location = revmap_f[1];
-    // } else
     if (uripath == outdir || uripath.startsWith(outdir + path.sep) || uripath.startsWith(`${outdir}/`)) {
       f.location = uripath;
     } else if (
@@ -174,22 +216,26 @@ function revmap_file(
   throw new WorkflowException(`Output File object is missing both 'location' and 'path' fields: ${str(f)}`);
 }
 
-export async function executeCommand({
-  id,
-  staging,
-  builderOutdir,
-  commands,
-  stdin_path,
-  stdout_path,
-  stderr_path,
-  env,
-  cwd,
-  timelimit,
-  outputBindings,
-  vols,
-  inplace_update,
-  evaluator,
-}: JobExec): Promise<[number, { [key: string]: (File | Directory)[] }]> {
+export async function executeCommand(
+  url: string,
+  {
+    id,
+    staging,
+    builderOutdir,
+    commands,
+    stdin_path,
+    stdout_path,
+    stderr_path,
+    env,
+    cwd,
+    timelimit,
+    outputBindings,
+    vols,
+    inplace_update,
+  }: JobExec,
+): Promise<[number, { [key: string]: (File | Directory)[] }]> {
+  const evaluator = async (id: string, ex: CWLOutputType | undefined, context: CWLOutputType | undefined) =>
+    fastifyEvaluator(url, id, ex, context);
   await prepareStagingDir(staging);
   const rcode = await executeJob(commands, stdin_path, stdout_path, stderr_path, env, cwd, timelimit);
   await relink_initialworkdir(vols, cwd, builderOutdir, inplace_update);
@@ -205,19 +251,19 @@ export async function executeCommand({
     },
     cwd,
     true,
-    revmap,
   );
   if (files.length > 0) {
     fileMap['cwl.output.json'] = files;
   }
 
   for (const outputBinding of outputBindings) {
-    const files = await globOutput(builderOutdir, outputBinding, cwd, true, revmap);
-    await collect_secondary_files(id, outputBinding, evaluator, files, new StdFsAccess(''), revmap);
+    const files = await globOutput(builderOutdir, outputBinding, cwd, true);
+    await collect_secondary_files(id, outputBinding, evaluator, files, new StdFsAccess(''), cwd, builderOutdir);
     fileMap[outputBinding.name] = files;
   }
   return [rcode, fileMap];
 }
+
 async function relink_initialworkdir(
   vols: MapperEnt[],
   host_outdir: string,
@@ -257,7 +303,74 @@ async function relink_initialworkdir(
     }
   }
 }
+async function compute_checksums(fsAccess: StdFsAccess, fileobj: File): Promise<void> {
+  if (!fileobj.checksum) {
+    const checksum = crypto.createHash('sha1');
+    const location = fileobj.location;
 
+    const fileHandle = await fsAccess.open(location, 'r');
+    let contents = await fileHandle.readFile();
+
+    while (contents.length > 0) {
+      checksum.update(contents);
+      contents = await fileHandle.readFile();
+    }
+
+    await fileHandle.close();
+
+    // eslint-disable-next-line require-atomic-updates
+    fileobj.checksum = `sha1$${checksum.digest('hex')}`;
+    // eslint-disable-next-line require-atomic-updates
+    fileobj.size = fsAccess.size(location);
+  }
+}
+
+async function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+export async function main(url: string) {
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      const res = await fetch(`${url}/api/getExectableJob`, {
+        method: 'POST',
+      });
+      _logger.info(res.status);
+      const json: JobExec[] = await res.json();
+      if (json) {
+        for (const job of json) {
+          try {
+            _logger.info(job.id);
+            const [exitCode, results] = await executeCommand(url, job);
+            const postData = JSON.stringify({ id: job.id, exitCode, results });
+            const res2 = await fetch(`${url}/api/jobFinished`, {
+              method: 'POST',
+              body: postData,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            });
+            _logger.info(res2.status);
+          } catch (e) {
+            const postData = JSON.stringify({ id: job.id, errorMsg: e.message });
+            fetch(`${url}/api/jobFailed`, {
+              method: 'POST',
+              body: postData,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            });
+          }
+        }
+      }
+    } catch (e) {
+      _logger.error(e);
+    }
+    await sleep(10 * 1000);
+  }
+}
 export async function executeJob(
   commands: string[],
   stdin_path: string | undefined,
@@ -297,12 +410,35 @@ export async function executeJob(
     });
   });
 }
+function convertToFileOrDirectory(builderOutdir: string, prefix: string, path1: string): File | Directory {
+  const decoded_basename = path.basename(path1);
+  const stat = fs.statSync(path1);
+
+  if (stat.isFile()) {
+    const file: File = {
+      class: 'File',
+      location: path1,
+      path: path.join(builderOutdir, decodeURIComponent(path1.substring(prefix.length + 1))),
+      basename: decoded_basename,
+      nameroot: splitext(decoded_basename)[0],
+      nameext: splitext(decoded_basename)[1],
+    };
+    return file;
+  } else {
+    const directory: Directory = {
+      class: 'Directory',
+      location: path1,
+      path: path.join(builderOutdir, decodeURIComponent(path1.substring(prefix.length + 1))),
+      basename: decoded_basename,
+    };
+    return directory;
+  }
+}
 async function globOutput(
   builderOutdir: string,
   binding: OutputBinding,
   outdir: string,
   compute_checksum: boolean,
-  revmap: (f: File | Directory) => void,
 ): Promise<(File | Directory)[]> {
   const r: (File | Directory)[] = [];
   const fs_access = new StdFsAccess('');
@@ -321,30 +457,7 @@ async function globOutput(
         const prefix = fs_access.glob(outdir);
         const sorted_glob_result = fs_access.glob(fs_access.join(outdir, gb)).sort();
 
-        r.push(
-          ...sorted_glob_result.map((g): File | Directory => {
-            const decoded_basename = path.basename(g);
-            if (fs_access.isfile(g)) {
-              const file: File = {
-                class: 'File',
-                location: g,
-                path: fs_access.join(builderOutdir, decodeURIComponent(g.substring(prefix[0].length + 1))),
-                basename: decoded_basename,
-                nameroot: splitext(decoded_basename)[0],
-                nameext: splitext(decoded_basename)[1],
-              };
-              return file;
-            } else {
-              const directory: Directory = {
-                class: 'Directory',
-                location: g,
-                path: fs_access.join(builderOutdir, decodeURIComponent(g.substring(prefix[0].length + 1))),
-                basename: decoded_basename,
-              };
-              return directory;
-            }
-          }),
-        );
+        r.push(...sorted_glob_result.map((g) => convertToFileOrDirectory(builderOutdir, prefix[0], g)));
       } catch (e) {
         console.error('Unexpected error from fs_access');
         throw e;
@@ -352,7 +465,7 @@ async function globOutput(
     }
     for (const files of r) {
       const rfile = cloneDeep(files);
-      revmap(rfile);
+      revmap_file(builderOutdir, outdir, rfile, fs_access);
       if (isDirectory(files)) {
         const ll = binding.loadListing;
         if (ll && ll !== cwl.LoadListingEnum.NO_LISTING) {
@@ -382,7 +495,8 @@ async function collect_secondary_files(
   builder: Evaluator,
   result: (File | Directory)[],
   fs_access: StdFsAccess,
-  revmap: (f: File | Directory) => void,
+  outdir: string,
+  builderOutDir: string,
 ): Promise<void> {
   for (const primary of result) {
     if (primary instanceof Object) {
@@ -391,19 +505,19 @@ async function collect_secondary_files(
       }
       const pathprefix = primary['path'].substring(0, primary['path'].lastIndexOf(path.sep) + 1);
       for (const sf of schema.secondaryFiles) {
-        let sf_required: boolean;
-        if (sf.required) {
-          const sf_required_eval = await builder(id, sf.required, primary);
+        let sf_required: boolean = false;
+        if (sf.requiredString) {
+          const sf_required_eval = await builder(id, sf.requiredString, primary);
           if (!(typeof sf_required_eval === 'boolean' || sf_required_eval === null)) {
             throw new WorkflowException(
               `Expressions in the field 'required' must evaluate to a Boolean (true or false) or None. Got ${str(
                 sf_required_eval,
-              )} for ${sf.required}.`,
+              )} for ${sf.requiredString}.`,
             );
           }
           sf_required = (sf_required_eval as boolean) || false;
-        } else {
-          sf_required = false;
+        } else if (sf.requiredBoolean) {
+          sf_required = sf.requiredBoolean;
         }
 
         let sfpath;
@@ -421,7 +535,7 @@ async function collect_secondary_files(
             sfitem = { path: pathprefix + sfitem };
           }
           if ('path' in sfitem && !('location' in sfitem)) {
-            revmap(sfitem);
+            revmap_file(builderOutDir, outdir, sfitem, fs_access);
           }
           if (fs_access.isfile(sfitem['location'])) {
             sfitem['class'] = 'File';

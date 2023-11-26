@@ -22,12 +22,9 @@ import {
   adjustFileObjs,
   aslist,
   fileUri,
-  get_listing,
   isDirectory,
   isFile,
-  isStringOrStringArray,
   normalizeFilesDirs,
-  splitext,
   str,
   uriFilePath,
   visitFile,
@@ -167,6 +164,9 @@ export async function collect_output_ports(
       return ret || {};
     }
   } catch (e) {
+    if (e instanceof Error) {
+      _logger.warn(`Error collecting output: ${e.stack}`);
+    }
     if (e instanceof ValidationException) {
       throw new WorkflowException(`Error validating output record. ${e.message}\n in ${JSON.stringify(ret, null, 4)}`);
     }

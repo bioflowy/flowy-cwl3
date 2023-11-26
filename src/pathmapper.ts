@@ -1,23 +1,20 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
+import { z } from 'zod';
 import { RuntimeContext } from './context.js';
 import { Directory, File } from './cwltypes.js';
 import { abspath } from './stdfsaccess.js';
 import { uriFilePath, dedup, downloadHttpFile, isFile, isDirectory } from './utils.js';
 
-export class MapperEnt {
-  resolved: string;
-  target: string;
-  type: string;
-  staged: boolean;
-  constructor(resolved: string, target: string, type: string, staged: boolean) {
-    this.resolved = resolved;
-    this.target = target;
-    this.type = type;
-    this.staged = staged;
-  }
-}
+// MapperEnt Schema
+export const MapperEntSchema = z.object({
+  resolved: z.string(),
+  target: z.string(),
+  type: z.string(),
+  staged: z.boolean(),
+});
+export type MapperEnt = z.infer<typeof MapperEntSchema>;
 
 export class PathMapper {
   /**
@@ -110,7 +107,7 @@ export class PathMapper {
         resolved = location;
       }
 
-      this._pathmap[location] = new MapperEnt(resolved, tgt, copy ? 'WritableDirectory' : 'Directory', staged);
+      this._pathmap[location] = { resolved, target: tgt, type: copy ? 'WritableDirectory' : 'Directory', staged };
 
       if (location.startsWith('file://')) {
         staged = false;
@@ -122,7 +119,12 @@ export class PathMapper {
       const ab: string = abspath(path1, basedir);
 
       if (obj.contents !== undefined && path1.startsWith('_:')) {
-        this._pathmap[path1] = new MapperEnt(obj.contents, tgt, copy ? 'CreateWritableFile' : 'CreateFile', staged);
+        this._pathmap[path1] = {
+          resolved: obj.contents,
+          target: tgt,
+          type: copy ? 'CreateWritableFile' : 'CreateFile',
+          staged,
+        };
       } else {
         let deref: string = ab;
 
@@ -138,7 +140,7 @@ export class PathMapper {
           }
         }
 
-        this._pathmap[path1] = new MapperEnt(deref, tgt, copy ? 'WritableFile' : 'File', staged);
+        this._pathmap[path1] = { resolved: deref, target: tgt, type: copy ? 'WritableFile' : 'File', staged };
       }
 
       this.visitlisting(obj.secondaryFiles ?? [], stagedir, basedir, copy, staged);
@@ -159,7 +161,7 @@ export class PathMapper {
     if (src.includes('#')) {
       const i = src.indexOf('#');
       const p = this._pathmap[src.slice(0, i)];
-      return p ? new MapperEnt(p.resolved, p.target + src.slice(i), p.type, p.staged) : undefined;
+      return p ? { resolved: p.resolved, target: p.target + src.slice(i), type: p.type, staged: p.staged } : undefined;
     }
     return this._pathmap[src];
   }

@@ -1,0 +1,308 @@
+openapi: 3.0.0
+info:
+  version: 1.0.0
+  title: My API
+  description: This is the API
+servers:
+  - url: v1
+components:
+  schemas:
+    StagingCommandName:
+      type: string
+      enum:
+        - writeFileContent
+        - relink
+        - symlink
+        - copy
+        - mkdir
+    StagingCommand:
+      type: object
+      properties:
+        command:
+          $ref: '#/components/schemas/StagingCommandName'
+        target:
+          type: string
+        resolved:
+          type: string
+        content:
+          type: string
+        mode:
+          type: integer
+        ensureWritable:
+          type: boolean
+        recursive:
+          type: boolean
+      required:
+        - command
+    LoadListingEnum:
+      type: string
+      enum:
+        - no_listing
+        - shallow_listing
+        - deep_listing
+    OutputBinding:
+      type: object
+      properties:
+        name:
+          type: string
+        secondaryFiles:
+          type: array
+          items:
+            type: object
+            properties:
+              pattern:
+                type: string
+              requiredBoolean:
+                type: boolean
+              requiredString:
+                type: string
+            required:
+              - pattern
+        loadContents:
+          type: boolean
+        loadListing:
+          $ref: '#/components/schemas/LoadListingEnum'
+        glob:
+          type: array
+          items:
+            type: string
+        outputEval:
+          type: string
+      required:
+        - name
+        - secondaryFiles
+    ChildFile:
+      type: object
+      properties:
+        class:
+          type: string
+          enum:
+            - File
+        location:
+          type: string
+        path:
+          type: string
+        basename:
+          type: string
+        dirname:
+          type: string
+        nameroot:
+          type: string
+        nameext:
+          type: string
+        checksum:
+          type: string
+        size:
+          type: number
+        format:
+          type: string
+        contents:
+          type: string
+        writable:
+          type: boolean
+      required:
+        - class
+    ChildDirectory:
+      type: object
+      properties:
+        class:
+          type: string
+          enum:
+            - Directory
+        location:
+          type: string
+        path:
+          type: string
+        basename:
+          type: string
+        dirname:
+          type: string
+        writable:
+          type: boolean
+      required:
+        - class
+    File:
+      allOf:
+        - $ref: '#/components/schemas/ChildFile'
+        - type: object
+          properties:
+            secondaryFiles:
+              type: array
+              items:
+                anyOf:
+                  - $ref: '#/components/schemas/ChildFile'
+                  - $ref: '#/components/schemas/ChildDirectory'
+    Directory:
+      allOf:
+        - $ref: '#/components/schemas/ChildDirectory'
+        - type: object
+          properties:
+            listing:
+              type: array
+              items:
+                anyOf:
+                  - $ref: '#/components/schemas/ChildFile'
+                  - $ref: '#/components/schemas/ChildDirectory'
+    JobFinishedRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        exitCode:
+          type: integer
+        results:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              anyOf:
+                - $ref: '#/components/schemas/File'
+                - $ref: '#/components/schemas/Directory'
+      required:
+        - id
+        - exitCode
+        - results
+  parameters: {}
+paths:
+  /api/getExectableJob:
+    post:
+      description: Get executable job
+      summary: Get a single user
+      responses:
+        '200':
+          description: Exectable jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    staging:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/StagingCommand'
+                    commands:
+                      type: array
+                      items:
+                        type: string
+                    stdin_path:
+                      type: string
+                    stdout_path:
+                      type: string
+                    stderr_path:
+                      type: string
+                    env:
+                      type: object
+                      additionalProperties:
+                        type: string
+                    cwd:
+                      type: string
+                    builderOutdir:
+                      type: string
+                    timelimit:
+                      type: integer
+                    outputBindings:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/OutputBinding'
+                    vols:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          resolved:
+                            type: string
+                          target:
+                            type: string
+                          type:
+                            type: string
+                          staged:
+                            type: boolean
+                        required:
+                          - resolved
+                          - target
+                          - type
+                          - staged
+                    inplace_update:
+                      type: boolean
+                  required:
+                    - id
+                    - staging
+                    - commands
+                    - env
+                    - cwd
+                    - builderOutdir
+                    - outputBindings
+                    - vols
+                    - inplace_update
+  /api/do_eval:
+    post:
+      description: report job failed
+      summary: report job failed
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: string
+                ex:
+                  type: string
+                context:
+                  anyOf:
+                    - $ref: '#/components/schemas/File'
+                    - $ref: '#/components/schemas/Directory'
+              required:
+                - id
+                - ex
+      responses:
+        '200':
+          description: Exectable jobs
+          content:
+            application/json:
+              schema:
+                nullable: true
+  /api/jobFailed:
+    post:
+      description: report job failed
+      summary: report job failed
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: string
+                errorMsg:
+                  type: string
+              required:
+                - id
+                - errorMsg
+      responses:
+        '200':
+          description: Exectable jobs
+          content:
+            application/json:
+              schema:
+                type: string
+  /api/jobFinished:
+    post:
+      description: report job finished
+      summary: report job finished
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobFinishedRequest'
+      responses:
+        '200':
+          description: Exectable jobs
+          content:
+            application/json:
+              schema:
+                type: string

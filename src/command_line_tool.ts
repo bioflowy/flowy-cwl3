@@ -552,23 +552,26 @@ export class CommandLineTool extends Process {
     }
 
     const limit_field = timelimit.timelimit;
+    let timelimit_eval: number | undefined = undefined;
     if (typeof limit_field === 'string') {
-      let timelimit_eval = await builder.do_eval(limit_field);
-      if (timelimit_eval && typeof timelimit_eval !== 'number') {
-        throw new WorkflowException(
-          `'timelimit' expression must evaluate to a long/int. Got 
-                ${str(timelimit_eval)} for expression ${limit_field}.`,
-        );
-      } else {
-        timelimit_eval = limit_field;
+      const time_eval = await builder.do_eval(limit_field);
+      if (time_eval) {
+        if (typeof time_eval === 'number') {
+          timelimit_eval = time_eval;
+        } else {
+          throw new WorkflowException(
+            `'timelimit' expression must evaluate to a long/int. Got 
+                ${str(time_eval)} for expression ${limit_field}.`,
+          );
+        }
       }
-      if (typeof timelimit_eval !== 'number' || timelimit_eval < 0) {
-        throw new WorkflowException(`timelimit must be an integer >= 0, got: ${timelimit_eval}`);
-      }
-      j.timelimit = timelimit_eval;
-    } else {
-      j.timelimit = limit_field;
+    } else if (typeof limit_field === 'number') {
+      timelimit_eval = limit_field;
     }
+    if (typeof timelimit_eval !== 'number' || timelimit_eval < 0) {
+      throw new WorkflowException(`timelimit must be an integer >= 0, got: ${timelimit_eval}`);
+    }
+    j.timelimit = timelimit_eval;
   }
 
   async handle_network_access(builder: Builder, j: JobBase): Promise<void> {
