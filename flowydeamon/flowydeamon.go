@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -194,7 +195,49 @@ func abspath(src string, basedir string) (string, error) {
 
 	return abpath, nil
 }
+func reportFailed(c *APIClient, jobId string, err error) {
+	ctx := context.Background()
+	r := c.DefaultAPI.ApiJobFailedPost(ctx)
+	r.apiJobFailedPostRequest = &ApiJobFailedPostRequest{
+		Id:       jobId,
+		ErrorMsg: err.Error(),
+	}
+	r.Execute()
+}
+func relinkInitialWorkDir(vols []MapperEnt, hostOutDir, containerOutDir string, inplaceUpdate bool) error {
+	for _, vol := range vols {
+		if !vol.Staged {
+			continue
+		}
+		if contains([]string{"File", "Directory"}, vol.Type) ||
+			(inplaceUpdate && contains([]string{"WritableFile", "WritableDirectory"}, vol.Type)) {
+			if !strings.HasPrefix(vol.Target, containerOutDir) {
+				continue
+			}
+			hostOutDirTgt := filepath.Join(hostOutDir, vol.Target[len(containerOutDir)+1:])
+			stat, err := os.Lstat(hostOutDirTgt)
 
+			if err == nil {
+				if (stat.Mode()&os.ModeSymlink != 0) || !stat.IsDir() {
+					if err := os.Remove(hostOutDirTgt); err != nil && !errors.Is(err, os.ErrPermission) && !errors.Is(err, os.ErrNotExist) {
+						return err
+					}
+				} else if stat.IsDir() && !strings.HasPrefix(vol.Resolved, "_:") {
+					if err := removeIgnorePermissionError(hostOutDirTgt); err != nil {
+						return err
+					}
+				}
+			}
+
+			if !strings.HasPrefix(vol.Resolved, "_:") {
+				if err := os.Symlink(vol.Resolved, hostOutDirTgt); err != nil && !os.IsExist(err) {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
 func GetAndExecuteJob(c *APIClient) {
 	ctx := context.Background()
 	res, httpres, err := c.DefaultAPI.ApiGetExectableJobPost(ctx).Execute()
@@ -223,17 +266,25 @@ func GetAndExecuteJob(c *APIClient) {
 				job.Cwd,
 				true,
 			)
+			if err != nil {
+				reportFailed(c, job.Id, err)
+				return
+			}
 			results := map[string][]ApiDoEvalPostRequestContext{}
 			if len(files) > 0 {
 				results["cwl.output.json"] = files
 			}
 			for _, output := range job.OutputBindings {
-				files2, _ := globOutput(
+				files2, err := globOutput(
 					job.BuilderOutdir,
 					output,
 					job.Cwd,
 					true,
 				)
+				if err != nil {
+					reportFailed(c, job.Id, err)
+					return
+				}
 				if len(files2) > 0 {
 					results[output.Name] = files2
 					for _, file := range files2 {
@@ -734,16 +785,16 @@ func splitext(path string) (root, ext string) {
 }
 
 // convertToFileOrDirectory determines if the given path is a file or directory and returns the corresponding struct.
-func convertToFileOrDirectory(builderOutdir, prefix, path1 string) (*File, *Directory) {
+func convertToFileOrDirectory(builderOutdir, prefix, path1 string) (*File, *Directory, error) {
 	decodedBasename := filepath.Base(path1)
 	stat, err := os.Stat(path1)
 	if err != nil {
-		panic(err) // or handle the error as appropriate
+		return nil, nil, err
 	}
 
 	relPath, err := filepath.Rel(prefix, path1)
 	if err != nil {
-		panic(err) // or handle the error as appropriate
+		return nil, nil, err
 	}
 
 	if stat.Mode().IsRegular() {
@@ -757,7 +808,7 @@ func convertToFileOrDirectory(builderOutdir, prefix, path1 string) (*File, *Dire
 			Nameroot: &nameroot,
 			Nameext:  &nameext,
 		}
-		return &file, nil
+		return &file, nil, nil
 	} else {
 		path2 := filepath.Join(builderOutdir, filepath.FromSlash(relPath))
 		directory := Directory{
@@ -766,85 +817,94 @@ func convertToFileOrDirectory(builderOutdir, prefix, path1 string) (*File, *Dire
 			Path:     &path2,
 			Basename: &decodedBasename,
 		}
-		return nil, &directory
+		return nil, &directory, nil
 	}
 }
 
-// func listdir(dir, filepath string) ([]string, error) {
-// 	// 絶対パスへの変換（エラーハンドリングを含む）
-// 	path, err := abspath(filepath, dir)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	// ディレクトリ内のエントリを取得
-// 	entries, err := ioutil.ReadDir(absPath)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+func listdir(dir, fn string) ([]string, error) {
+	absPath, err := abspath(fn, dir)
+	if err != nil {
+		return nil, err
+	}
+	// ディレクトリ内のエントリを取得
+	entries, err := ioutil.ReadDir(absPath)
+	if err != nil {
+		return nil, err
+	}
 
-// 	// 各エントリのURIを作成
-// 	var uris []string
-// 	for _, entry := range entries {
-// 		entryPath := filepath.Join(absPath, entry.Name())
-// 		uri := "file://" + entryPath
-// 		if strings.HasPrefix(fn, "file://") {
-// 			if strings.HasSuffix(fn, "/") {
-// 				uri = fn + entry.Name()
-// 			} else {
-// 				uri = fn + "/" + entry.Name()
-// 			}
-// 		}
-// 		uris = append(uris, uri)
-// 	}
+	// 各エントリのURIを作成
+	var uris []string
+	for _, entry := range entries {
+		entryPath := filepath.Join(absPath, entry.Name())
+		uri := "file://" + entryPath
+		if strings.HasPrefix(fn, "file://") {
+			if strings.HasSuffix(fn, "/") {
+				uri = fn + entry.Name()
+			} else {
+				uri = fn + "/" + entry.Name()
+			}
+		}
+		uris = append(uris, uri)
+	}
 
-// 	return uris, nil
-// }
-
-// func get_listing(outdir string,dir *Directory, recursive bool) error {
-// 	var listing []FileAllOfSecondaryFilesInner = [];
-// 	const loc = dir.location;
-// 	ls,err := listdir(outdir, loc)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	for _,ld := range ls {
-// 		if (isDir(outdir,ld)) {
-// 			const ent: Directory = {
-// 			class: 'Directory',
-// 			location: ld,
-// 			basename: bn,
-// 			};
-// 			// if (recursive) {
-// 			// get_listing(fs_access, ent, recursive);
-// 			// }
-// 			listing.push(ent);
-// 		} else {
-// 			listing.push(FileAllOfSecondaryFilesInner{
-// 				ChildFile: File{
-// 					Location: ld,
-// 					Basename: bn
-// 				}
-// 			);
-// 		}
-// 	}
-// 	rec.listing = listing;
-
-// }
+	return uris, nil
+}
+func basename(path string) string {
+	if strings.HasPrefix(path, "file:/") {
+		// 文字列が "file:/" で始まる場合、これを取り除く
+		path = strings.TrimPrefix(path, "file:/")
+	}
+	return filepath.Base(path)
+}
+func get_listing(outdir string, dir *Directory, recursive bool) error {
+	var listing = []FileAllOfSecondaryFilesInner{}
+	ls, err := listdir(outdir, *dir.Location)
+	if err != nil {
+		return err
+	}
+	for _, ld := range ls {
+		fileUri(ld, false)
+		if isDir(outdir, ld) {
+			bn := basename(ld)
+			ent := ChildDirectory{
+				Class:    "Directory",
+				Location: &ld,
+				Basename: &bn,
+			}
+			// if (recursive) {
+			// get_listing(fs_access, ent, recursive);
+			// }
+			listing = append(listing, FileAllOfSecondaryFilesInner{
+				ChildDirectory: &ent,
+			})
+		} else {
+			bn := basename(ld)
+			ent := ChildFile{
+				Class:    "File",
+				Location: &ld,
+				Basename: &bn,
+			}
+			listing = append(listing, FileAllOfSecondaryFilesInner{
+				ChildFile: &ent,
+			})
+		}
+	}
+	dir.Listing = listing
+	return nil
+}
 func globOutput(builderOutdir string, binding OutputBinding, outdir string, computeChecksum bool) ([]ApiDoEvalPostRequestContext, error) {
 	var results []ApiDoEvalPostRequestContext
 	// Example of globbing in Go
 	for _, glob := range binding.Glob {
-		matches, err := filepath.Glob(filepath.Join(outdir, glob)) // This needs to be adapted to your specific logic
+		globPath := Join(outdir, glob)
+		matches, err := filepath.Glob(globPath) // This needs to be adapted to your specific logic
 		if err != nil {
 			return results, err
 		}
 
 		for _, match := range matches {
-			f, d := convertToFileOrDirectory(builderOutdir, outdir, match)
+			f, d, err := convertToFileOrDirectory(builderOutdir, outdir, match)
 			if f != nil {
-				// if f != nil && binding.LoadListing != nil && *binding.LoadListing != NO_LISTING {
-				// 	get_listing(f, *binding.LoadListing == DEEP_LISTING)
-				// }
 				if binding.LoadContents != nil && *binding.LoadContents {
 					content, _ := contentLimitRespectedReadBytes(*f.Location)
 					f.Contents = &content
@@ -856,7 +916,12 @@ func globOutput(builderOutdir string, binding OutputBinding, outdir string, comp
 
 				results = append(results, ApiDoEvalPostRequestContext{File: f})
 			} else if d != nil {
+				if binding.LoadListing != nil && *binding.LoadListing != NO_LISTING {
+					get_listing(outdir, d, *binding.LoadListing == DEEP_LISTING)
+				}
 				results = append(results, ApiDoEvalPostRequestContext{Directory: d})
+			} else if err != nil {
+				return results, err
 			}
 		}
 

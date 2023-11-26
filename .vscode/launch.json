@@ -25,12 +25,17 @@
       "runtimeExecutable": "/home/uehara/.nodenv/shims/node",
       "console": "integratedTerminal",
       "preLaunchTask": "npm build",
-      "runtimeArgs": [
-        "${workspaceFolder}/bin/flowycwl.js",
-        "tests/initialworkdir-glob-fullpath.cwl",
-        "tests/initialworkdirrequirement-docker-out-job.json"
-      ]
+      "runtimeArgs": ["${workspaceFolder}/bin/flowycwl.js", "tests/listing_shallow3.cwl", "tests/listing-job.yml"]
     },
+    {
+      "name": "flowydeamon",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "cwd": "${workspaceFolder}/flowydeamon",
+      "program": "${workspaceFolder}/flowydeamon/flowydeamon.go"
+    },
+
     {
       "name": "daemon",
       "type": "node",

@@ -1,19 +1,23 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { RuntimeContext } from './context.js';
 import { Directory, File } from './cwltypes.js';
 import { abspath } from './stdfsaccess.js';
 import { uriFilePath, dedup, downloadHttpFile, isFile, isDirectory } from './utils.js';
+extendZodWithOpenApi(z);
 
 // MapperEnt Schema
-export const MapperEntSchema = z.object({
-  resolved: z.string(),
-  target: z.string(),
-  type: z.string(),
-  staged: z.boolean(),
-});
+export const MapperEntSchema = z
+  .object({
+    resolved: z.string(),
+    target: z.string(),
+    type: z.string(),
+    staged: z.boolean(),
+  })
+  .openapi('MapperEnt');
 export type MapperEnt = z.infer<typeof MapperEntSchema>;
 
 export class PathMapper {

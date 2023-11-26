@@ -148,6 +148,27 @@ components:
       - name
       - secondaryFiles
       type: object
+    MapperEnt:
+      example:
+        staged: true
+        type: type
+        resolved: resolved
+        target: target
+      properties:
+        resolved:
+          type: string
+        target:
+          type: string
+        type:
+          type: string
+        staged:
+          type: boolean
+      required:
+      - resolved
+      - staged
+      - target
+      - type
+      type: object
     ChildFile:
       properties:
         class:
@@ -239,27 +260,6 @@ components:
       - exitCode
       - id
       - results
-      type: object
-    _api_getExectableJob_post_200_response_inner_vols_inner:
-      example:
-        staged: true
-        type: type
-        resolved: resolved
-        target: target
-      properties:
-        resolved:
-          type: string
-        target:
-          type: string
-        type:
-          type: string
-        staged:
-          type: boolean
-      required:
-      - resolved
-      - staged
-      - target
-      - type
       type: object
     _api_getExectableJob_post_200_response_inner:
       example:
@@ -362,7 +362,7 @@ components:
           type: array
         vols:
           items:
-            $ref: '#/components/schemas/_api_getExectableJob_post_200_response_inner_vols_inner'
+            $ref: '#/components/schemas/MapperEnt'
           type: array
         inplace_update:
           type: boolean

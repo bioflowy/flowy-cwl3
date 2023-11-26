@@ -31,7 +31,7 @@ type ApiGetExectableJobPost200ResponseInner struct {
 	BuilderOutdir string `json:"builderOutdir"`
 	Timelimit *int32 `json:"timelimit,omitempty"`
 	OutputBindings []OutputBinding `json:"outputBindings"`
-	Vols []ApiGetExectableJobPost200ResponseInnerVolsInner `json:"vols"`
+	Vols []MapperEnt `json:"vols"`
 	InplaceUpdate bool `json:"inplace_update"`
 }
 
@@ -41,7 +41,7 @@ type _ApiGetExectableJobPost200ResponseInner ApiGetExectableJobPost200ResponseIn
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewApiGetExectableJobPost200ResponseInner(id string, staging []StagingCommand, commands []string, env map[string]string, cwd string, builderOutdir string, outputBindings []OutputBinding, vols []ApiGetExectableJobPost200ResponseInnerVolsInner, inplaceUpdate bool) *ApiGetExectableJobPost200ResponseInner {
+func NewApiGetExectableJobPost200ResponseInner(id string, staging []StagingCommand, commands []string, env map[string]string, cwd string, builderOutdir string, outputBindings []OutputBinding, vols []MapperEnt, inplaceUpdate bool) *ApiGetExectableJobPost200ResponseInner {
 	this := ApiGetExectableJobPost200ResponseInner{}
 	this.Id = id
 	this.Staging = staging
@@ -360,9 +360,9 @@ func (o *ApiGetExectableJobPost200ResponseInner) SetOutputBindings(v []OutputBin
 }
 
 // GetVols returns the Vols field value
-func (o *ApiGetExectableJobPost200ResponseInner) GetVols() []ApiGetExectableJobPost200ResponseInnerVolsInner {
+func (o *ApiGetExectableJobPost200ResponseInner) GetVols() []MapperEnt {
 	if o == nil {
-		var ret []ApiGetExectableJobPost200ResponseInnerVolsInner
+		var ret []MapperEnt
 		return ret
 	}
 
@@ -371,7 +371,7 @@ func (o *ApiGetExectableJobPost200ResponseInner) GetVols() []ApiGetExectableJobP
 
 // GetVolsOk returns a tuple with the Vols field value
 // and a boolean to check if the value has been set.
-func (o *ApiGetExectableJobPost200ResponseInner) GetVolsOk() ([]ApiGetExectableJobPost200ResponseInnerVolsInner, bool) {
+func (o *ApiGetExectableJobPost200ResponseInner) GetVolsOk() ([]MapperEnt, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -379,7 +379,7 @@ func (o *ApiGetExectableJobPost200ResponseInner) GetVolsOk() ([]ApiGetExectableJ
 }
 
 // SetVols sets field value
-func (o *ApiGetExectableJobPost200ResponseInner) SetVols(v []ApiGetExectableJobPost200ResponseInnerVolsInner) {
+func (o *ApiGetExectableJobPost200ResponseInner) SetVols(v []MapperEnt) {
 	o.Vols = v
 }
 

@@ -71,6 +71,22 @@ components:
       required:
         - name
         - secondaryFiles
+    MapperEnt:
+      type: object
+      properties:
+        resolved:
+          type: string
+        target:
+          type: string
+        type:
+          type: string
+        staged:
+          type: boolean
+      required:
+        - resolved
+        - target
+        - type
+        - staged
     ChildFile:
       type: object
       properties:
@@ -211,21 +227,7 @@ paths:
                     vols:
                       type: array
                       items:
-                        type: object
-                        properties:
-                          resolved:
-                            type: string
-                          target:
-                            type: string
-                          type:
-                            type: string
-                          staged:
-                            type: boolean
-                        required:
-                          - resolved
-                          - target
-                          - type
-                          - staged
+                        $ref: '#/components/schemas/MapperEnt'
                     inplace_update:
                       type: boolean
                   required:
