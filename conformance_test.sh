@@ -5,7 +5,7 @@ SCRIPT_PATH=$(readlink -f "$0")
 SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 
 cd flowydeamon
-./flowydeamon &> flowydeamon.log &
+./flowydeamon 2> flowydeamon.log &
 cd ..
 
 mkdir work
@@ -23,6 +23,6 @@ tar -xzf "${GIT_TARGET}.tar.gz"
 
 cd "${REPO}-${GIT_TARGET}"
 
-cwltest --test conformance_tests.yaml --badgedir badge --tool ../flowycwl 2>&1 | tee conformance_test.log
+cwltest --test conformance_tests.yaml --badgedir badge --tool ${SCRIPT_DIR}/flowycwl 2>&1 | tee conformance_test.log
 
 killall flowydeamon

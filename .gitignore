@@ -50,6 +50,7 @@ tests/
 web_modules/
 
 test_work/
+work/
 # TypeScript cache
 *.tsbuildinfo
 
