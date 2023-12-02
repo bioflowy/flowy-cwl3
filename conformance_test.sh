@@ -4,9 +4,9 @@ SCRIPT_PATH=$(readlink -f "$0")
 # スクリプトのディレクトリパスを取得
 SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 
-pushd flowydeamon
+cd flowydeamon
 ./flowydeamon &> flowydeamon.log &
-popd
+cd ..
 
 mkdir work
 cd work
