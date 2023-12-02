@@ -2,6 +2,13 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "flowydeamonp",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/flowydeamon"
+    },
+    {
       "name": "dev",
       "type": "node",
       "request": "launch",
@@ -21,11 +28,40 @@
       "name": "exec",
       "type": "node",
       "request": "launch",
-      "cwd": "${workspaceFolder}/work",
+      "cwd": "${workspaceFolder}/test_work",
       "runtimeExecutable": "/home/uehara/.nodenv/shims/node",
       "console": "integratedTerminal",
       "preLaunchTask": "npm build",
-      "runtimeArgs": ["${workspaceFolder}/bin/flowycwl.js", "test_work/search.cwl#main", "test_work/search-job.json"]
+      "runtimeArgs": ["${workspaceFolder}/bin/flowycwl.js", "tests/listing_shallow3.cwl", "tests/listing-job.yml"]
+    },
+    {
+      "name": "flowydeamon",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "cwd": "${workspaceFolder}/flowydeamon",
+      "program": "${workspaceFolder}/flowydeamon/flowydeamon.go"
+    },
+
+    {
+      "name": "daemon",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "/home/uehara/.nodenv/shims/node",
+      "console": "integratedTerminal",
+      "preLaunchTask": "npm build",
+      "runtimeArgs": ["${workspaceFolder}/bin/flowyd.js"]
+    },
+    {
+      "name": "generate_openapi",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "/home/uehara/.nodenv/shims/node",
+      "console": "integratedTerminal",
+      "preLaunchTask": "npm build",
+      "runtimeArgs": ["${workspaceFolder}/bin/generate_openapidoc.js"]
     },
     {
       "name": "test",

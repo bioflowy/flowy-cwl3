@@ -1,6 +1,15 @@
 #!/bin/sh
+SCRIPT_PATH=$(readlink -f "$0")
 
-cd "$(dirname "$0")/work"
+# スクリプトのディレクトリパスを取得
+SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
+
+cd flowydeamon
+./flowydeamon 2> flowydeamon.log &
+cd ..
+
+mkdir work
+cd work
 VERSION=${VERSION:-"v1.2"}
 
 # Which commit of the standard's repo to use
@@ -11,6 +20,9 @@ wget "https://github.com/common-workflow-language/${REPO}/archive/${GIT_TARGET}.
 
 tar -xzf "${GIT_TARGET}.tar.gz"
 
+
 cd "${REPO}-${GIT_TARGET}"
 
-cwltest --test conformance_tests.yaml --badgedir badge --tool $(dirname "$0")/flowycwl 2>&1 | tee conformance_test.log
+cwltest --test conformance_tests.yaml --badgedir badge --tool ${SCRIPT_DIR}/flowycwl 2>&1 | tee conformance_test.log
+
+killall flowydeamon

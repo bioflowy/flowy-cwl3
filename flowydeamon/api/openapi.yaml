@@ -1,0 +1,424 @@
+openapi: 3.0.0
+info:
+  description: This is the API
+  title: My API
+  version: 1.0.0
+servers:
+- url: v1
+paths:
+  /api/getExectableJob:
+    post:
+      description: Get executable job
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/_api_getExectableJob_post_200_response_inner'
+                type: array
+          description: Exectable jobs
+      summary: Get a single user
+  /api/do_eval:
+    post:
+      description: report job failed
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/_api_do_eval_post_request'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                nullable: true
+          description: Exectable jobs
+      summary: report job failed
+  /api/jobFailed:
+    post:
+      description: report job failed
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/_api_jobFailed_post_request'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: string
+          description: Exectable jobs
+      summary: report job failed
+  /api/jobFinished:
+    post:
+      description: report job finished
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobFinishedRequest'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: string
+          description: Exectable jobs
+      summary: report job finished
+components:
+  parameters: {}
+  schemas:
+    StagingCommandName:
+      enum:
+      - writeFileContent
+      - relink
+      - symlink
+      - copy
+      - mkdir
+      type: string
+    StagingCommand:
+      example:
+        mode: 0
+        ensureWritable: true
+        command: null
+        content: content
+        recursive: true
+        target: target
+        resolved: resolved
+      properties:
+        command:
+          $ref: '#/components/schemas/StagingCommandName'
+        target:
+          type: string
+        resolved:
+          type: string
+        content:
+          type: string
+        mode:
+          type: integer
+        ensureWritable:
+          type: boolean
+        recursive:
+          type: boolean
+      required:
+      - command
+      type: object
+    LoadListingEnum:
+      enum:
+      - no_listing
+      - shallow_listing
+      - deep_listing
+      type: string
+    OutputBinding:
+      example:
+        loadContents: true
+        loadListing: null
+        outputEval: outputEval
+        name: name
+        glob:
+        - glob
+        - glob
+        secondaryFiles:
+        - pattern: pattern
+          requiredBoolean: true
+          requiredString: requiredString
+        - pattern: pattern
+          requiredBoolean: true
+          requiredString: requiredString
+      properties:
+        name:
+          type: string
+        secondaryFiles:
+          items:
+            $ref: '#/components/schemas/OutputBinding_secondaryFiles_inner'
+          type: array
+        loadContents:
+          type: boolean
+        loadListing:
+          $ref: '#/components/schemas/LoadListingEnum'
+        glob:
+          items:
+            type: string
+          type: array
+        outputEval:
+          type: string
+      required:
+      - name
+      - secondaryFiles
+      type: object
+    MapperEnt:
+      example:
+        staged: true
+        type: type
+        resolved: resolved
+        target: target
+      properties:
+        resolved:
+          type: string
+        target:
+          type: string
+        type:
+          type: string
+        staged:
+          type: boolean
+      required:
+      - resolved
+      - staged
+      - target
+      - type
+      type: object
+    ChildFile:
+      properties:
+        class:
+          enum:
+          - File
+          type: string
+        location:
+          type: string
+        path:
+          type: string
+        basename:
+          type: string
+        dirname:
+          type: string
+        nameroot:
+          type: string
+        nameext:
+          type: string
+        checksum:
+          type: string
+        size:
+          type: number
+        format:
+          type: string
+        contents:
+          type: string
+        writable:
+          type: boolean
+      required:
+      - class
+      type: object
+    ChildDirectory:
+      properties:
+        class:
+          enum:
+          - Directory
+          type: string
+        location:
+          type: string
+        path:
+          type: string
+        basename:
+          type: string
+        dirname:
+          type: string
+        writable:
+          type: boolean
+      required:
+      - class
+      type: object
+    File:
+      allOf:
+      - $ref: '#/components/schemas/ChildFile'
+      - properties:
+          secondaryFiles:
+            items:
+              $ref: '#/components/schemas/File_allOf_secondaryFiles_inner'
+            type: array
+        type: object
+    Directory:
+      allOf:
+      - $ref: '#/components/schemas/ChildDirectory'
+      - properties:
+          listing:
+            items:
+              $ref: '#/components/schemas/File_allOf_secondaryFiles_inner'
+            type: array
+        type: object
+    JobFinishedRequest:
+      example:
+        exitCode: 0
+        id: id
+        results:
+          key:
+          - null
+          - null
+      properties:
+        id:
+          type: string
+        exitCode:
+          type: integer
+        results:
+          additionalProperties:
+            items:
+              $ref: '#/components/schemas/_api_do_eval_post_request_context'
+            type: array
+          type: object
+      required:
+      - exitCode
+      - id
+      - results
+      type: object
+    _api_getExectableJob_post_200_response_inner:
+      example:
+        stdout_path: stdout_path
+        builderOutdir: builderOutdir
+        env:
+          key: env
+        timelimit: 6
+        inplace_update: true
+        stderr_path: stderr_path
+        cwd: cwd
+        stdin_path: stdin_path
+        vols:
+        - staged: true
+          type: type
+          resolved: resolved
+          target: target
+        - staged: true
+          type: type
+          resolved: resolved
+          target: target
+        id: id
+        staging:
+        - mode: 0
+          ensureWritable: true
+          command: null
+          content: content
+          recursive: true
+          target: target
+          resolved: resolved
+        - mode: 0
+          ensureWritable: true
+          command: null
+          content: content
+          recursive: true
+          target: target
+          resolved: resolved
+        commands:
+        - commands
+        - commands
+        outputBindings:
+        - loadContents: true
+          loadListing: null
+          outputEval: outputEval
+          name: name
+          glob:
+          - glob
+          - glob
+          secondaryFiles:
+          - pattern: pattern
+            requiredBoolean: true
+            requiredString: requiredString
+          - pattern: pattern
+            requiredBoolean: true
+            requiredString: requiredString
+        - loadContents: true
+          loadListing: null
+          outputEval: outputEval
+          name: name
+          glob:
+          - glob
+          - glob
+          secondaryFiles:
+          - pattern: pattern
+            requiredBoolean: true
+            requiredString: requiredString
+          - pattern: pattern
+            requiredBoolean: true
+            requiredString: requiredString
+      properties:
+        id:
+          type: string
+        staging:
+          items:
+            $ref: '#/components/schemas/StagingCommand'
+          type: array
+        commands:
+          items:
+            type: string
+          type: array
+        stdin_path:
+          type: string
+        stdout_path:
+          type: string
+        stderr_path:
+          type: string
+        env:
+          additionalProperties:
+            type: string
+          type: object
+        cwd:
+          type: string
+        builderOutdir:
+          type: string
+        timelimit:
+          type: integer
+        outputBindings:
+          items:
+            $ref: '#/components/schemas/OutputBinding'
+          type: array
+        vols:
+          items:
+            $ref: '#/components/schemas/MapperEnt'
+          type: array
+        inplace_update:
+          type: boolean
+      required:
+      - builderOutdir
+      - commands
+      - cwd
+      - env
+      - id
+      - inplace_update
+      - outputBindings
+      - staging
+      - vols
+      type: object
+    _api_do_eval_post_request_context:
+      anyOf:
+      - $ref: '#/components/schemas/File'
+      - $ref: '#/components/schemas/Directory'
+    _api_do_eval_post_request:
+      properties:
+        id:
+          type: string
+        ex:
+          type: string
+        context:
+          $ref: '#/components/schemas/_api_do_eval_post_request_context'
+      required:
+      - ex
+      - id
+      type: object
+    _api_jobFailed_post_request:
+      properties:
+        id:
+          type: string
+        errorMsg:
+          type: string
+      required:
+      - errorMsg
+      - id
+      type: object
+    OutputBinding_secondaryFiles_inner:
+      example:
+        pattern: pattern
+        requiredBoolean: true
+        requiredString: requiredString
+      properties:
+        pattern:
+          type: string
+        requiredBoolean:
+          type: boolean
+        requiredString:
+          type: string
+      required:
+      - pattern
+      type: object
+    File_allOf_secondaryFiles_inner:
+      anyOf:
+      - $ref: '#/components/schemas/ChildFile'
+      - $ref: '#/components/schemas/ChildDirectory'

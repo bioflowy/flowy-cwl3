@@ -1,4 +1,5 @@
 /* eslint-disable no-use-before-define */
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import * as cwl from 'cwl-ts-auto';
 import {
   enum_d062602be0b4b8fd33e69e29a841317b6ab665bc as ArrayTypeEnum,
@@ -7,8 +8,11 @@ import {
 } from 'cwl-ts-auto';
 import { Dictionary } from 'cwl-ts-auto/dist/util/Dict.js';
 import type { LoadingOptions } from 'cwl-ts-auto/dist/util/LoadingOptions.js';
+import { z } from 'zod';
 import { ToolRequirement } from './types.js';
 import { CWLOutputType } from './utils.js';
+extendZodWithOpenApi(z);
+
 export interface IOParam {
   extensionFields?: Dictionary<unknown>;
   name?: undefined | string;
@@ -140,38 +144,46 @@ export interface CommandOutputBinding {
   glob?: undefined | string | string[];
   outputEval?: undefined | string;
 }
-export interface OutputBinding {
-  name: string;
-  secondaryFiles: SecondaryFileSchema[];
-  loadContents?: boolean;
-  loadListing?: undefined | cwl.LoadListingEnum;
-  glob?: string[];
-  outputEval?: undefined | string;
-}
-export interface File {
-  class: 'File';
-  location?: undefined | string;
-  path?: undefined | string;
-  basename?: undefined | string;
-  dirname?: undefined | string;
-  nameroot?: undefined | string;
-  nameext?: undefined | string;
-  checksum?: undefined | string;
-  size?: undefined | number;
-  secondaryFiles?: undefined | (File | Directory)[];
-  format?: undefined | string;
-  contents?: undefined | string;
-  writable?: undefined | boolean;
-}
-export interface Directory {
-  class: 'Directory';
-  location?: undefined | string;
-  path?: undefined | string;
-  basename?: undefined | string;
-  dirname?: undefined | string;
-  listing?: undefined | (File | Directory)[];
-  writable?: undefined | boolean;
-}
+const ChildFileSchema = z
+  .object({
+    class: z.literal('File'),
+    location: z.string().optional(),
+    path: z.string().optional(),
+    basename: z.string().optional(),
+    dirname: z.string().optional(),
+    nameroot: z.string().optional(),
+    nameext: z.string().optional(),
+    checksum: z.string().optional(),
+    size: z.number().optional(),
+    format: z.string().optional(),
+    contents: z.string().optional(),
+    writable: z.boolean().optional(),
+  })
+  .openapi('ChildFile');
+
+// ChildDirectory Schema
+const ChildDirectorySchema = z
+  .object({
+    class: z.literal('Directory'),
+    location: z.string().optional(),
+    path: z.string().optional(),
+    basename: z.string().optional(),
+    dirname: z.string().optional(),
+    writable: z.boolean().optional(),
+  })
+  .openapi('ChildDirectory');
+
+// File Schema
+export const FileSchema = ChildFileSchema.extend({
+  secondaryFiles: z.array(z.union([ChildFileSchema, ChildDirectorySchema])).optional(),
+}).openapi('File');
+export type File = z.infer<typeof FileSchema>;
+
+// Directory Schema
+export const DirectorySchema = ChildDirectorySchema.extend({
+  listing: z.array(z.union([ChildFileSchema, ChildDirectorySchema])).optional(),
+}).openapi('Directory');
+export type Directory = z.infer<typeof DirectorySchema>;
 
 export interface CommandInputParameter {
   id?: undefined | string;

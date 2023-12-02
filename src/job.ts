@@ -4,17 +4,16 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { DockerRequirement, ShellCommandRequirement } from 'cwl-ts-auto';
 import { v4 as uuidv4 } from 'uuid';
-import { executeCommand, executeJob } from './JobExecutor.js';
+import { OutputBinding, OutputSecondaryFile } from './JobExecutor.js';
 import { Builder } from './builder.js';
 import { RuntimeContext } from './context.js';
 import {
   CommandOutputParameter,
   Directory,
   File,
-  OutputBinding,
+  SecondaryFileSchema,
   Tool,
   isCommandOutputRecordSchema,
-  isIORecordSchema,
 } from './cwltypes.js';
 import { UnsupportedRequirement, ValueError, WorkflowException } from './errors.js';
 import { removeIgnorePermissionError } from './fileutils.js';
@@ -22,6 +21,7 @@ import { _logger } from './loghandler.js';
 import { MakePathMapper, MapperEnt, PathMapper } from './pathmapper.js';
 import { stage_files } from './process.js';
 import { SecretStore } from './secrets.js';
+import { getServer } from './server.js';
 import { LazyStaging } from './staging.js';
 import {
   type CWLObjectType,
@@ -76,9 +76,10 @@ export async function _job_popen(
   timelimit: number | undefined = undefined,
 ): Promise<[number, { [key: string]: (File | Directory)[] }]> {
   const id = uuidv4();
-  return executeCommand({
+  const server = getServer();
+  server.addBuilder(id, builder);
+  return server.execute(id, {
     id,
-    evaluator: async (id, ex, context) => builder.do_eval(ex, context),
     staging: staging.commands,
     commands,
     stdin_path,
@@ -505,7 +506,7 @@ async function createOutputBinding(outputs: CommandOutputParameter[], builder: B
       const binding: OutputBinding = {
         name: output.name,
         glob: globpatterns,
-        secondaryFiles: aslist(output.secondaryFiles),
+        secondaryFiles: aslist(output.secondaryFiles).map(convertSecondaryFiles),
         outputEval: output.outputBinding.outputEval,
         loadListing: output.outputBinding.loadListing,
         loadContents: output.outputBinding.loadContents ?? false,
@@ -514,6 +515,15 @@ async function createOutputBinding(outputs: CommandOutputParameter[], builder: B
     }
   }
   return outputBindings;
+}
+function convertSecondaryFiles(file: SecondaryFileSchema): OutputSecondaryFile {
+  if (typeof file.required === 'string') {
+    return { pattern: file.pattern, requiredString: file.required };
+  } else if (typeof file.required === 'boolean') {
+    return { pattern: file.pattern, requiredBoolean: file.required };
+  } else {
+    return { pattern: file.pattern };
+  }
 }
 
 export class CommandLineJob extends JobBase {
