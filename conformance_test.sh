@@ -1,9 +1,13 @@
 #!/bin/sh
+SCRIPT_PATH=$(readlink -f "$0")
 
-cd "$(dirname "$0")/flowydeamon"
+# スクリプトのディレクトリパスを取得
+SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
+
+cd "$(dirname "$SCRIPT_DIR")/flowydeamon"
 ./flowydeamon &> flowydeamon.log &
-
-cd "$(dirname "$0")/work"
+mkdir -p "${SCRIPT_DIR}/work"
+cd "${SCRIPT_DIR}/work"
 VERSION=${VERSION:-"v1.2"}
 
 # Which commit of the standard's repo to use
