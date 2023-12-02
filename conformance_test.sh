@@ -14,6 +14,7 @@ wget "https://github.com/common-workflow-language/${REPO}/archive/${GIT_TARGET}.
 
 tar -xzf "${GIT_TARGET}.tar.gz"
 
+
 cd "${REPO}-${GIT_TARGET}"
 
 cwltest --test conformance_tests.yaml --badgedir badge --tool ../flowycwl 2>&1 | tee conformance_test.log
