@@ -255,6 +255,7 @@ func GetAndExecuteJob(c *APIClient) {
 			if err != nil {
 				panic(err)
 			}
+			relinkInitialWorkDir(job.Vols, job.Cwd, job.BuilderOutdir, job.InplaceUpdate);
 			var glob1 = []string{"cwl.output.json"}
 			files, err := globOutput(
 				job.BuilderOutdir,

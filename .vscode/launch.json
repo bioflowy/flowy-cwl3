@@ -2,6 +2,13 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "flowydeamonp",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/flowydeamon"
+    },
+    {
       "name": "dev",
       "type": "node",
       "request": "launch",

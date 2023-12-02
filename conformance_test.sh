@@ -1,5 +1,8 @@
 #!/bin/sh
 
+cd "$(dirname "$0")/flowydeamon"
+./flowydeamon &> flowydeamon.log &
+
 cd "$(dirname "$0")/work"
 VERSION=${VERSION:-"v1.2"}
 
@@ -14,3 +17,5 @@ tar -xzf "${GIT_TARGET}.tar.gz"
 cd "${REPO}-${GIT_TARGET}"
 
 cwltest --test conformance_tests.yaml --badgedir badge --tool $(dirname "$0")/flowycwl 2>&1 | tee conformance_test.log
+
+killall flowydeamon
