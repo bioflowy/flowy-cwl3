@@ -9,12 +9,12 @@
       "program": "${workspaceFolder}/flowydeamon"
     },
     {
-      "name": "dev",
+      "name": "client",
       "type": "node",
       "request": "launch",
-      "cwd": "${workspaceFolder}",
-      "runtimeExecutable": "/home/uehara/.nodenv/shims/npm",
-      "runtimeArgs": ["run", "dev"]
+      "cwd": "${workspaceFolder}/work",
+      "runtimeExecutable": "/home/uehara/.nodenv/shims/node",
+      "runtimeArgs": ["run", "de"]
     },
     {
       "name": "edam_test",
@@ -28,7 +28,7 @@
       "name": "exec",
       "type": "node",
       "request": "launch",
-      "cwd": "${workspaceFolder}/test_work",
+      "cwd": "${workspaceFolder}/work",
       "runtimeExecutable": "/home/uehara/.nodenv/shims/node",
       "console": "integratedTerminal",
       "preLaunchTask": "npm build",
@@ -41,17 +41,6 @@
       "mode": "auto",
       "cwd": "${workspaceFolder}/flowydeamon",
       "program": "${workspaceFolder}/flowydeamon/flowydeamon.go"
-    },
-
-    {
-      "name": "daemon",
-      "type": "node",
-      "request": "launch",
-      "cwd": "${workspaceFolder}",
-      "runtimeExecutable": "/home/uehara/.nodenv/shims/node",
-      "console": "integratedTerminal",
-      "preLaunchTask": "npm build",
-      "runtimeArgs": ["${workspaceFolder}/bin/flowyd.js"]
     },
     {
       "name": "generate_openapi",
@@ -70,6 +59,14 @@
       "cwd": "${workspaceFolder}/cwl-v1.2-1.2.1_proposed",
       "runtimeExecutable": "/home/uehara/.nodenv/shims/npm",
       "runtimeArgs": ["run", "test"]
+    },
+    {
+      "name": "server",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "/home/uehara/.nodenv/shims/npm",
+      "runtimeArgs": ["run", "server"]
     }
   ]
 }

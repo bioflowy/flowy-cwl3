@@ -53,7 +53,7 @@ abstract class JobExecutor {
     }
 
     let finaloutdir: string | null = null;
-    const original_outdir = runtime_context.outdir;
+    const original_outdir = runtime_context.clientWorkDir;
     if (typeof original_outdir === 'string') {
       finaloutdir = path.resolve(original_outdir);
     }

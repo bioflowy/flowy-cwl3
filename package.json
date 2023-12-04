@@ -19,6 +19,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "npm run build && cd work && node ../bin/conformance_test.js",
+    "server": "npm run build && node bin/flowyd.js",
     "lint": "run-s -c lint:*",
     "lint:tsc": "tsc",
     "lint:eslint": "eslint .",
@@ -71,6 +72,8 @@
   ],
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^6.3.0",
+    "@trpc/client": "^10.44.1",
+    "@trpc/server": "^10.44.1",
     "@types/rdflib": "^1.2.0",
     "crypto": "^1.0.1",
     "cwl-ts-auto": "file:../cwl-ts-auto",
@@ -81,6 +84,7 @@
     "js-yaml": "^4.1.0",
     "lodash-es": "^4.17.21",
     "rdflib": "^2.2.32",
+    "superjson": "^2.2.1",
     "uuid": "^9.0.0",
     "winston": "^3.10.0",
     "yargs": "^17.7.2",
