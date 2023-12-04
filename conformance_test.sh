@@ -8,6 +8,8 @@ cd flowydeamon
 ./flowydeamon 2> flowydeamon.log &
 cd ..
 
+./flowy-server start
+
 mkdir work
 cd work
 VERSION=${VERSION:-"v1.2"}
@@ -25,4 +27,5 @@ cd "${REPO}-${GIT_TARGET}"
 
 cwltest --test conformance_tests.yaml --badgedir badge --tool ${SCRIPT_DIR}/flowycwl 2>&1 | tee conformance_test.log
 
+../flowy-server stop
 killall flowydeamon

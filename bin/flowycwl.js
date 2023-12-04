@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // @ts-check
 
-import { run } from '../dist/index.js';
+import { executeClient } from '../dist/client/client.js';
 
-run()
+executeClient()
   .then((e) => {
     process.exit(e);
   })

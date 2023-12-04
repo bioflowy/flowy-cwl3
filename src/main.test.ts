@@ -1,5 +1,6 @@
 import jsYaml from 'js-yaml';
 import { describe, expect, test } from 'vitest';
+import { RuntimeContext } from './context.js';
 import { exec } from './main.js';
 describe('conformance_test', () => {
   const data = jsYaml.load('conformance_test.yaml') as { [key: string]: any }[];
@@ -10,7 +11,8 @@ describe('conformance_test', () => {
       const job_path = testdata['job'] as string;
       const tool_path = testdata['job'] as string;
       const expected_outputs = testdata['output'] as string;
-      const [output, status] = await exec(tool_path, job_path);
+      const runtimeContext = new RuntimeContext({});
+      const [output, status] = await exec(runtimeContext, tool_path, job_path);
       expect(status).toBe('success');
       expect(output).toStrictEqual(expected_outputs);
     });

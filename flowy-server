@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# Fastifyサーバースクリプトのパス
+SERVER_SCRIPT="bin/flowy-server.js"
+
+# サーバープロセスを特定するための識別子
+SERVER_NAME="flowy-server.js"
+
+start_server() {
+    echo "starting flowy-server"
+    node $SERVER_SCRIPT >flowy-server.log 2>&1 &
+    echo "started flowy-server"
+}
+
+stop_server() {
+    echo "stopping flowy-server"
+    pkill -f $SERVER_SCRIPT
+    echo "flowy-server stopped"
+}
+
+# 引数によってアクションを決定
+case "$1" in
+    start)
+        start_server
+        ;;
+    stop)
+        stop_server
+        ;;
+    *)
+        echo "usage: $0 {start|stop}"
+        exit 1
+        ;;
+esac

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { OpenAPIRegistry, OpenApiGeneratorV3, extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
+import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
 import fastify, { FastifyReply, FastifyRequest } from 'fastify';
 import jsYaml from 'js-yaml';
 import { z } from 'zod';
@@ -7,6 +8,8 @@ import { JobExec, JobExecSchema } from './JobExecutor.js';
 import { Builder } from './builder.js';
 import { Directory, DirectorySchema, File, FileSchema } from './cwltypes.js';
 import { WorkflowException } from './errors.js';
+import { _logger } from './loghandler.js';
+import { appRouter } from './router/router.js';
 import { StagingCommandNameSchema } from './staging.js';
 import { CWLOutputType } from './utils.js';
 
@@ -52,7 +55,17 @@ export class Server {
   > = new Map();
   constructor() {
     this.server = fastify();
-
+  }
+  async initialize() {
+    await this.server.register(fastifyTRPCPlugin, {
+      prefix: '/trpc',
+      trpcOptions: { router: appRouter },
+    });
+    this.server.get('/hellow', async (request, reply) => {
+      const id = request.params['id'];
+      _logger.info(`hellow ${id}`);
+      await reply.send({ msg: `hellow ${id}` });
+    });
     this.server.post('/v1/api/do_eval', async (request, reply) => {
       const jsonData = request.body as DoEvalRequest;
       const ret = await this.evaluate(jsonData.id, jsonData.ex, jsonData.context);
@@ -286,7 +299,21 @@ export class Server {
   }
   async start() {
     try {
-      await this.server.listen(3000);
+      await this.initialize();
+      await this.server.listen({ port: 3000 });
+      process.on('SIGTERM', () => {
+        this.close()
+          .then(() => {
+            console.log('flowy-server stopped');
+            // eslint-disable-next-line n/no-process-exit
+            process.exit(0);
+          })
+          .catch((e) => {
+            console.log(e);
+            // eslint-disable-next-line n/no-process-exit
+            process.exit(1);
+          });
+      });
     } catch (error) {
       this.server.log.error(error);
       throw error;

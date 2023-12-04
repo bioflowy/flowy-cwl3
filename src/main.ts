@@ -200,9 +200,6 @@ function init_job_order(
   if ('id' in job_order_object) delete job_order_object['id'];
   return job_order_object;
 }
-function toJsonString(obj: object): string {
-  return JSON.stringify(obj, null, 2);
-}
 function loadData(filePath: string): any {
   if (!fs.existsSync(filePath)) {
     throw new Error(`${filePath} dosen't exists`);
@@ -219,148 +216,18 @@ function loadData(filePath: string): any {
       throw new Error(`Unexpected file extention ${fileExtention}`);
   }
 }
-function equals(expected: unknown, actual: unknown, basedir: string): boolean {
-  if (expected instanceof Array) {
-    if (!(actual instanceof Array)) {
-      return false;
-    }
-    if (expected.length !== actual.length) {
-      return false;
-    }
-    for (let index = 0; index < expected.length; index++) {
-      if (!equals(expected[index], actual[index], basedir)) {
-        return false;
-      }
-    }
-  } else if (expected instanceof Object) {
-    if (expected['$import']) {
-      const data_path = path.join(basedir, expected['$import']);
-      expected = loadData(data_path);
-    }
-    if (!(actual instanceof Object)) {
-      return false;
-    }
-    for (const key of Object.keys(expected)) {
-      const expectedValue = expected[key];
-      const actualValue = actual[key];
-      if (expectedValue === 'Any') {
-        continue;
-      }
-      if (key === 'location') {
-        return actualValue.endsWith(expectedValue);
-      }
-      if (!equals(expectedValue, actualValue, basedir)) {
-        return false;
-      }
-    }
-  } else {
-    return expected === actual;
-  }
-  return true;
-}
-function cleanWorkdir(directory: string, expect: string[]) {
-  const items = fs.readdirSync(directory);
-  for (const item of items) {
-    if (!expect.includes(item)) {
-      fsExtra.removeSync(item);
-    }
-  }
-}
-export async function conformance_test(): Promise<number> {
-  // return do_test(path.join(process.cwd(), 'tests/iwd/test-index.yaml'), 13, -1);
-  return do_test(path.join(process.cwd(), 'conformance_tests.yaml'), 200, -1);
-  // return do_test(path.join(process.cwd(), 'conformance_tests.yaml'), 0, -1);
-}
-export interface Args {
-  tool_path: string;
-  job_path?: string;
-  outdir?: string;
-  quiet?: boolean;
-}
-export async function main(args: Args): Promise<number> {
-  const server = getServer();
-  await server.start();
-  const [output, status] = await exec(args.tool_path, args.job_path, args.outdir);
-  if (status === 'success') {
-    process.stdout.write(`${JSON.stringify(output)}\n`);
-    return new Promise((resolve) => {
-      process.stdout.end(() => {
-        resolve(0);
-      });
-    });
-  } else {
-    await server.close();
-    return 1;
-  }
-}
-export async function do_test(test_path: string, start = 0, end = -1): Promise<number> {
-  const test_dir = path.dirname(test_path);
-  const data = loadData(test_path) as { [key: string]: any }[];
-  for (let index = start; index < (end < 0 ? data.length : end); index++) {
-    cleanWorkdir(process.cwd(), ['tests', 'conformance_tests.yaml']);
-    const test = data[index];
-    if (test['id'] !== 'params_broken_null') {
-      continue;
-    }
-    if (test['$import']) {
-      const t = path.join(test_dir, test['$import']);
-      await do_test(t);
-    } else {
-      _logger.info(`test index =${index}`);
-      console.log(`index =${index}`);
-      _logger.info(test['doc']);
-      let job_path = test['job'] as string;
-      if (job_path && !path.isAbsolute(job_path)) {
-        job_path = path.join(test_dir, job_path);
-      }
-      let tool_path = test['tool'] as string;
-      if (tool_path && !path.isAbsolute(tool_path)) {
-        tool_path = path.join(test_dir, tool_path);
-      }
-      _logger.info(tool_path);
-      _logger.info(job_path);
-      const expected_outputs = test['output'];
-      try {
-        const [output, status] = await exec(tool_path, job_path);
-        console.log(status);
-        if (status !== 'success' && test['should_fail']) {
-          console.log('OK expected error has occurred');
-          continue;
-        }
-        if (test['should_fail']) {
-          console.log('should_failed flag is true, but no error occurred.');
-          continue;
-        }
-
-        if (!equals(expected_outputs, output, test_dir)) {
-          const expected_str = toJsonString(expected_outputs);
-          const output_str = toJsonString(output as object);
-          console.log(`index=${index}`);
-          console.log(test['id']);
-          console.log(`expected: ${expected_str}`);
-          console.log(`output: ${output_str}`);
-        }
-      } catch (e: any) {
-        if (!test['should_fail']) {
-          console.log(`index=${index}`);
-          console.log(test['id']);
-          console.log(e);
-        } else {
-          console.log('OK expected error has occurred');
-        }
-      }
-    }
-  }
-  return 1;
-}
-export async function exec(tool_path: string, job_path?: string, outdir?: string): Promise<[CWLOutputType, string]> {
+export async function exec(
+  runtimeContext: RuntimeContext,
+  tool_path: string,
+  job_path?: string,
+): Promise<[CWLOutputType, string]> {
   const loadingContext = new LoadingContext({});
   loadingContext.construct_tool_object = default_make_tool;
   if (!path.isAbsolute(tool_path)) {
-    tool_path = path.join(process.cwd(), tool_path);
+    tool_path = path.join(runtimeContext.clientWorkDir, tool_path);
   }
   if (job_path && !path.isAbsolute(job_path)) {
-    job_path = path.join(process.cwd(), job_path);
+    job_path = path.join(runtimeContext.clientWorkDir, job_path);
   }
   _logger.info(`tool_path=${tool_path}`);
   _logger.info(`job_path=${job_path}`);
@@ -371,10 +238,7 @@ export async function exec(tool_path: string, job_path?: string, outdir?: string
   if (job_order_object == null) {
     input_basedir = path.dirname(tool_path);
   }
-  const runtimeContext = new RuntimeContext({
-    outdir: outdir ? outdir : process.cwd(),
-    secret_store: new SecretStore(),
-  });
+  _logger.info(`outdir=${runtimeContext.outdir}`);
   const initialized_job_order = init_job_order(job_order_object, tool, input_basedir, tool_path, runtimeContext);
   runtimeContext.basedir = input_basedir;
   const process_executor = new SingleJobExecutor();
