@@ -6,6 +6,31 @@ info:
 servers:
 - url: v1
 paths:
+  /api/workerStarted:
+    post:
+      description: report worker started and return shared file system settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/_api_workerStarted_post_request'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedFileSystemConfig'
+          description: Exectable jobs
+  /api/workerStopping:
+    post:
+      description: report worker stopping
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: string
+          description: Exectable jobs
   /api/getExectableJob:
     post:
       description: Get executable job
@@ -78,6 +103,35 @@ components:
       - copy
       - mkdir
       type: string
+    SharedFileSystemConfig:
+      example:
+        endpoint: endpoint
+        secretKey: secretKey
+        accessKey: accessKey
+        type: s3
+        region: region
+        rootUrl: https://openapi-generator.tech
+      properties:
+        type:
+          enum:
+          - s3
+          - nfs
+          type: string
+        rootUrl:
+          format: uri
+          type: string
+        region:
+          type: string
+        endpoint:
+          type: string
+        accessKey:
+          type: string
+        secretKey:
+          type: string
+      required:
+      - rootUrl
+      - type
+      type: object
     StagingCommand:
       example:
         mode: 0
@@ -260,6 +314,20 @@ components:
       - exitCode
       - id
       - results
+      type: object
+    _api_workerStarted_post_request:
+      properties:
+        hostname:
+          type: string
+        cpu:
+          type: integer
+        memory:
+          description: memory in MB
+          type: integer
+      required:
+      - cpu
+      - hostname
+      - memory
       type: object
     _api_getExectableJob_post_200_response_inner:
       example:

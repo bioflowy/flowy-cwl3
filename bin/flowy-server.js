@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // @ts-check
 
-import * as server from '../dist/server.js';
+import * as server from '../dist/server/server.js';
 
 const serverInstance = server.getServer();
 serverInstance

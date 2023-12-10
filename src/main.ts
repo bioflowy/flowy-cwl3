@@ -2,7 +2,6 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as cwlTsAuto from 'cwl-ts-auto';
-import fsExtra from 'fs-extra/esm';
 import yaml from 'js-yaml';
 import { LoadingContext, RuntimeContext } from './context.js';
 import { Directory, File } from './cwltypes.js';
@@ -10,8 +9,6 @@ import { SingleJobExecutor } from './executors.js';
 import { loadDocument } from './loader.js';
 import { _logger } from './loghandler.js';
 import { shortname, type Process, add_sizes } from './process.js';
-import { SecretStore } from './secrets.js';
-import { getServer } from './server.js';
 import {
   type CWLObjectType,
   normalizeFilesDirs,
@@ -44,21 +41,20 @@ function parseFile(filePath: string): object | null {
       throw new Error('Unsupported file type.');
   }
 }
-function convertToAbsPath(filePath: string, inputBaseDir: string): string {
-  if (!filePath) {
-    return filePath;
-  }
-  let inputBaseDirUrl = filePathToURI(inputBaseDir);
-  if (!inputBaseDirUrl.endsWith('/')) {
-    inputBaseDirUrl = `${inputBaseDirUrl}/`;
+function isSupportedUrl(url: URL): boolean {
+  return url.protocol === 'file:' || url.protocol === 's3:';
+}
+function convertToAbsPath(filePath: string, inputBaseUrl: URL): URL {
+  if (isSupportedUrl(inputBaseUrl)) {
+    throw new Error('Unsupported url protocol.');
   }
   if (!filePath.startsWith('/')) {
-    return `${inputBaseDirUrl}${filePath}`;
+    return new URL(`${inputBaseUrl.toString()}${filePath}`);
   }
-  if (!filePath.startsWith('file://')) {
+  if (!filePath.startsWith('file:/') || filePath.startsWith('s3:/')) {
     filePath = pathToFileURL(filePath).toString();
   }
-  return filePath;
+  return new URL(filePathToURI(filePath));
 }
 function load_job_order(basedir: string | undefined, job_order_file: string): [CWLObjectType | null, string] {
   let job_order_object = null;
@@ -87,10 +83,10 @@ function load_job_order(basedir: string | undefined, job_order_file: string): [C
   }
   function _normalizeFileDir(val: File | Directory) {
     if (val.location) {
-      val.location = convertToAbsPath(val.location, input_basedir);
+      val.location = convertToAbsPath(val.location, input_basedir).toString();
     }
     if (val.path) {
-      val.path = convertToAbsPath(val.path, input_basedir);
+      val.path = convertToAbsPath(val.path, input_basedir).toString();
     }
   }
   visitFileDirectory(job_order_object, _normalizeFileDir);
@@ -200,22 +196,6 @@ function init_job_order(
   if ('id' in job_order_object) delete job_order_object['id'];
   return job_order_object;
 }
-function loadData(filePath: string): any {
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`${filePath} dosen't exists`);
-  }
-  const fileContent = fs.readFileSync(filePath, 'utf-8');
-  const fileExtention = path.extname(filePath);
-  switch (fileExtention) {
-    case '.json':
-      return JSON.parse(fileContent);
-    case '.yaml':
-    case '.yml':
-      return yaml.load(fileContent);
-    default:
-      throw new Error(`Unexpected file extention ${fileExtention}`);
-  }
-}
 export async function exec(
   runtimeContext: RuntimeContext,
   tool_path: string,
@@ -232,7 +212,7 @@ export async function exec(
   _logger.info(`tool_path=${tool_path}`);
   _logger.info(`job_path=${job_path}`);
   const [tool] = await loadDocument(tool_path, loadingContext);
-  const jo = load_job_order(undefined, job_path);
+  const jo = load_job_order(runtimeContext.basedir, job_path);
   const job_order_object = jo[0];
   let input_basedir = jo[1];
   if (job_order_object == null) {

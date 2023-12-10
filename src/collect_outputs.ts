@@ -47,6 +47,8 @@ function revmap_file(builder: Builder, outdir: string, f: File | Directory): Fil
     const location: string = f.location;
     if (location.startsWith('file://')) {
       f.path = uriFilePath(location);
+    } else if (location.startsWith('s3://')) {
+      return f;
     } else {
       f.location = builder.fs_access.join(outdir, f.location);
       return f;
@@ -96,6 +98,9 @@ function checkValidLocations(fsAccess: StdFsAccess, ob: Directory | File): void 
   if (location.startsWith('_:')) {
     return;
   }
+  if (location.startsWith('s3://')) {
+    return;
+  }
   if (isFile(ob) && !fsAccess.isfile(location)) {
     throw new Error(`Does not exist or is not a File: '${location}'`);
   }
@@ -111,7 +116,6 @@ export async function collect_output_ports(
   outdir: string,
   rcode: number,
   outfiles: { [key: string]: (File | Directory)[] },
-  compute_checksum = true,
   _jobname: string,
 ): Promise<OutputPortsType> {
   let ret: OutputPortsType = {};
@@ -126,8 +130,7 @@ export async function collect_output_ports(
       if (!(outjson.length == 1 && isFile(outjson[0]))) {
         throw new WorkflowException('Expected cwl.output.json to be a single file');
       }
-      const f = await fs_access.read(outjson[0].location);
-      ret = JSON.parse(f);
+      ret = JSON.parse(outjson[0].contents);
       if (debug) {
         _logger.debug(`Raw output from ${outjson[0].location}: ${JSON.stringify(ret, null, 4)}`);
       }
@@ -136,7 +139,7 @@ export async function collect_output_ports(
       for (let i = 0; i < ports.length; i++) {
         const port = ports[i];
         const fragment = shortname(port.id);
-        ret[fragment] = await collect_output(port, builder, outdir, outfiles, fs_access, compute_checksum);
+        ret[fragment] = await collect_output(port, builder, outdir, outfiles, fs_access);
       }
     }
     if (ret) {
@@ -147,18 +150,6 @@ export async function collect_output_ports(
       normalizeFilesDirs(ret);
       visitFileDirectory(ret, (val) => checkValidLocations(fs_access, val));
 
-      if (compute_checksum) {
-        const promises: Promise<void>[] = [];
-        visitFile(ret, (val) => {
-          const size = fs_access.size(val.location);
-          if (size !== val.size) {
-            // recompute checksums if size has changed
-            val.checksum = undefined;
-          }
-          promises.push(compute_checksums(fs_access, val));
-        });
-        await Promise.all(promises);
-      }
       // const expected_schema = ((this.names.get_name("outputs_record_schema", null)) as Schema);
       validate({ type: RecordType, fields }, ret, true);
       return ret || {};
@@ -252,7 +243,7 @@ async function collect_output(
       }
     }
     await handle_output_format(schema, builder, result);
-    adjustFileObjs(result, revmap);
+    // adjustFileObjs(result, revmap);
     if (optional && (!result || (result instanceof Array && result.length === 0))) {
       return result === 0 || result === '' ? result : null;
     }

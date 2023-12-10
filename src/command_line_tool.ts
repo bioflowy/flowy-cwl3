@@ -833,7 +833,6 @@ export class CommandLineTool extends Process {
         outdir,
         rcode,
         fileMap,
-        getDefault(runtimeContext.compute_checksum, true),
         jobname,
       );
     j.output_callback = output_callbacks;

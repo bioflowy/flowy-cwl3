@@ -108,7 +108,7 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
     const mount_arg = options.join(',');
     runtime.push(`--mount=${mount_arg}`);
 
-    if (!fs.existsSync(source)) {
+    if (source.startsWith('file://') && !fs.existsSync(source)) {
       fs.mkdirSync(source);
     }
   }

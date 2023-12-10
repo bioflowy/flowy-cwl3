@@ -1,0 +1,6 @@
+sharedFileSystem:
+  type: s3
+  rootUrl: s3://flowytest/tests/
+  endpoint: http://localhost:9000
+  accessKey: minio
+  secretKey: minio123

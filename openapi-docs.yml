@@ -15,6 +15,28 @@ components:
         - symlink
         - copy
         - mkdir
+    SharedFileSystemConfig:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - s3
+            - nfs
+        rootUrl:
+          type: string
+          format: uri
+        region:
+          type: string
+        endpoint:
+          type: string
+        accessKey:
+          type: string
+        secretKey:
+          type: string
+      required:
+        - type
+        - rootUrl
     StagingCommand:
       type: object
       properties:
@@ -180,6 +202,43 @@ components:
         - results
   parameters: {}
 paths:
+  /api/workerStarted:
+    post:
+      description: report worker started and return shared file system settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hostname:
+                  type: string
+                cpu:
+                  type: integer
+                memory:
+                  type: integer
+                  description: memory in MB
+              required:
+                - hostname
+                - cpu
+                - memory
+      responses:
+        '200':
+          description: Exectable jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedFileSystemConfig'
+  /api/workerStopping:
+    post:
+      description: report worker stopping
+      responses:
+        '200':
+          description: Exectable jobs
+          content:
+            application/json:
+              schema:
+                type: string
   /api/getExectableJob:
     post:
       description: Get executable job

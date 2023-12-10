@@ -9,14 +9,6 @@
       "program": "${workspaceFolder}/flowydeamon"
     },
     {
-      "name": "client",
-      "type": "node",
-      "request": "launch",
-      "cwd": "${workspaceFolder}/work",
-      "runtimeExecutable": "/home/uehara/.nodenv/shims/node",
-      "runtimeArgs": ["run", "de"]
-    },
-    {
       "name": "edam_test",
       "type": "node",
       "request": "launch",
@@ -53,20 +45,31 @@
       "runtimeArgs": ["${workspaceFolder}/bin/generate_openapidoc.js"]
     },
     {
-      "name": "test",
-      "type": "node",
-      "request": "launch",
-      "cwd": "${workspaceFolder}/cwl-v1.2-1.2.1_proposed",
-      "runtimeExecutable": "/home/uehara/.nodenv/shims/npm",
-      "runtimeArgs": ["run", "test"]
-    },
-    {
       "name": "server",
       "type": "node",
       "request": "launch",
       "cwd": "${workspaceFolder}",
       "runtimeExecutable": "/home/uehara/.nodenv/shims/npm",
+      "preLaunchTask": "npm build",
+      "console": "integratedTerminal",
       "runtimeArgs": ["run", "server"]
+    },
+    {
+      "name": "client",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/test_work",
+      "runtimeExecutable": "/home/uehara/.nodenv/shims/node",
+      "preLaunchTask": "npm build",
+      "console": "integratedTerminal",
+      "runtimeArgs": [
+        "${workspaceFolder}/bin/flowycwl.js",
+        "-b",
+        "s3://flowytest/",
+        "--outdir=/tmp/tmpcyfnir16",
+        "tests/stderr.cwl",
+        "tests/empty.json"
+      ]
     }
   ]
 }

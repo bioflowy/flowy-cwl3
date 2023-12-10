@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"errors"
@@ -15,8 +16,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
 type FileSystemEntity interface {
@@ -204,7 +213,7 @@ func reportFailed(c *APIClient, jobId string, err error) {
 	}
 	r.Execute()
 }
-func relinkInitialWorkDir(vols []MapperEnt, hostOutDir, containerOutDir string, inplaceUpdate bool) error {
+func relinkInitialWorkDir(config *SharedFileSystemConfig, vols []MapperEnt, hostOutDir, containerOutDir string, inplaceUpdate bool) error {
 	for _, vol := range vols {
 		if !vol.Staged {
 			continue
@@ -230,7 +239,15 @@ func relinkInitialWorkDir(vols []MapperEnt, hostOutDir, containerOutDir string, 
 			}
 
 			if !strings.HasPrefix(vol.Resolved, "_:") {
-				if err := os.Symlink(vol.Resolved, hostOutDirTgt); err != nil && !os.IsExist(err) {
+				filePath := vol.Resolved
+				if strings.HasPrefix(filePath, "s3://") {
+					// TODO Avoid downloading the same file twice
+					filePath, err = downloadS3FileToTemp(config, filePath, nil)
+					if err != nil {
+						return err
+					}
+				}
+				if err := os.Symlink(filePath, hostOutDirTgt); err != nil && !os.IsExist(err) {
 					return err
 				}
 			}
@@ -238,7 +255,7 @@ func relinkInitialWorkDir(vols []MapperEnt, hostOutDir, containerOutDir string, 
 	}
 	return nil
 }
-func GetAndExecuteJob(c *APIClient) {
+func GetAndExecuteJob(c *APIClient, config *SharedFileSystemConfig) {
 	ctx := context.Background()
 	res, httpres, err := c.DefaultAPI.ApiGetExectableJobPost(ctx).Execute()
 
@@ -247,15 +264,15 @@ func GetAndExecuteJob(c *APIClient) {
 	}
 	if httpres.StatusCode == 200 {
 		for _, job := range res {
-			err := prepareStagingDir(job.Staging)
+			err := prepareStagingDir(config, job.Staging)
 			if err != nil {
 				panic(err)
 			}
-			exitCode, err := executeJob(job.Commands, job.StdinPath, job.StdoutPath, job.StderrPath, job.Env, job.Cwd, job.Timelimit)
+			exitCode, err := executeJob(config, job.Commands, job.StdinPath, job.StdoutPath, job.StderrPath, job.Env, job.Cwd, job.Timelimit)
 			if err != nil {
 				panic(err)
 			}
-			relinkInitialWorkDir(job.Vols, job.Cwd, job.BuilderOutdir, job.InplaceUpdate);
+			relinkInitialWorkDir(config, job.Vols, job.Cwd, job.BuilderOutdir, job.InplaceUpdate)
 			var glob1 = []string{"cwl.output.json"}
 			files, err := globOutput(
 				job.BuilderOutdir,
@@ -263,6 +280,7 @@ func GetAndExecuteJob(c *APIClient) {
 					Name:           "cwl.output.json",
 					Glob:           glob1,
 					SecondaryFiles: []OutputBindingSecondaryFilesInner{},
+					LoadContents:   PtrBool(true),
 				},
 				job.Cwd,
 				true,
@@ -293,6 +311,7 @@ func GetAndExecuteJob(c *APIClient) {
 					}
 				}
 			}
+			uploadOutputs(config, results)
 			r := c.DefaultAPI.ApiJobFinishedPost(ctx)
 			r.jobFinishedRequest = &JobFinishedRequest{
 				Id:       job.Id,
@@ -305,6 +324,153 @@ func GetAndExecuteJob(c *APIClient) {
 		}
 	}
 }
+func uploadOutputs(config *SharedFileSystemConfig, results map[string][]ApiDoEvalPostRequestContext) error {
+	for _, files := range results {
+		for idx, file := range files {
+			if file.File != nil {
+				path, err := uploadToS3(config, *file.File.Location)
+				if err != nil {
+					return err
+				}
+				file.File.Location = &path
+				files[idx] = file
+				for _, secondaryFile := range file.File.SecondaryFiles {
+					if secondaryFile.ChildFile != nil {
+						path, err := uploadToS3(config, *secondaryFile.ChildFile.Location)
+						if err != nil {
+							return err
+						}
+						secondaryFile.ChildFile.Location = &path
+					} else if secondaryFile.ChildDirectory != nil {
+						path, err := uploadToS3(config, *secondaryFile.ChildDirectory.Location)
+						if err != nil {
+							return err
+						}
+						secondaryFile.ChildDirectory.Location = &path
+					}
+				}
+			}
+
+		}
+	}
+	return nil
+}
+func uploadToS3(config *SharedFileSystemConfig, filePath string) (string, error) {
+	if config.Type != "s3" {
+		return "file:/" + filePath, nil
+	}
+	filePath = strings.TrimPrefix(filePath, "file:/")
+	sess, err := session.NewSession(&aws.Config{
+		Credentials:      credentials.NewStaticCredentials(*config.AccessKey, *config.SecretKey, ""),
+		Region:           aws.String("ap-northeast-1"), // Set your AWS region
+		Endpoint:         config.Endpoint,
+		S3ForcePathStyle: aws.Bool(true),
+	})
+	if err != nil {
+		return "", err
+	}
+
+	uploader := s3manager.NewUploader(sess)
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return "", err
+	}
+	if fileInfo.IsDir() {
+		return uploadDirectory(uploader, *config, filePath)
+	} else {
+		return uploadFile(uploader, *config, filePath)
+	}
+}
+func uploadFile(uploader *s3manager.Uploader, config SharedFileSystemConfig, filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	u, err := url.Parse(config.RootUrl)
+	if err != nil {
+		return "", err
+	}
+	filePath = strings.TrimPrefix(filePath, "/")
+	key := strings.TrimPrefix(filepath.Join(u.Path, filePath), "/")
+
+	_, err = uploader.Upload(&s3manager.UploadInput{
+		Bucket: aws.String(u.Host), // Set your bucket name
+		Key:    aws.String(key),
+		Body:   file,
+	})
+	if err != nil {
+		return "", err
+	}
+	s3url := "s3://" + u.Host + "/" + key
+	return s3url, nil
+}
+func uploadDirectory(uploader *s3manager.Uploader, config SharedFileSystemConfig, directoryPath string) (string, error) {
+	u, err := url.Parse(config.RootUrl)
+	if err != nil {
+		return "", err
+	}
+
+	err = filepath.Walk(directoryPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			_, err := uploadFile(uploader, config, path)
+			if err != nil {
+				return err
+			}
+		} else {
+			directoryPath = strings.TrimPrefix(directoryPath, "/")
+			emptyBuffer := bytes.NewBuffer([]byte{})
+			key := strings.TrimPrefix(filepath.Join(u.Path, directoryPath), "/")
+			metadata := map[string]*string{
+				"x-amz-meta-filetype": aws.String("directory"),
+			}
+			ui := s3manager.UploadInput{
+				Bucket:   aws.String(u.Host), // Set your bucket name
+				Key:      aws.String(key),
+				Body:     emptyBuffer,
+				Metadata: metadata,
+			}
+			_, err = uploader.Upload(&ui)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+	directoryPath = strings.TrimPrefix(directoryPath, "/")
+	key := strings.TrimPrefix(filepath.Join(u.Path, directoryPath), "/")
+
+	// すべてのURLを結合して返す
+	return "s3://" + u.Host + "/" + key, nil
+}
+func reportWorkerStarted(c *APIClient) (*SharedFileSystemConfig, error) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return nil, err
+	}
+	var sysinfo syscall.Sysinfo_t
+	err = syscall.Sysinfo(&sysinfo)
+	if err != nil {
+		return nil, err
+	}
+	req := c.DefaultAPI.ApiWorkerStartedPost(context.Background())
+	req.apiWorkerStartedPostRequest = &ApiWorkerStartedPostRequest{
+		Hostname: hostname,
+		Cpu:      int32(runtime.NumCPU()),
+		Memory:   int32(sysinfo.Totalram / 1024 / 1024),
+	}
+	res, _, err := req.Execute()
+	return res, err
+}
 
 func main() {
 	cfg := NewConfiguration()
@@ -315,9 +481,19 @@ func main() {
 	}
 	cfg.Debug = true
 	c := NewAPIClient(cfg)
+	var err error = nil
+	var config *SharedFileSystemConfig = nil
 	for {
-		GetAndExecuteJob(c)
-		time.Sleep(2 * time.Second)
+		config, err = reportWorkerStarted(c)
+		if err != nil {
+			time.Sleep(time.Second)
+		} else {
+			break
+		}
+	}
+	for {
+		GetAndExecuteJob(c, config)
+		time.Sleep(10 * time.Second)
 	}
 }
 func do_eval(c *APIClient, id string, expression string, primary ApiDoEvalPostRequestContext) interface{} {
@@ -481,7 +657,11 @@ func ensureWritable(targetPath string, includeRoot bool) error {
 }
 
 // CopyFile copies a single file from src to dst
-func CopyFile(src, dst string) error {
+func CopyFile(config *SharedFileSystemConfig, src, dst string) error {
+	if strings.HasPrefix(src, "s3://") {
+		_, err := downloadS3FileToTemp(config, src, &dst)
+		return err
+	}
 	source, err := os.Open(src)
 	if err != nil {
 		return err
@@ -508,7 +688,7 @@ func CopyFile(src, dst string) error {
 }
 
 // CopyDir recursively copies a directory tree, attempting to preserve permissions.
-func CopyDir(src string, dst string) error {
+func CopyDir(config *SharedFileSystemConfig, src string, dst string) error {
 	src = filepath.Clean(src)
 	dst = filepath.Clean(dst)
 
@@ -541,7 +721,7 @@ func CopyDir(src string, dst string) error {
 			}
 		} else {
 			// It's a file, copy it
-			err = CopyFile(path, destPath)
+			err = CopyFile(config, path, destPath)
 			if err != nil {
 				return err
 			}
@@ -551,7 +731,7 @@ func CopyDir(src string, dst string) error {
 
 	return err
 }
-func CopyFileOrDir(src, dst string) error {
+func CopyFileOrDir(config *SharedFileSystemConfig, src, dst string) error {
 	srcInfo, err := os.Stat(src)
 	if err != nil {
 		return err
@@ -559,10 +739,10 @@ func CopyFileOrDir(src, dst string) error {
 
 	if srcInfo.IsDir() {
 		// If source is a directory, call CopyDir
-		return CopyDir(src, dst)
+		return CopyDir(config, src, dst)
 	} else {
 		// If source is a file, call CopyFile
-		return CopyFile(src, dst)
+		return CopyFile(config, src, dst)
 	}
 }
 func removeIgnorePermissionError(filePath string) error {
@@ -579,7 +759,7 @@ func removeIgnorePermissionError(filePath string) error {
 	return nil
 }
 
-func prepareStagingDir(commands []StagingCommand) error {
+func prepareStagingDir(config *SharedFileSystemConfig, commands []StagingCommand) error {
 	for _, command := range commands {
 		switch command.Command {
 		case "writeFileContent":
@@ -598,8 +778,16 @@ func prepareStagingDir(commands []StagingCommand) error {
 
 		case "symlink":
 			if _, err := os.Stat(*command.Target); os.IsNotExist(err) {
-				if _, err := os.Stat(*command.Resolved); err == nil {
-					err = os.Symlink(*command.Resolved, *command.Target)
+				sourcepath := *command.Resolved
+				if strings.HasPrefix(sourcepath, "s3://") {
+					downloadpath, err := downloadS3FileToTemp(config, sourcepath, nil)
+					if err != nil {
+						return err
+					}
+					sourcepath = downloadpath
+				}
+				if _, err := os.Stat(sourcepath); err == nil {
+					err = os.Symlink(sourcepath, *command.Target)
 					if err != nil {
 						return err
 					}
@@ -616,7 +804,7 @@ func prepareStagingDir(commands []StagingCommand) error {
 
 		case "copy":
 			if _, err := os.Stat(*command.Target); os.IsNotExist(err) {
-				err = CopyFileOrDir(*command.Resolved, *command.Target) // copyFile needs to be implemented
+				err = CopyFileOrDir(config, *command.Resolved, *command.Target) // copyFile needs to be implemented
 				if err != nil {
 					return err
 				}
@@ -649,7 +837,7 @@ func prepareStagingDir(commands []StagingCommand) error {
 			}
 
 		default:
-			return errors.New("Unknown staging command: ")
+			return errors.New("unknown staging command: ")
 		}
 	}
 	return nil
@@ -660,7 +848,7 @@ func uriFilePath(inputUrl string) (string, error) {
 		return "", err
 	}
 	if u.Scheme != "file" {
-		return "", fmt.Errorf("Not a file URI: %s", inputUrl)
+		return "", fmt.Errorf("not a file URI: %s", inputUrl)
 	}
 	return filepath.FromSlash(u.Path), nil
 }
@@ -954,12 +1142,187 @@ func contentLimitRespectedReadBytes(filePath string) (string, error) {
 
 	return string(buffer[:bytesRead]), nil
 }
-func executeJob(commands []string, stdinPath, stdoutPath, stderrPath *string, env map[string]string, cwd string, timelimit *int32) (int, error) {
+func downloadFile(svc *s3.S3, bucket, key, filePath string) error {
+	// Ensure the local directory structure exists
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return fmt.Errorf("error creating directory: %v", err)
+	}
+
+	// Create a file to write the download to
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("error creating file: %v", err)
+	}
+	defer file.Close()
+
+	// Download the file
+	objInput := &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}
+	output, err := svc.GetObject(objInput)
+	if err != nil {
+		return fmt.Errorf("error getting object: %v", err)
+	}
+	defer output.Body.Close()
+
+	if _, err = io.Copy(file, output.Body); err != nil {
+		return fmt.Errorf("error downloading object: %v", err)
+	}
+
+	return nil
+}
+
+func DownloadDirectory(svc *s3.S3, bucket, prefix, localDir string) error {
+	input := &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucket),
+		Prefix: aws.String(prefix),
+	}
+
+	// List objects
+	err := svc.ListObjectsV2Pages(input, func(page *s3.ListObjectsV2Output, lastPage bool) bool {
+		for _, obj := range page.Contents {
+			// Create file path based on object key
+			filePath := filepath.Join(localDir, strings.TrimPrefix(*obj.Key, prefix))
+			if err := downloadFile(svc, bucket, *obj.Key, filePath); err != nil {
+				fmt.Printf("Failed to download file: %s, error: %v\n", *obj.Key, err)
+			} else {
+				fmt.Printf("File downloaded: %s\n", filePath)
+			}
+		}
+		return !lastPage
+	})
+
+	if err != nil {
+		return fmt.Errorf("error listing objects: %v", err)
+	}
+
+	return nil
+}
+func downloadS3FileToTemp(config *SharedFileSystemConfig, s3URL string, dstPath *string) (string, error) {
+	// URLを解析してバケットとキーを取得
+	u, err := url.Parse(s3URL)
+	if err != nil {
+		return "", err
+	}
+	bucket := u.Host
+	key := strings.TrimPrefix(u.Path, "/")
+	var region string = "ap-northeast-1"
+	// AWSセッションを作成
+	sess, err := session.NewSession(&aws.Config{
+		Region:           &region, // 適切なリージョンに変更してください
+		Credentials:      credentials.NewStaticCredentials(*config.AccessKey, *config.SecretKey, ""),
+		Endpoint:         aws.String(*config.Endpoint),
+		S3ForcePathStyle: aws.Bool(true),
+	})
+	if err != nil {
+		return "", err
+	}
+
+	// S3サービスクライアントを作成
+	svc := s3.New(sess)
+	input := &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}
+
+	// S3オブジェクトのメタデータを取得
+	result, err := svc.HeadObject(input)
+	if err != nil {
+		return "", err
+	}
+	if result.Metadata["x-amz-meta-filetype"] == aws.String("directory") {
+		if dstPath != nil {
+			tmpPath, err := os.MkdirTemp("", "flowy-")
+			if err != nil {
+				return "", err
+			}
+			dstPath = &tmpPath
+		}
+
+		DownloadDirectory(svc, bucket, key, *dstPath)
+		return *dstPath, nil
+	} else {
+		// S3オブジェクトを取得
+		resp, err := svc.GetObject(&s3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		})
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+
+		var destFile *os.File
+		// 一時ファイルを作成
+		if dstPath == nil {
+			destFile, err = ioutil.TempFile("", "flowy-")
+			if err != nil {
+				return "", err
+			}
+			defer destFile.Close()
+		} else {
+			destFile, err = os.Create(*dstPath)
+			if err != nil {
+				return "", err
+			}
+		}
+
+		// S3オブジェクトの内容を一時ファイルに書き込み
+		if _, err := io.Copy(destFile, resp.Body); err != nil {
+			return "", err
+		}
+
+		return destFile.Name(), nil
+
+	}
+}
+func prepareForDocker(config *SharedFileSystemConfig, commands []string) ([]string, error) {
+	var dockerCommands []string
+	for _, cmd := range commands {
+		var command string = cmd
+		if strings.HasPrefix(cmd, "--mount=") {
+			mounts := strings.Split(cmd, ",")
+			var isUpdated = false
+			for indx, mnt := range mounts {
+				if strings.HasPrefix(mnt, "source=s3://") {
+					tmpfile, err := downloadS3FileToTemp(config,
+						mnt[len("source="):], nil)
+					if err != nil {
+						return nil, err
+					}
+					isUpdated = true
+					mounts[indx] = "source=" + tmpfile
+				}
+			}
+			if isUpdated {
+				command = strings.Join(mounts, ",")
+			}
+		}
+		dockerCommands = append(dockerCommands, command)
+	}
+	return dockerCommands, nil
+}
+func executeJob(config *SharedFileSystemConfig, commands []string, stdinPath, stdoutPath, stderrPath *string, env map[string]string, cwd string, timelimit *int32) (int, error) {
+	var err error = nil
+	if commands[0] == "docker" {
+		commands, err = prepareForDocker(config, commands)
+		if err != nil {
+			return -1, err
+		}
+	}
 	var stdin io.Reader = os.Stdin
 	var stdout, stderr io.Writer = os.Stdout, os.Stderr
-	var err error
 
 	if stdinPath != nil {
+		if strings.HasPrefix(*stdinPath, "s3://") {
+			tmppath, err := downloadS3FileToTemp(config, *stdinPath, nil)
+			if err != nil {
+				return 0, err
+
+			}
+			stdinPath = &tmppath
+		}
 		stdin, err = os.Open(*stdinPath)
 		if err != nil {
 			return -1, err

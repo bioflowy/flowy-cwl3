@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import aws from 'aws-sdk';
 import * as cwlTsAuto from 'cwl-ts-auto';
 import { InlineJavascriptRequirement } from 'cwl-ts-auto';
 import {
@@ -19,6 +20,8 @@ import * as expression from './expression.js';
 import { FormatGraph } from './formatgraph.js';
 import { _logger } from './loghandler.js';
 import { PathMapper } from './pathmapper.js';
+import { SharedFileSystem } from './server/config.js';
+import { getServerConfig } from './server/server.js';
 import { StdFsAccess } from './stdfsaccess.js';
 import { type ToolRequirement, CommandLineBinded } from './types.js';
 import {
@@ -42,8 +45,38 @@ export const INPUT_OBJ_VOCAB: { [key: string]: string } = {
   File: 'https://w3id.org/cwl/cwl#File',
   Directory: 'https://w3id.org/cwl/cwl#Directory',
 };
+async function getFileContentFromS3(config: SharedFileSystem, s3Url: string): Promise<string> {
+  if (config.type !== 's3') {
+    throw new Error('Unsupported file system type');
+  }
 
+  // S3のクライアントを初期化
+  const s3 = new aws.S3({
+    region: config.region,
+    endpoint: config.endpoint,
+    s3ForcePathStyle: true,
+    credentials: {
+      accessKeyId: config.accessKey ?? '',
+      secretAccessKey: config.secretKey ?? '',
+    },
+  });
+
+  // S3のURLからバケット名とオブジェクトキーを抽出
+  const urlParts = new URL(s3Url);
+  const bucket = urlParts.hostname.split('.')[0];
+  const key = urlParts.pathname.substring(1);
+
+  // S3からファイルを取得
+  const response = await s3.getObject({ Bucket: bucket, Key: key }).promise();
+
+  // ファイルの内容を文字列として返す
+  return response.Body?.toString() ?? '';
+}
 export async function contentLimitRespectedReadBytes(filePath: string): Promise<string> {
+  if (filePath.startsWith('s3://')) {
+    const config = getServerConfig();
+    return getFileContentFromS3(config.sharedFileSystem, filePath);
+  }
   return new Promise((resolve, reject) => {
     const buffer = Buffer.alloc(CONTENT_LIMIT + 1);
     const fd = fs.openSync(fileURLToPath(filePath), 'r');

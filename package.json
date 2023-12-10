@@ -19,7 +19,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "npm run build && cd work && node ../bin/conformance_test.js",
-    "server": "npm run build && node bin/flowyd.js",
+    "server": "npm run build && node bin/flowy-server.js",
     "lint": "run-s -c lint:*",
     "lint:tsc": "tsc",
     "lint:eslint": "eslint .",
@@ -75,6 +75,7 @@
     "@trpc/client": "^10.44.1",
     "@trpc/server": "^10.44.1",
     "@types/rdflib": "^1.2.0",
+    "aws-sdk": "^2.1514.0",
     "crypto": "^1.0.1",
     "cwl-ts-auto": "file:../cwl-ts-auto",
     "fastify": "^4.24.3",

@@ -132,9 +132,8 @@ export class PathMapper {
       } else {
         let deref: string = ab;
 
-        if (deref.startsWith('http') || deref.startsWith('https')) {
-          const [deref1, _] = downloadHttpFile(path1);
-          deref = deref1;
+        if (deref.startsWith('s3:/')) {
+          // do nothing when it is s3
         } else {
           let st: fs.Stats = fs.lstatSync(deref);
           while (st.isSymbolicLink()) {

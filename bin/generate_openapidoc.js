@@ -1,4 +1,4 @@
-import { getServer } from '../dist/server.js';
+import { getServer } from '../dist/server/server.js';
 
 function main() {
   const server = getServer();

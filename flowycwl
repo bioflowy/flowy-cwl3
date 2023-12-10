@@ -2,4 +2,4 @@
 
 BASE_DIR=$(dirname $0)
 
-node ${BASE_DIR}/bin/flowycwl.js $* 
+node ${BASE_DIR}/bin/flowycwl.js -b s3://flowytest/ $* 

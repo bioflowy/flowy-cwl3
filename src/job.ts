@@ -21,7 +21,7 @@ import { _logger } from './loghandler.js';
 import { MakePathMapper, MapperEnt, PathMapper } from './pathmapper.js';
 import { stage_files } from './process.js';
 import { SecretStore } from './secrets.js';
-import { getServer } from './server.js';
+import { getServer } from './server/server.js';
 import { LazyStaging } from './staging.js';
 import {
   type CWLObjectType,
@@ -196,7 +196,7 @@ export abstract class JobBase {
 
     for (const knownfile of this.pathmapper.files()) {
       const p = this.pathmapper.mapper(knownfile);
-      if (p.type == 'File' && !fs.existsSync(p.resolved) && p.staged) {
+      if (p.type == 'File' && p.resolved.startsWith('file:/') && !fs.existsSync(p.resolved) && p.staged) {
         if (!(is_streamable(knownfile) && fs.statSync(p.resolved).isFIFO())) {
           throw new WorkflowException(
             `Input file ${knownfile} (at ${

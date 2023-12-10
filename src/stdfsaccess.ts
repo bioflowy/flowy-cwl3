@@ -6,7 +6,7 @@ export function abspath(src: string, basedir: string): string {
   let abpath: string;
   if (src.startsWith('file://')) {
     abpath = url.fileURLToPath(src);
-  } else if (src.startsWith('http://') || src.startsWith('https://')) {
+  } else if (src.startsWith('s3://') || src.startsWith('S3://')) {
     return src;
   } else {
     if (basedir.startsWith('file://')) {

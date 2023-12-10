@@ -99,6 +99,7 @@ export function make_default_fs_access(basedir: string): StdFsAccess {
   return new StdFsAccess(basedir);
 }
 export class RuntimeContext extends ContextBase {
+  relocateOutputs = true;
   clientWorkDir?: string = undefined;
   outdir?: string = undefined;
   tmpdir = '';

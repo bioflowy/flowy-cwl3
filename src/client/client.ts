@@ -3,11 +3,12 @@ import SuperJSON from 'superjson';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
-import type { AppRouter } from '../router/router.js';
+import type { AppRouter } from '../server/router.js';
 export interface Args {
   tool_path: string;
   job_path?: string;
   outdir?: string;
+  basedir?: string;
   quiet?: boolean;
 }
 
@@ -24,6 +25,7 @@ export async function main(args: Args): Promise<number> {
     tool_path: args.tool_path,
     job_path: args.job_path,
     clientWorkDir: process.cwd(),
+    basedir: args.basedir,
   });
   if (status === 'success') {
     process.stdout.write(`${JSON.stringify(output)}\n`);
@@ -53,6 +55,11 @@ export async function executeClient() {
     .option('outdir', {
       alias: 'o',
       description: 'Output directory',
+      type: 'string',
+    })
+    .option('basedir', {
+      alias: 'b',
+      description: 'base directory for input',
       type: 'string',
     })
     .option('quiet', {
