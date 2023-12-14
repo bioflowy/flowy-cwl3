@@ -3,6 +3,8 @@ import { FormatGraph } from './formatgraph.js';
 import { PathMapper } from './pathmapper.js';
 import { Process } from './process.js';
 import { SecretStore } from './secrets.js';
+import { SharedFileSystem } from './server/config.js';
+import { getServerConfig } from './server/server.js';
 import { StdFsAccess } from './stdfsaccess.js';
 import type { ToolRequirement } from './types.js';
 import { DEFAULT_TMP_PREFIX, type CWLObjectType, mkdtemp, splitPath, MutableMapping } from './utils.js';
@@ -96,9 +98,10 @@ export class LoadingContext extends ContextBase {
   }
 }
 export function make_default_fs_access(basedir: string): StdFsAccess {
-  return new StdFsAccess(basedir);
+  return new StdFsAccess(basedir, getServerConfig().sharedFileSystem);
 }
 export class RuntimeContext extends ContextBase {
+  sharedFilesystemConfig: SharedFileSystem;
   relocateOutputs = true;
   clientWorkDir?: string = undefined;
   outdir?: string = undefined;

@@ -3,6 +3,8 @@ import SuperJSON from 'superjson';
 import { z } from 'zod';
 import { RuntimeContext } from '../context.js';
 import { exec } from '../main.js';
+import { SharedFileSystem } from './config.js';
+import { getServerConfig } from './server.js';
 
 export const ExecuteJobInputSchema = z.object({
   tool_path: z.string(),
@@ -19,6 +21,7 @@ export const appRouter = t.router({
       clientWorkDir: input.clientWorkDir,
       outdir: input.outdir ? input.outdir : input.clientWorkDir,
       move_output: input.move_output,
+      sharedFileSystem: getServerConfig().sharedFileSystem,
     });
     if (input.basedir) {
       runtimeContext.basedir = input.basedir;

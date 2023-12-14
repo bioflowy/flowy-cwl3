@@ -2,8 +2,8 @@ import { createTRPCProxyClient, httpBatchLink } from '@trpc/client';
 import SuperJSON from 'superjson';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
+import { AppRouter } from '../server/router.js';
 
-import type { AppRouter } from '../server/router.js';
 export interface Args {
   tool_path: string;
   job_path?: string;

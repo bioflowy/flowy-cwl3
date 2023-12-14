@@ -425,6 +425,9 @@ func uploadDirectory(uploader *s3manager.Uploader, config SharedFileSystemConfig
 			directoryPath = strings.TrimPrefix(directoryPath, "/")
 			emptyBuffer := bytes.NewBuffer([]byte{})
 			key := strings.TrimPrefix(filepath.Join(u.Path, directoryPath), "/")
+			if !strings.HasSuffix(key, "/") {
+				key += "/"
+			}
 			metadata := map[string]*string{
 				"x-amz-meta-filetype": aws.String("directory"),
 			}
@@ -1229,7 +1232,15 @@ func downloadS3FileToTemp(config *SharedFileSystemConfig, s3URL string, dstPath 
 	// S3オブジェクトのメタデータを取得
 	result, err := svc.HeadObject(input)
 	if err != nil {
-		return "", err
+		key += "/"
+		input = &s3.HeadObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		}
+		result, err = svc.HeadObject(input)
+		if err != nil {
+			return "", err
+		}
 	}
 	if result.Metadata["x-amz-meta-filetype"] == aws.String("directory") {
 		if dstPath != nil {

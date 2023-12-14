@@ -86,7 +86,7 @@ abstract class JobExecutor {
         new Set(this.output_dirs),
         runtime_context.move_outputs,
         runtime_context.make_fs_access(''),
-        getDefault(runtime_context.compute_checksum, true),
+        getDefault(runtime_context.compute_checksum, false),
       );
     }
 

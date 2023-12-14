@@ -83,11 +83,12 @@ interface StageFilesOptions {
   fix_conflicts?: boolean;
   secret_store?: SecretStore;
 }
-export function stage_files_for_outputs(
+export async function stage_files_for_outputs(
   pathmapper: PathMapper,
-  stage_func?: (src: string, dest: string) => void,
+  stage_func: (src: string, dest: string) => Promise<void>,
+  fs_access: StdFsAccess,
   { ignore_writable = false, symlink = true, fix_conflicts = false }: StageFilesOptions = {},
-): void {
+): Promise<void> {
   let items: [string, MapperEnt][] = symlink ? pathmapper.items_exclude_children() : pathmapper.items();
   const targets: { [key: string]: MapperEnt } = {};
 
@@ -123,11 +124,11 @@ export function stage_files_for_outputs(
     if (!fs.existsSync(targetDir)) {
       fs.mkdirSync(targetDir, { recursive: true });
     }
-    if ((entry.type === 'File' || entry.type === 'Directory') && fs.existsSync(entry.resolved)) {
+    if ((entry.type === 'File' || entry.type === 'Directory') && (await fs_access.exists(entry.resolved))) {
       if (symlink) {
         fs.symlinkSync(entry.resolved, entry.target);
       } else if (stage_func) {
-        stage_func(entry.resolved, entry.target);
+        await stage_func(entry.resolved, entry.target);
       }
     } else if (entry.type === 'Directory' && !fs.existsSync(entry.target) && entry.resolved.startsWith('_:')) {
       fs.mkdirSync(entry.target, { recursive: true });
@@ -249,6 +250,56 @@ function scandir(dir: string): DirEntry[] {
     return new DirEntry(entry, entryPath, stat.isDirectory());
   });
 }
+async function _relocate(
+  fs_access: StdFsAccess,
+  source_directories: Set<string>,
+  action: string,
+  src: string,
+  dst: string,
+) {
+  src = fs_access.realpath(src);
+  dst = fs_access.realpath(dst);
+
+  if (src === dst) {
+    return;
+  }
+
+  let src_can_deleted = false;
+  for (const p of source_directories) {
+    const common = commonPrefix([p, src]);
+    if (common === p) {
+      src_can_deleted = true;
+    }
+  }
+
+  const _action = action === 'move' && src_can_deleted ? 'move' : 'copy';
+  if (_action === 'move') {
+    _logger.debug(`Moving ${src} to ${dst}`);
+    let isDir = await fs_access.isdir(src);
+    isDir = isDir && (await fs_access.isdir(dst));
+    if (isDir) {
+      for (const dir_entry of scandir(src)) {
+        await _relocate(fs_access, source_directories, action, dir_entry.path, fs_access.join(dst, dir_entry.name));
+      }
+    } else {
+      fsExtra.moveSync(src, dst, { overwrite: true });
+    }
+  } else if (_action === 'copy') {
+    _logger.debug(`Copying ${src} to ${dst}`);
+    const isDir = await fs_access.isdir(src);
+    if (isDir) {
+      if (isdir(dst)) {
+        removeSyncIgnorePermissionError(dst);
+      } else if (isfile(dst)) {
+        fs.unlinkSync(dst);
+      }
+      await fs_access.copy(src, dst);
+    } else {
+      await fs_access.copy(src, dst);
+    }
+  }
+}
+
 export async function relocateOutputs(
   outputObj: CWLObjectType,
   destination_path: string,
@@ -257,56 +308,20 @@ export async function relocateOutputs(
   fs_access: StdFsAccess,
   compute_checksum = true,
 ): Promise<CWLObjectType> {
-  adjustDirObjs(outputObj, (val) => get_listing(fs_access, val, true));
-
+  const promises = [];
+  adjustDirObjs(outputObj, (val) => {
+    promises.push(get_listing(fs_access, val, true));
+  });
+  await Promise.all(promises);
   if (!['move', 'copy'].includes(action)) {
     return outputObj;
   }
 
-  function _relocate(src: string, dst: string): void {
-    src = fs_access.realpath(src);
-    dst = fs_access.realpath(dst);
-
-    if (src === dst) {
-      return;
-    }
-
-    let src_can_deleted = false;
-    for (const p of source_directories) {
-      const common = commonPrefix([p, src]);
-      if (common === p) {
-        src_can_deleted = true;
-      }
-    }
-
-    const _action = action === 'move' && src_can_deleted ? 'move' : 'copy';
-    if (_action === 'move') {
-      _logger.debug(`Moving ${src} to ${dst}`);
-      if (fs_access.isdir(src) && fs_access.isdir(dst)) {
-        for (const dir_entry of scandir(src)) {
-          _relocate(dir_entry.path, fs_access.join(dst, dir_entry.name));
-        }
-      } else {
-        fsExtra.moveSync(src, dst, { overwrite: true });
-      }
-    } else if (_action === 'copy') {
-      _logger.debug(`Copying ${src} to ${dst}`);
-      if (fs_access.isdir(src)) {
-        if (isdir(dst)) {
-          removeSyncIgnorePermissionError(dst);
-        } else if (isfile(dst)) {
-          fs.unlinkSync(dst);
-        }
-        fsExtra.copySync(src, dst, { overwrite: true });
-      } else {
-        fsExtra.copySync(src, dst, { preserveTimestamps: true, overwrite: true });
-      }
-    }
-  }
-
   function _realpath(ob: Directory | File): void {
     const location = ob.location;
-    if (location.startsWith('file:')) {
+    if (location.startsWith('s3:')) {
+      ob.location = location;
+    } else if (location.startsWith('file:')) {
       ob.location = fileUri(fs.realpathSync(uriFilePath(location)));
     } else if (location.startsWith('/')) {
       ob.location = fs.realpathSync(location);
@@ -318,7 +333,15 @@ export async function relocateOutputs(
   visitFileDirectory(outputObj, (v) => outfiles.push(v));
   visitFileDirectory(outfiles, _realpath);
   const pm = new PathMapper(outfiles, '', destination_path, false);
-  stage_files_for_outputs(pm, _relocate, { symlink: false, fix_conflicts: true });
+  await stage_files_for_outputs(
+    pm,
+    async (src, dst) => _relocate(fs_access, source_directories, action, src, dst),
+    fs_access,
+    {
+      symlink: false,
+      fix_conflicts: true,
+    },
+  );
 
   function _check_adjust(a_file: File | Directory): void {
     a_file.location = fileUri(pm.mapper(a_file.location)?.target ?? '');
@@ -598,7 +621,7 @@ export abstract class Process {
   async _init_job(joborder: CWLObjectType, runtime_context: RuntimeContext): Promise<Builder> {
     const job = { ...joborder };
 
-    const fs_access = new StdFsAccess(runtime_context.basedir);
+    const fs_access = new StdFsAccess(runtime_context.basedir, runtime_context.sharedFilesystemConfig);
 
     const [load_listing_req] = getRequirement(this.tool, cwlTsAuto.LoadListingRequirement);
 
@@ -615,7 +638,7 @@ export abstract class Process {
       validate(schema.type, job, false);
 
       if (load_listing != cwlTsAuto.LoadListingEnum.NO_LISTING) {
-        get_listing(fs_access, job, load_listing === LoadListingEnum.DEEP_LISTING);
+        await get_listing(fs_access, job, load_listing === LoadListingEnum.DEEP_LISTING);
       }
 
       visitFile(job, (x): void => add_sizes(fs_access, x));

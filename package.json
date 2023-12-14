@@ -72,10 +72,11 @@
   ],
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^6.3.0",
+    "@aws-sdk/client-s3": "^3.473.0",
+    "@aws-sdk/lib-storage": "^3.473.0",
     "@trpc/client": "^10.44.1",
     "@trpc/server": "^10.44.1",
     "@types/rdflib": "^1.2.0",
-    "aws-sdk": "^2.1514.0",
     "crypto": "^1.0.1",
     "cwl-ts-auto": "file:../cwl-ts-auto",
     "fastify": "^4.24.3",

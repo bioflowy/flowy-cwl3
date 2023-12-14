@@ -1,7 +1,9 @@
 import * as fs from 'node:fs';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import aws from 'aws-sdk';
+import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 import * as cwlTsAuto from 'cwl-ts-auto';
+
 import { InlineJavascriptRequirement } from 'cwl-ts-auto';
 import {
   ArrayType,
@@ -45,16 +47,24 @@ export const INPUT_OBJ_VOCAB: { [key: string]: string } = {
   File: 'https://w3id.org/cwl/cwl#File',
   Directory: 'https://w3id.org/cwl/cwl#Directory',
 };
+const streamToString = async (stream: Readable): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const chunks: Uint8Array[] = [];
+    stream.on('data', (chunk) => chunks.push(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+  });
+};
 async function getFileContentFromS3(config: SharedFileSystem, s3Url: string): Promise<string> {
   if (config.type !== 's3') {
     throw new Error('Unsupported file system type');
   }
 
   // S3のクライアントを初期化
-  const s3 = new aws.S3({
+  const s3 = new S3Client({
+    forcePathStyle: true,
     region: config.region,
     endpoint: config.endpoint,
-    s3ForcePathStyle: true,
     credentials: {
       accessKeyId: config.accessKey ?? '',
       secretAccessKey: config.secretKey ?? '',
@@ -65,12 +75,16 @@ async function getFileContentFromS3(config: SharedFileSystem, s3Url: string): Pr
   const urlParts = new URL(s3Url);
   const bucket = urlParts.hostname.split('.')[0];
   const key = urlParts.pathname.substring(1);
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+  });
 
-  // S3からファイルを取得
-  const response = await s3.getObject({ Bucket: bucket, Key: key }).promise();
-
-  // ファイルの内容を文字列として返す
-  return response.Body?.toString() ?? '';
+  const { Body } = await s3.send(command);
+  if (Body instanceof Readable) {
+    return streamToString(Body);
+  }
+  throw new Error('Invalid object body type.');
 }
 export async function contentLimitRespectedReadBytes(filePath: string): Promise<string> {
   if (filePath.startsWith('s3://')) {
@@ -313,7 +327,7 @@ export class Builder {
       }
 
       if (schema.type == 'Directory') {
-        datum = this.handle_directory(schema, datum);
+        datum = await this.handle_directory(schema, datum);
       }
 
       if (schema.type == 'Any') {
@@ -403,11 +417,11 @@ export class Builder {
     }
   }
 
-  handle_directory(schema: CommandInputParameter, datum: CWLOutputType): Directory {
+  async handle_directory(schema: CommandInputParameter, datum: CWLOutputType): Promise<Directory> {
     const dir = datum as Directory;
     const ll = schema.loadListing;
     if (ll && ll !== cwlTsAuto.LoadListingEnum.NO_LISTING) {
-      get_listing(this.fs_access, datum, ll === cwlTsAuto.LoadListingEnum.DEEP_LISTING);
+      await get_listing(this.fs_access, datum, ll === cwlTsAuto.LoadListingEnum.DEEP_LISTING);
     }
     this.files.push(dir);
     return dir;
@@ -537,7 +551,7 @@ export class Builder {
         if (!sfname) {
           continue;
         }
-        this.handle_secondary_path(schema, datum, discover_secondaryFiles, debug, sf_entry, sf_required, sfname);
+        await this.handle_secondary_path(schema, datum, discover_secondaryFiles, debug, sf_entry, sf_required, sfname);
       }
     }
 
@@ -552,7 +566,7 @@ export class Builder {
     }
     files.push(newsf);
   }
-  handle_secondary_path(
+  async handle_secondary_path(
     schema: CommandInputParameter,
     datum: File,
     discover_secondaryFiles: boolean,
@@ -599,7 +613,7 @@ export class Builder {
     if (!found) {
       if (typeof sfname === 'object') {
         this.addsf(datum.secondaryFiles ?? [], sfname);
-      } else if (discover_secondaryFiles && this.fs_access.exists(sf_location)) {
+      } else if (discover_secondaryFiles && (await this.fs_access.exists(sf_location))) {
         this.addsf(datum.secondaryFiles ?? [], {
           class: 'File',
           location: sf_location,

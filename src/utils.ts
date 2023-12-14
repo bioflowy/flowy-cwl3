@@ -410,13 +410,13 @@ function url2pathname(url: string): string {
   }
 }
 
-export function get_listing(fs_access: StdFsAccess, rec: unknown, recursive = true) {
+export async function get_listing(fs_access: StdFsAccess, rec: unknown, recursive = true) {
   if (!isDirectory(rec)) {
     const finddirs: Directory[] = [];
     adjustDirObjs(rec, (val) => finddirs.push(val));
     for (let _i = 0, finddirs_1 = finddirs; _i < finddirs_1.length; _i++) {
       const f = finddirs_1[_i];
-      get_listing(fs_access, f, recursive);
+      await get_listing(fs_access, f, recursive);
     }
     return;
   }
@@ -425,17 +425,19 @@ export function get_listing(fs_access: StdFsAccess, rec: unknown, recursive = tr
   }
   const listing: (File | Directory)[] = [];
   const loc = rec.location;
-  for (let _a = 0, _b = fs_access.listdir(loc); _a < _b.length; _a++) {
+  const _b = await fs_access.listdir(loc);
+  for (let _a = 0; _a < _b.length; _a++) {
     const ld = _b[_a];
     const bn = path.basename(url2pathname(ld));
-    if (fs_access.isdir(ld)) {
+    const isDir = await fs_access.isdir(ld);
+    if (isDir) {
       const ent: Directory = {
         class: 'Directory',
         location: ld,
         basename: bn,
       };
       if (recursive) {
-        get_listing(fs_access, ent, recursive);
+        await get_listing(fs_access, ent, recursive);
       }
       listing.push(ent);
     } else {

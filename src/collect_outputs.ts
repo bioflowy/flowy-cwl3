@@ -93,7 +93,7 @@ function revmap_file(builder: Builder, outdir: string, f: File | Directory): Fil
   throw new WorkflowException(`Output File object is missing both 'location' and 'path' fields: ${str(f)}`);
 }
 
-function checkValidLocations(fsAccess: StdFsAccess, ob: Directory | File): void {
+async function checkValidLocations(fsAccess: StdFsAccess, ob: Directory | File): Promise<void> {
   const location = ob.location;
   if (location.startsWith('_:')) {
     return;
@@ -104,8 +104,11 @@ function checkValidLocations(fsAccess: StdFsAccess, ob: Directory | File): void 
   if (isFile(ob) && !fsAccess.isfile(location)) {
     throw new Error(`Does not exist or is not a File: '${location}'`);
   }
-  if (isDirectory(ob) && !fsAccess.isdir(location)) {
-    throw new Error(`Does not exist or is not a Directory: '${location}'`);
+  if (isDirectory(ob)) {
+    const isDir = await fsAccess.isdir(location);
+    if (!isDir) {
+      throw new Error(`Does not exist or is not a Directory: '${location}'`);
+    }
   }
 }
 
@@ -148,8 +151,9 @@ export async function collect_output_ports(
       visitFileDirectory(ret, revmap);
       visitFileDirectory(ret, remove_path);
       normalizeFilesDirs(ret);
-      visitFileDirectory(ret, (val) => checkValidLocations(fs_access, val));
-
+      const promises = [];
+      visitFileDirectory(ret, (val) => promises.push(checkValidLocations(fs_access, val)));
+      await Promise.all(promises);
       // const expected_schema = ((this.names.get_name("outputs_record_schema", null)) as Schema);
       validate({ type: RecordType, fields }, ret, true);
       return ret || {};
