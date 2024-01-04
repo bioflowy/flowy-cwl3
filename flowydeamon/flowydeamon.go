@@ -97,6 +97,7 @@ func (lrt *LoggingRoundTripper) RoundTrip(r *http.Request) (*http.Response, erro
 }
 func collect_secondary_files(
 	c *APIClient,
+	config *SharedFileSystemConfig,
 	id string,
 	schema OutputBinding,
 	results []ApiDoEvalPostRequestContext,
@@ -154,9 +155,9 @@ func collect_secondary_files(
 				if secondaryFile.GetPath() != "" && secondaryFile.GetLocation() == "" {
 					RevmapFile(builderOutDir, outdir, secondaryFile)
 				}
-				if isFile(outdir, secondaryFile.GetLocation()) {
+				if isFile(config, outdir, secondaryFile.GetLocation()) {
 					primary.SecondaryFiles = append(primary.SecondaryFiles, FileAllOfSecondaryFilesInner{ChildFile: convertToFile(secondaryFile)})
-				} else if isDir(outdir, secondaryFile.GetLocation()) {
+				} else if isDir(config, outdir, secondaryFile.GetLocation()) {
 					primary.SecondaryFiles = append(primary.SecondaryFiles, FileAllOfSecondaryFilesInner{ChildDirectory: convertToDirectory(secondaryFile)})
 				}
 			}
@@ -307,7 +308,7 @@ func GetAndExecuteJob(c *APIClient, config *SharedFileSystemConfig) {
 				if len(files2) > 0 {
 					results[output.Name] = files2
 					for _, file := range files2 {
-						collect_secondary_files(c, job.Id, output, []ApiDoEvalPostRequestContext{file}, job.Cwd, job.BuilderOutdir)
+						collect_secondary_files(c, config, job.Id, output, []ApiDoEvalPostRequestContext{file}, job.Cwd, job.BuilderOutdir)
 					}
 				}
 			}
@@ -528,7 +529,15 @@ func aslist(val interface{}) []interface{} {
 	}
 	return val.([]interface{})
 }
-func isFile(dir string, filepath string) bool {
+func isFile(config *SharedFileSystemConfig, dir string, filepath string) bool {
+	if config != nil && strings.HasPrefix(filepath, "s3://") {
+		h, err := headS3Object(config, filepath)
+		if err != nil {
+			return false
+		} else {
+			return h == "file"
+		}
+	}
 	path, err := abspath(filepath, dir)
 	if err != nil {
 		return false
@@ -536,7 +545,15 @@ func isFile(dir string, filepath string) bool {
 	fileInfo, err := os.Stat(path)
 	return err == nil && !fileInfo.IsDir()
 }
-func isDir(dir string, filepath string) bool {
+func isDir(config *SharedFileSystemConfig, dir string, filepath string) bool {
+	if config != nil && strings.HasPrefix(filepath, "s3://") {
+		h, err := headS3Object(config, filepath)
+		if err != nil {
+			return false
+		} else {
+			return h == "directory"
+		}
+	}
 	path, err := abspath(filepath, dir)
 	if err != nil {
 		return false
@@ -807,7 +824,11 @@ func prepareStagingDir(config *SharedFileSystemConfig, commands []StagingCommand
 
 		case "copy":
 			if _, err := os.Stat(*command.Target); os.IsNotExist(err) {
-				err = CopyFileOrDir(config, *command.Resolved, *command.Target) // copyFile needs to be implemented
+				if strings.HasPrefix(*command.Resolved, "s3://") {
+					_, err = downloadS3FileToTemp(config, *command.Resolved, command.Target)
+				} else {
+					err = CopyFileOrDir(config, *command.Resolved, *command.Target) // copyFile needs to be implemented
+				}
 				if err != nil {
 					return err
 				}
@@ -833,7 +854,14 @@ func prepareStagingDir(config *SharedFileSystemConfig, commands []StagingCommand
 				}
 			}
 			if !filepath.HasPrefix(*command.Resolved, "_:") {
-				err = os.Symlink(*command.Resolved, *command.Target)
+				src := *command.Resolved
+				if strings.HasPrefix(*command.Resolved, "s3://") {
+					src, err = downloadS3FileToTemp(config, *command.Resolved, nil)
+					if err != nil {
+						return err
+					}
+				}
+				err = os.Symlink(src, *command.Target)
 				if err != nil && !errors.Is(err, os.ErrExist) {
 					return err
 				}
@@ -1056,7 +1084,7 @@ func get_listing(outdir string, dir *Directory, recursive bool) error {
 	}
 	for _, ld := range ls {
 		fileUri(ld, false)
-		if isDir(outdir, ld) {
+		if isDir(nil, outdir, ld) {
 			bn := basename(ld)
 			ent := ChildDirectory{
 				Class:    "Directory",
@@ -1202,6 +1230,49 @@ func DownloadDirectory(svc *s3.S3, bucket, prefix, localDir string) error {
 
 	return nil
 }
+func headS3Object(config *SharedFileSystemConfig, s3URL string) (string, error) {
+	// URLを解析してバケットとキーを取得
+	u, err := url.Parse(s3URL)
+	if err != nil {
+		return "", err
+	}
+	bucket := u.Host
+	key := strings.TrimPrefix(u.Path, "/")
+	var region string = "ap-northeast-1"
+	// AWSセッションを作成
+	sess, err := session.NewSession(&aws.Config{
+		Region:           &region, // 適切なリージョンに変更してください
+		Credentials:      credentials.NewStaticCredentials(*config.AccessKey, *config.SecretKey, ""),
+		Endpoint:         aws.String(*config.Endpoint),
+		S3ForcePathStyle: aws.Bool(true),
+	})
+	if err != nil {
+		return "", err
+	}
+
+	// S3サービスクライアントを作成
+	svc := s3.New(sess)
+	input := &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}
+
+	// S3オブジェクトのメタデータを取得
+	_, err = svc.HeadObject(input)
+	if err == nil {
+		return "file", nil
+	}
+	key += "/"
+	input = &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}
+	_, err = svc.HeadObject(input)
+	if err == nil {
+		return "directory", err
+	}
+	return "", err
+}
 func downloadS3FileToTemp(config *SharedFileSystemConfig, s3URL string, dstPath *string) (string, error) {
 	// URLを解析してバケットとキーを取得
 	u, err := url.Parse(s3URL)
@@ -1239,7 +1310,15 @@ func downloadS3FileToTemp(config *SharedFileSystemConfig, s3URL string, dstPath 
 		}
 		result, err = svc.HeadObject(input)
 		if err != nil {
-			return "", err
+			if dstPath == nil {
+				tmpPath, err := ioutil.TempDir("", "example")
+				if err != nil {
+					return "", err
+				}
+				dstPath = &tmpPath
+			}
+			DownloadDirectory(svc, bucket, key, *dstPath)
+			return *dstPath, nil
 		}
 	}
 	if result.Metadata["x-amz-meta-filetype"] == aws.String("directory") {

@@ -55,7 +55,7 @@ const streamToString = async (stream: Readable): Promise<string> => {
     stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
   });
 };
-async function getFileContentFromS3(config: SharedFileSystem, s3Url: string): Promise<string> {
+export async function getFileContentFromS3(config: SharedFileSystem, s3Url: string): Promise<string> {
   if (config.type !== 's3') {
     throw new Error('Unsupported file system type');
   }
@@ -419,7 +419,7 @@ export class Builder {
 
   async handle_directory(schema: CommandInputParameter, datum: CWLOutputType): Promise<Directory> {
     const dir = datum as Directory;
-    const ll = schema.loadListing;
+    const ll = schema.loadListing ?? this.loadListing;
     if (ll && ll !== cwlTsAuto.LoadListingEnum.NO_LISTING) {
       await get_listing(this.fs_access, datum, ll === cwlTsAuto.LoadListingEnum.DEEP_LISTING);
     }

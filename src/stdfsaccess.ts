@@ -30,41 +30,6 @@ export function abspath(src: string, basedir: string): string {
   return abpath;
 }
 export class StdFsAccess {
-  async downloadS3Object(s3path: string, downloadPath: string): Promise<void> {
-    const s3url = new URL(s3path);
-    let key = s3url.pathname;
-    key = key.startsWith('/') ? key.substring(1) : key;
-    const getObjectInput: GetObjectCommandInput = {
-      Bucket: s3url.host,
-      Key: key,
-    };
-
-    try {
-      const s3Client = this._getS3();
-      const data = await s3Client.send(new GetObjectCommand(getObjectInput));
-      if (data.Body) {
-        const stream = data.Body as Readable;
-        const writeStream = createWriteStream(downloadPath);
-        stream.pipe(writeStream);
-        return await new Promise((resolve, reject) => {
-          writeStream.on('finish', resolve);
-          writeStream.on('error', reject);
-        });
-      } else {
-        throw new Error('File body is empty');
-      }
-    } catch (error) {
-      console.error('Error downloading file:', error);
-      throw error;
-    }
-  }
-  async copy(src: string, dst: string) {
-    if (src.startsWith('s3://')) {
-      await this.downloadS3Object(src, dst);
-    } else {
-      fsExtra.copySync(src, dst, { preserveTimestamps: true, overwrite: true });
-    }
-  }
   s3: S3Client;
   sharedFileSystem: SharedFileSystem;
   basedir: string;
@@ -116,8 +81,14 @@ export class StdFsAccess {
     }
   }
 
-  size(fn: string): number {
-    return fs.statSync(this._abs(fn)).size;
+  async size(fn: string): Promise<number> {
+    if (fn.startsWith('s3://')) {
+      const response = await this.headObject(fn);
+      return response.ContentLength;
+    } else {
+      const stat = await fs.promises.stat(this._abs(fn));
+      return stat.size;
+    }
   }
 
   isfile(fn: string): boolean {
@@ -139,15 +110,15 @@ export class StdFsAccess {
       Bucket: s3url.host,
       Key: key,
     });
-
-    return s3.send(command);
+    try {
+      return await s3.send(command);
+    } catch {
+      return undefined;
+    }
   }
   async isdirs3(fn: string): Promise<boolean> {
-    const response = await this.headObject(fn);
-    if (response.Metadata === undefined) {
-      return false;
-    }
-    return response.Metadata['x-amz-meta-filetype'] === 'directory';
+    const contents = await this.listdirS3(fn);
+    return contents !== undefined;
   }
   async isdir(fn: string): Promise<boolean> {
     if (fn.startsWith('s3://')) {
@@ -156,9 +127,58 @@ export class StdFsAccess {
     const p = this._statSync(this._abs(fn));
     return p ? p.isDirectory() : false;
   }
+  async downloadS3Object(s3path: string, downloadPath: string): Promise<void> {
+    const s3url = new URL(s3path);
+    let key = s3url.pathname;
+    key = key.startsWith('/') ? key.substring(1) : key;
+    const getObjectInput: GetObjectCommandInput = {
+      Bucket: s3url.host,
+      Key: key,
+    };
 
-  async listdirS3(fn: string): Promise<string[]> {
-    const s3url = new URL(fn);
+    try {
+      const s3Client = this._getS3();
+      const data = await s3Client.send(new GetObjectCommand(getObjectInput));
+      if (data.Body) {
+        const stream = data.Body as Readable;
+        const writeStream = createWriteStream(downloadPath);
+        stream.pipe(writeStream);
+        return await new Promise((resolve, reject) => {
+          writeStream.on('finish', resolve);
+          writeStream.on('error', reject);
+        });
+      } else {
+        throw new Error('File body is empty');
+      }
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      throw error;
+    }
+  }
+  async copy(src2: string, dst: string): Promise<number> {
+    const src = `${src2}`;
+
+    if (src.startsWith('s3://')) {
+      console.log(`download ${src} to ${dst}`);
+      await this.downloadS3Object(src, dst);
+    } else {
+      console.log(`filecopy ${src} to ${dst}`);
+      fsExtra.copySync(src, dst, { preserveTimestamps: true, overwrite: true });
+    }
+    return 0;
+  }
+  /**
+   * Returns an array of file and directory paths contained within the specified directory.
+   * If the directory is empty, it returns an array of size 0.
+   * If the specified path does not exist or is not a directory, it returns undefined.
+   *
+   * @param {string} path - The path of the directory.
+   * @returns {string[]|undefined} An array of paths for files and directories within the given directory,
+   *                               or undefined if the specified path is not a directory.
+   */
+  async listdirS3(path: string): Promise<string[] | undefined> {
+    path = path.endsWith('/') ? path : `${path}/`;
+    const s3url = new URL(path);
     const s3 = this._getS3();
     let key = s3url.pathname.endsWith('/') ? s3url.pathname : `${s3url.pathname}/`;
     key = key.startsWith('/') ? key.substring(1) : key;
@@ -168,13 +188,23 @@ export class StdFsAccess {
     });
 
     const response = await s3.send(command);
+    if (response.Contents === undefined) {
+      return undefined;
+    }
     const contents = response.Contents.filter((content) => content.Key !== key);
-    return (
-      contents?.map((object) => {
-        const u = `s3://${s3url.host}/${object.Key}`;
-        return u;
-      }) ?? []
-    );
+    const keys = key.split('/');
+    const listdirs = [];
+    for (const content of contents) {
+      const parts = content.Key.split('/');
+      let dir = path + parts[keys.length - 1];
+      if (parts.length > keys.length) {
+        dir = `${dir}/`;
+      }
+      if (!listdirs.includes(dir)) {
+        listdirs.push(dir);
+      }
+    }
+    return listdirs;
   }
   async listdir(fn: string): Promise<string[]> {
     if (fn.startsWith('s3://')) {
@@ -207,7 +237,9 @@ export class StdFsAccess {
   }
 
   realpath(p: string): string {
-    if (fs.existsSync(p)) {
+    if (p.startsWith('s3://')) {
+      return p;
+    } else if (fs.existsSync(p)) {
       return fs.realpathSync(p);
     } else {
       return p;

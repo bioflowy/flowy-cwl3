@@ -27,6 +27,7 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
   // eslint-disable-next-line @typescript-eslint/no-useless-constructor
   constructor(builder: Builder, joborder: CWLObjectType, make_path_mapper: MakePathMapper, tool: Tool, name: string) {
     super(builder, joborder, make_path_mapper, tool, name);
+    this.inplace_update = true;
   }
 
   async get_image(docker_requirement: DockerRequirement, pull_image: boolean, force_pull: boolean): Promise<boolean> {
@@ -132,7 +133,9 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
         if (!fs.existsSync(path.dirname(hostOutdirTgt))) {
           fs.mkdirSync(path.dirname(hostOutdirTgt), { recursive: true });
         }
-        fs.copyFileSync(volume.resolved, hostOutdirTgt);
+        if (volume.resolved.startsWith('file://')) {
+          fs.copyFileSync(volume.resolved, hostOutdirTgt);
+        }
       } else {
         const tmpdir = createTmpDir(tmpdirPrefix);
         fileCopy = path.join(tmpdir, path.basename(volume.resolved));

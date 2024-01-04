@@ -490,6 +490,9 @@ export function str<T>(val: T): string {
   return JSON.stringify(val, null, 4);
 }
 export function ensureWritable(targetPath: string, includeRoot = false): void {
+  if (targetPath.startsWith('s3://')) {
+    return;
+  }
   //
   // Ensure that 'path' is writable.
   //

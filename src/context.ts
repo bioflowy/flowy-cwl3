@@ -101,7 +101,7 @@ export function make_default_fs_access(basedir: string): StdFsAccess {
   return new StdFsAccess(basedir, getServerConfig().sharedFileSystem);
 }
 export class RuntimeContext extends ContextBase {
-  sharedFilesystemConfig: SharedFileSystem;
+  sharedFilesystemConfig: SharedFileSystem = undefined;
   relocateOutputs = true;
   clientWorkDir?: string = undefined;
   outdir?: string = undefined;

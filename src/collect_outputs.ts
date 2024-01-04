@@ -17,6 +17,7 @@ import { convertDictToFileDirectory } from './main.js';
 import { compute_checksums, shortname } from './process.js';
 import { StdFsAccess } from './stdfsaccess.js';
 import {
+  CONTENT_LIMIT,
   CWLObjectType,
   CWLOutputType,
   adjustFileObjs,
@@ -129,13 +130,19 @@ export async function collect_output_ports(
     // eslint-disable-next-line new-cap
     const fs_access = new builder.make_fs_access(outdir);
     if (outfiles['cwl.output.json']) {
-      const outjson = outfiles['cwl.output.json'];
-      if (!(outjson.length == 1 && isFile(outjson[0]))) {
+      const outjsons = outfiles['cwl.output.json'];
+      if (!(outjsons.length == 1 && isFile(outjsons[0]))) {
         throw new WorkflowException('Expected cwl.output.json to be a single file');
       }
-      ret = JSON.parse(outjson[0].contents);
+      const outjson = outjsons[0];
+      if (outjson.size > CONTENT_LIMIT) {
+        const jsonString = await contentLimitRespectedReadBytes(outjson.location);
+        ret = JSON.parse(jsonString);
+      } else {
+        ret = JSON.parse(outjson.contents);
+      }
       if (debug) {
-        _logger.debug(`Raw output from ${outjson[0].location}: ${JSON.stringify(ret, null, 4)}`);
+        _logger.debug(`Raw output from ${outjson.location}: ${JSON.stringify(ret, null, 4)}`);
       }
       convertDictToFileDirectory(ret);
     } else if (Array.isArray(ports)) {

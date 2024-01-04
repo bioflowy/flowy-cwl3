@@ -21,13 +21,18 @@ export const appRouter = t.router({
       clientWorkDir: input.clientWorkDir,
       outdir: input.outdir ? input.outdir : input.clientWorkDir,
       move_output: input.move_output,
-      sharedFileSystem: getServerConfig().sharedFileSystem,
+      sharedFilesystemConfig: getServerConfig().sharedFileSystem,
     });
-    if (input.basedir) {
-      runtimeContext.basedir = input.basedir;
+    try {
+      if (input.basedir) {
+        runtimeContext.basedir = input.basedir;
+      }
+      const [result, status] = await exec(runtimeContext, input.tool_path, input.job_path);
+      return [result, status]; // input type is string
+    } catch (error) {
+      console.error(error);
+      throw error;
     }
-    const [result, status] = await exec(runtimeContext, input.tool_path, input.job_path);
-    return [result, status]; // input type is string
   }),
 });
 // export type definition of API

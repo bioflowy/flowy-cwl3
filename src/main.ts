@@ -3,12 +3,15 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as cwlTsAuto from 'cwl-ts-auto';
 import yaml from 'js-yaml';
+import { getFileContentFromS3 } from './builder.js';
 import { LoadingContext, RuntimeContext } from './context.js';
 import { Directory, File } from './cwltypes.js';
 import { SingleJobExecutor } from './executors.js';
 import { loadDocument } from './loader.js';
 import { _logger } from './loghandler.js';
 import { shortname, type Process, add_sizes } from './process.js';
+import { dirnames3 } from './s3util.js';
+import { getServerConfig } from './server/server.js';
 import {
   type CWLObjectType,
   normalizeFilesDirs,
@@ -22,14 +25,19 @@ import {
 } from './utils.js';
 import { default_make_tool } from './workflow.js';
 
-function parseFile(filePath: string): object | null {
+async function parseFile(filePath: string): Promise<object | null> {
   const extname = path.extname(filePath).toLowerCase();
 
-  if (!fs.existsSync(filePath)) {
-    throw new Error('File does not exist.');
+  let content = '';
+  if (filePath.startsWith('s3:/')) {
+    const serverConfig = getServerConfig();
+    content = await getFileContentFromS3(serverConfig.sharedFileSystem, filePath);
+  } else {
+    if (!fs.existsSync(filePath)) {
+      throw new Error('File does not exist.');
+    }
+    content = await fs.promises.readFile(filePath, 'utf-8');
   }
-
-  const content = fs.readFileSync(filePath, 'utf-8');
 
   switch (extname) {
     case '.json':
@@ -56,7 +64,7 @@ function convertToAbsPath(filePath: string, inputBaseUrl: URL): URL {
   }
   return new URL(filePathToURI(filePath));
 }
-function load_job_order(basedir: string | undefined, job_order_file: string): [CWLObjectType | null, string] {
+async function load_job_order(job_order_file: string): Promise<[CWLObjectType | null, string]> {
   let job_order_object = null;
 
   // if (args.job_order.length == 1 && args.job_order[0][0] != '-') {
@@ -71,15 +79,19 @@ function load_job_order(basedir: string | undefined, job_order_file: string): [C
 
   let input_basedir;
   if (job_order_object != null) {
-    input_basedir = basedir ? basedir : process.cwd();
+    input_basedir = process.cwd();
   } else if (job_order_file != null) {
-    input_basedir = basedir ? basedir : path.resolve(path.dirname(job_order_file));
-    const fileData = parseFile(job_order_file);
+    if (job_order_file.startsWith('s3:/')) {
+      input_basedir = dirnames3(job_order_file);
+    } else {
+      input_basedir = path.resolve(path.dirname(job_order_file));
+    }
+    const fileData = await parseFile(job_order_file);
     job_order_object = fileData;
   }
 
   if (job_order_object == null) {
-    input_basedir = basedir ? basedir : process.cwd();
+    input_basedir = process.cwd();
   }
   function _normalizeFileDir(val: File | Directory) {
     if (val.location) {
@@ -151,13 +163,13 @@ export function convertDictToFileDirectory<T>(obj: T): T {
   return obj;
 }
 
-function init_job_order(
+async function init_job_order(
   job_order_object: CWLObjectType | null,
   process: Process,
   input_basedir,
   tool_file_path,
   runtime_context: RuntimeContext | null = null,
-): CWLObjectType {
+): Promise<CWLObjectType> {
   if (!job_order_object) {
     job_order_object = { id: tool_file_path };
   }
@@ -170,12 +182,12 @@ function init_job_order(
 
   const namespaces = process.tool.loadingOptions.namespaces;
   const fs_access = runtime_context.make_fs_access(input_basedir);
-  function path_to_loc(p: File | Directory): void {
+  async function path_to_loc(p: File | Directory): Promise<void> {
     if (!p.location && p.path) {
       p.location = p.path;
     }
     if (isFile(p)) {
-      add_sizes(fs_access, p);
+      await add_sizes(fs_access, p);
       if (namespaces) {
         const format = p.format;
         if (isString(format)) {
@@ -189,7 +201,11 @@ function init_job_order(
       trim_listing(p);
     }
   }
-  visitFileDirectory(job_order_object, path_to_loc);
+  const promises = [];
+  visitFileDirectory(job_order_object, (p) => {
+    promises.push(path_to_loc(p));
+  });
+  await Promise.all(promises);
   normalizeFilesDirs(job_order_object);
 
   if ('cwl:tool' in job_order_object) delete job_order_object['cwl:tool'];
@@ -207,20 +223,20 @@ export async function exec(
     tool_path = path.join(runtimeContext.clientWorkDir, tool_path);
   }
   if (job_path && !path.isAbsolute(job_path)) {
-    job_path = path.join(runtimeContext.clientWorkDir, job_path);
+    job_path = path.join(runtimeContext.basedir, job_path);
   }
   _logger.info(`tool_path=${tool_path}`);
   _logger.info(`job_path=${job_path}`);
   const [tool] = await loadDocument(tool_path, loadingContext);
-  const jo = load_job_order(runtimeContext.basedir, job_path);
+  const jo = await load_job_order(job_path);
   const job_order_object = jo[0];
   let input_basedir = jo[1];
   if (job_order_object == null) {
     input_basedir = path.dirname(tool_path);
   }
   _logger.info(`outdir=${runtimeContext.outdir}`);
-  const initialized_job_order = init_job_order(job_order_object, tool, input_basedir, tool_path, runtimeContext);
   runtimeContext.basedir = input_basedir;
+  const initialized_job_order = await init_job_order(job_order_object, tool, input_basedir, tool_path, runtimeContext);
   const process_executor = new SingleJobExecutor();
   const [out, status] = await process_executor.execute(tool, initialized_job_order, runtimeContext);
   return [out, status];

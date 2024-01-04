@@ -345,6 +345,9 @@ export async function relocateOutputs(
 
   function _check_adjust(a_file: File | Directory): void {
     a_file.location = fileUri(pm.mapper(a_file.location)?.target ?? '');
+    if (a_file.path === '') {
+      a_file.path = undefined;
+    }
     if (a_file['contents']) {
       a_file['contents'] = undefined;
     }
@@ -368,11 +371,11 @@ export async function cleanIntermediate(output_dirs: Iterable<string>): Promise<
   }
 }
 
-export function add_sizes(fsaccess: StdFsAccess, obj: File): void {
+export async function add_sizes(fsaccess: StdFsAccess, obj: File): Promise<void> {
   if (obj.location) {
     try {
       if (!obj.size) {
-        obj.size = fsaccess.size(String(obj.location));
+        obj.size = await fsaccess.size(String(obj.location));
       }
     } catch {}
   } else if (obj.contents) {
@@ -640,9 +643,11 @@ export abstract class Process {
       if (load_listing != cwlTsAuto.LoadListingEnum.NO_LISTING) {
         await get_listing(fs_access, job, load_listing === LoadListingEnum.DEEP_LISTING);
       }
-
-      visitFile(job, (x): void => add_sizes(fs_access, x));
-
+      const promises = [];
+      visitFile(job, (x): void => {
+        promises.push(add_sizes(fs_access, x));
+      });
+      await Promise.all(promises);
       if (load_listing == LoadListingEnum.DEEP_LISTING) {
         this.tool.inputs.forEach((inparm) => {
           const k = shortname(inparm.id);
@@ -898,6 +903,6 @@ export async function compute_checksums(fsAccess: StdFsAccess, fileobj: File): P
     // eslint-disable-next-line require-atomic-updates
     fileobj.checksum = `sha1$${checksum.digest('hex')}`;
     // eslint-disable-next-line require-atomic-updates
-    fileobj.size = fsAccess.size(location);
+    fileobj.size = await fsAccess.size(location);
   }
 }
