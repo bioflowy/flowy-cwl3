@@ -44,12 +44,14 @@ function revmap_file(builder: Builder, outdir: string, f: File | Directory): Fil
   if (outdir.startsWith('/')) {
     outdir = fileUri(outdir);
   }
+  if (f.location && f.location.startsWith('s3://')) {
+    f.path = undefined;
+    return f;
+  }
   if (f.location && !f.path) {
     const location: string = f.location;
     if (location.startsWith('file://')) {
       f.path = uriFilePath(location);
-    } else if (location.startsWith('s3://')) {
-      return f;
     } else {
       f.location = builder.fs_access.join(outdir, f.location);
       return f;

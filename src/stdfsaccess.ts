@@ -196,10 +196,7 @@ export class StdFsAccess {
     const listdirs = [];
     for (const content of contents) {
       const parts = content.Key.split('/');
-      let dir = path + parts[keys.length - 1];
-      if (parts.length > keys.length) {
-        dir = `${dir}/`;
-      }
+      const dir = path + parts[keys.length - 1];
       if (!listdirs.includes(dir)) {
         listdirs.push(dir);
       }

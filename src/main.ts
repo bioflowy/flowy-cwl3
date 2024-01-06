@@ -22,6 +22,7 @@ import {
   visitFileDirectory,
   isFile,
   isFileOrDirectory,
+  pathJoin,
 } from './utils.js';
 import { default_make_tool } from './workflow.js';
 
@@ -223,7 +224,7 @@ export async function exec(
     tool_path = path.join(runtimeContext.clientWorkDir, tool_path);
   }
   if (job_path && !path.isAbsolute(job_path)) {
-    job_path = path.join(runtimeContext.basedir, job_path);
+    if (runtimeContext) job_path = pathJoin(runtimeContext.basedir, job_path);
   }
   _logger.info(`tool_path=${tool_path}`);
   _logger.info(`job_path=${job_path}`);

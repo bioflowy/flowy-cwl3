@@ -595,7 +595,7 @@ export function normalizeFilesDirs(job: unknown) {
     } catch {}
     // strip trailing slash
     if (path2.endsWith('/')) {
-      if (!(d instanceof cwl.Directory)) {
+      if (!isDirectory(d)) {
         throw new ValidationException(`location '${d.location}' ends with '/' but is not a Directory`);
       }
       path2 = d.location.slice(0, -1);
@@ -625,6 +625,13 @@ export function normalizeFilesDirs(job: unknown) {
 }
 function reversed<T>(arrays: T[]): T[] {
   return [...arrays].reverse();
+}
+export function pathJoin(base: string, name: string) {
+  if (base.startsWith('s3://')) {
+    return `${base}${name}`;
+  } else {
+    return path.join(base, name);
+  }
 }
 export interface RequirementParam {
   requirements?: undefined | ToolRequirement;

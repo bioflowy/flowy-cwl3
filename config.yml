@@ -4,3 +4,4 @@ sharedFileSystem:
   endpoint: http://localhost:9000
   accessKey: minio
   secretKey: minio123
+  region: ap-northeast-1
