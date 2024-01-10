@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DockerRequirement, ResourceRequirement } from 'cwl-ts-auto';
+import { v4 as uuidv4 } from 'uuid';
 import { Builder } from './builder.js';
 import { RuntimeContext } from './context.js';
 import { Tool } from './cwltypes.js';
@@ -115,7 +116,22 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
   }
 
   add_file_or_directory_volume(runtime: string[], volume: MapperEnt, _host_outdir_tgt: string | null): void {
-    if (!volume.resolved.startsWith('_:')) {
+    if (volume.resolved.startsWith('s3://')) {
+      if (volume.target.startsWith(this.builder.stagedir)) {
+        // If the path of the target is under stagedir, it can be directly downloaded to the target.
+        const targetDir = path.dirname(volume.target);
+        this.staging.mkdirSync(targetDir, true);
+        this.staging.symlinkSync(volume.resolved, volume.target);
+        this.append_volume(runtime, volume.target, volume.target);
+      } else {
+        // In other cases, download under stagedir and link it (like in the case of InitialWorkdir).
+        const stagedir = path.join(this.builder.stagedir, `stg${uuidv4()}`);
+        const stagefile = path.join(stagedir, path.basename(volume.target));
+        this.staging.mkdirSync(stagedir, true);
+        this.staging.symlinkSync(volume.resolved, stagefile);
+        this.append_volume(runtime, stagefile, volume.target);
+      }
+    } else if (!volume.resolved.startsWith('_:')) {
       this.append_volume(runtime, volume.resolved, volume.target);
     }
   }
@@ -127,7 +143,11 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
   ): void {
     let fileCopy = '';
     if (this.inplace_update) {
-      this.append_volume(runtime, volume.resolved, volume.target, true);
+      const stagedir = path.join(this.builder.stagedir, `stg${uuidv4()}`);
+      const stagefile = path.join(stagedir, path.basename(volume.target));
+      this.staging.mkdirSync(stagedir, true);
+      this.staging.symlinkSync(volume.resolved, stagefile);
+      this.append_volume(runtime, stagefile, volume.target, true);
     } else {
       if (hostOutdirTgt) {
         if (!fs.existsSync(path.dirname(hostOutdirTgt))) {
@@ -135,6 +155,10 @@ export class DockerCommandLineJob extends ContainerCommandLineJob {
         }
         if (volume.resolved.startsWith('file://')) {
           fs.copyFileSync(volume.resolved, hostOutdirTgt);
+        } else if (volume.resolved.startsWith('s3://')) {
+          // if resolved is s3://, add volume
+          this.append_volume(runtime, volume.resolved, volume.target, true);
+          return;
         }
       } else {
         const tmpdir = createTmpDir(tmpdirPrefix);

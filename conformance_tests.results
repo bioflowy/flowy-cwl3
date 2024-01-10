@@ -1,0 +1,1073 @@
+Test [1/378] cl_basic_generation: General test of command line generation
+
+Test [2/378] nested_prefixes_arrays: Test nested prefixes with arrays
+
+Test [3/378] nested_cl_bindings: Test nested command line bindings
+
+Test [4/378] cl_optional_inputs_missing: Test command line with optional input (missing)
+
+Test [5/378] cl_optional_bindings_provided: Test command line with optional input (provided)
+
+Test [6/378] initworkdir_expreng_requirements: Test InitialWorkDirRequirement ExpressionEngineRequirement.engineConfig feature
+
+Test [7/378] stdout_redirect_docker: Test command execution in Docker with stdout redirection
+
+Test [8/378] stdout_redirect_shortcut_docker: Test command execution in Docker with shortcut stdout redirection
+
+Test [9/378] stdout_redirect_mediumcut_docker: Test command execution in Docker with mediumcut stdout redirection
+
+Test [10/378] stderr_redirect: Test command line with stderr redirection
+
+Test [11/378] stderr_redirect_shortcut: Test command line with stderr redirection, brief syntax
+
+Test [12/378] stderr_redirect_mediumcut: Test command line with stderr redirection, named brief syntax
+
+Test [13/378] stdinout_redirect_docker: Test command execution in Docker with stdin and stdout redirection
+
+Test [14/378] expression_any: Test default usage of Any in expressions.
+
+Test [15/378] expression_any_null: Test explicitly passing null to Any type inputs with default values.
+
+Test [16/378] expression_any_string: Testing the string 'null' does not trip up an Any with a default value.
+
+Test [17/378] expression_any_nodefaultany: Test Any without defaults cannot be unspecified.
+
+Test [18/378] expression_any_null_nodefaultany: Test explicitly passing null to Any type without a default value.
+
+Test [19/378] expression_any_nullstring_nodefaultany: Testing the string 'null' does not trip up an Any without a default value.
+
+Test [20/378] any_outputSource_compatibility: Testing Any type compatibility in outputSource
+
+Test [21/378] stdinout_redirect: Test command execution in with stdin and stdout redirection
+
+Test [22/378] expression_parseint: Test ExpressionTool with Javascript engine
+
+Test [23/378] expression_outputEval: Test outputEval to transform output
+
+Test [24/378] wf_wc_parseInt: Test two step workflow with imported tools
+
+Test [25/378] wf_wc_expressiontool: Test two step workflow with inline tools
+
+Test [26/378] wf_wc_scatter: Test single step workflow with Scatter step
+
+Test [27/378] wf_wc_scatter_multiple_merge: Test single step workflow with Scatter step and two data links connected to same input, default merge behavior
+
+Test [28/378] wf_wc_scatter_multiple_nested: Test single step workflow with Scatter step and two data links connected to same input, nested merge behavior
+
+Test [29/378] wf_wc_scatter_multiple_flattened: Test single step workflow with Scatter step and two data links connected to same input, flattened merge behavior
+
+Test [30/378] wf_wc_nomultiple: Test when step source is a single-item list and there is no linkMerge, then it not wrapped in a list, and that MultipleInputFeatureRequirement is not required.
+
+Test [31/378] wf_wc_nomultiple_merge_nested: Test when step source is a single-item list and linkMerge is listed, then it is wrapped in a list.
+
+Test [32/378] wf_input_default_missing: Test workflow with default value for input parameter (missing)
+
+Test [33/378] wf_input_default_provided: Test workflow with default value for input parameter (provided)
+
+Test [34/378] wf_default_tool_default: Test that workflow defaults override tool defaults
+
+Test [35/378] envvar_req: Test EnvVarRequirement
+
+Test [36/378] wf_scatter_single_param: Test workflow scatter with single scatter parameter
+
+Test [37/378] wf_scatter_two_nested_crossproduct: Test workflow scatter with two scatter parameters and nested_crossproduct join method
+
+Test [38/378] wf_scatter_two_flat_crossproduct: Test workflow scatter with two scatter parameters and flat_crossproduct join method
+
+Test [39/378] wf_scatter_two_dotproduct: Test workflow scatter with two scatter parameters and dotproduct join method
+
+Test [40/378] wf_scatter_emptylist: Test workflow scatter with single empty list parameter
+
+Test [41/378] wf_scatter_nested_crossproduct_secondempty: Test workflow scatter with two scatter parameters and nested_crossproduct join method with second list empty
+
+Test [42/378] wf_scatter_nested_crossproduct_firstempty: Test workflow scatter with two scatter parameters and nested_crossproduct join method with first list empty
+
+Test [43/378] wf_scatter_flat_crossproduct_oneempty: Test workflow scatter with two scatter parameters, one of which is empty and flat_crossproduct join method
+
+Test [44/378] wf_scatter_dotproduct_twoempty: Test workflow scatter with two empty scatter parameters and dotproduct join method
+
+Test [45/378] any_input_param: Test Any type input parameter
+
+Test [46/378] nested_workflow: Test nested workflow
+
+Test [47/378] requirement_priority: Test requirement priority
+
+Test [48/378] requirement_override_hints: Test requirements override hints
+
+Test [49/378] requirement_workflow_steps: Test requirements on workflow steps
+
+Test [50/378] step_input_default_value: Test default value on step input parameter
+
+Test [51/378] step_input_default_value_nosource: Test use default value on step input parameter with empty source
+
+Test [52/378] step_input_default_value_nullsource: Test use default value on step input parameter with null source
+
+Test [53/378] step_input_default_value_overriden: Test default value on step input parameter overridden by provided source
+
+Test [54/378] wf_simple: Test simple workflow
+
+Test [55/378] hints_unknown_ignored: Test unknown hints are ignored.
+
+Test [56/378] initial_workdir_secondary_files_expr: Test InitialWorkDirRequirement linking input files and capturing secondaryFiles on input and output. Also tests the use of a variety of parameter references and expressions in the secondaryFiles field.
+
+Test [57/378] rename: Test InitialWorkDirRequirement with expression in filename.
+
+Test [58/378] initial_workdir_trailingnl: Test if trailing newline is present in file entry in InitialWorkDir
+
+Test [59/378] inline_expressions: Test inline expressions
+
+Test [60/378] schemadef_req_tool_param: Test SchemaDefRequirement definition used in tool parameter
+
+Test [61/378] schemadef_req_wf_param: Test SchemaDefRequirement definition used in workflow parameter
+
+Test [62/378] param_evaluation_noexpr: Test parameter evaluation, no support for JS expressions
+
+Test [63/378] param_evaluation_expr: Test parameter evaluation, with support for JS expressions
+
+Test [64/378] metadata: Test metadata
+
+Test [65/378] format_checking: Test simple format checking.
+
+Test [66/378] format_checking_subclass: Test format checking against ontology using subclassOf.
+
+Test [67/378] format_checking_equivalentclass: Test format checking against ontology using equivalentClass.
+
+Test [68/378] output_secondaryfile_optional: Test optional output file and optional secondaryFile on output.
+
+Test [69/378] valuefrom_ignored_null: Test that valueFrom is ignored when the parameter is null
+
+Test [70/378] valuefrom_secondexpr_ignored: Test that second expression in concatenated valueFrom is not ignored
+
+Test [71/378] valuefrom_wf_step: Test valueFrom on workflow step.
+
+Test [72/378] valuefrom_wf_step_multiple: Test valueFrom on workflow step with multiple sources
+
+Test [73/378] valuefrom_wf_step_other: Test valueFrom on workflow step referencing other inputs
+
+Test [74/378] record_output_binding: Test record type output binding.
+
+Test [75/378] docker_json_output_path: Test support for reading cwl.output.json when running in a Docker container and just 'path' is provided.
+
+Test [76/378] docker_json_output_location: Test support for reading cwl.output.json when running in a Docker container and just 'location' is provided.
+
+Test [77/378] json_output_path_relative: Test support for reading cwl.output.json where 'path' is relative path in output dir.
+
+Test [78/378] json_output_location_relative: Test support for reading cwl.output.json where 'location' is relative reference to output dir.
+
+Test [79/378] multiple_glob_expr_list: Test support for returning multiple glob patterns from expression
+
+Test [80/378] wf_scatter_oneparam_valuefrom: Test workflow scatter with single scatter parameter and two valueFrom on step input (first and current el)
+
+Test [81/378] wf_scatter_twoparam_nested_crossproduct_valuefrom: Test workflow scatter with two scatter parameters and nested_crossproduct join method and valueFrom on step input
+
+Test [82/378] wf_scatter_twoparam_flat_crossproduct_valuefrom: Test workflow scatter with two scatter parameters and flat_crossproduct join method and valueFrom on step input
+
+Test [83/378] wf_scatter_twoparam_dotproduct_valuefrom: Test workflow scatter with two scatter parameters and dotproduct join method and valueFrom on step input
+
+Test [84/378] wf_scatter_oneparam_valuefrom_twice_current_el: Test workflow scatter with single scatter parameter and two valueFrom on step input (current el twice)
+
+Test [85/378] wf_scatter_oneparam_valueFrom: Test valueFrom eval on scattered input parameter
+
+Test [86/378] wf_two_inputfiles_namecollision: Test workflow two input files with same name.
+
+Test [87/378] directory_input_param_ref: Test directory input with parameter reference
+
+Test [88/378] directory_input_docker: Test directory input in Docker
+
+Test [89/378] directory_output: Test directory output
+
+Test [90/378] directory_secondaryfiles: Test directories in secondaryFiles
+
+Test [91/378] dynamic_initial_workdir: Test dynamic initial work dir
+
+Test [92/378] writable_stagedfiles: Test writable staged files.
+
+Test [93/378] input_file_literal: Test file literal as input
+
+Test [94/378] initial_workdir_expr: Test expression in InitialWorkDir listing
+
+Test [95/378] nameroot_nameext_stdout_expr: Test nameroot/nameext expression in arguments, stdout
+
+Test [96/378] input_dir_inputbinding: Test directory input with inputBinding
+
+Test [97/378] cl_gen_arrayofarrays: Test command line generation of array-of-arrays
+
+Test [98/378] env_home_tmpdir: Test $HOME and $TMPDIR are set correctly
+
+Test [99/378] env_home_tmpdir_docker: Test $HOME and $TMPDIR are set correctly in Docker
+
+Test [100/378] expressionlib_tool_wf_override: Test that expressionLib requirement of individual tool step overrides expressionLib of workflow.
+
+Test [101/378] initial_workdir_output: Test output of InitialWorkDir
+
+Test [102/378] embedded_subworkflow: Test embedded subworkflow
+
+Test [103/378] filesarray_secondaryfiles: Test required, optional and null secondaryFiles on array of files.
+
+Test [104/378] filesarray_secondaryfiles2: Test required, optional and null secondaryFiles on array of files.
+
+Test [105/378] exprtool_directory_literal: Test directory literal output created by ExpressionTool
+
+Test [106/378] exprtool_file_literal: Test file literal output created by ExpressionTool
+
+Test [107/378] dockeroutputdir: Test dockerOutputDirectory
+
+Test [108/378] hints_import: Test hints with $import
+
+Test [109/378] default_path_notfound_warning: Test warning instead of error when default path is not found
+
+Test [110/378] inlinejs_req_expressions: Test InlineJavascriptRequirement with multiple expressions in the same tool
+
+Test [111/378] input_dir_recurs_copy_writable: Test if a writable input directory is recursively copied and writable
+
+Test [112/378] null_missing_params: Test that missing parameters are null (not undefined) in expression
+
+Test [113/378] param_notnull_expr: Test that provided parameter is not null in expression
+
+Test [114/378] wf_compound_doc: Test compound workflow document
+
+Test [115/378] nameroot_nameext_generated: Test that nameroot and nameext are generated from basename at execution time by the runner
+
+Test [116/378] initialworkpath_output: Test that file path in $(inputs) for initialworkdir is in $(outdir).
+
+Test [117/378] wf_scatter_twopar_oneinput_flattenedmerge: Test single step workflow with Scatter step and two data links connected to same input, flattened merge behavior. Workflow inputs are set as list
+
+Test [118/378] wf_multiplesources_multipletypes: Test step input with multiple sources with multiple types
+
+Test [119/378] shelldir_notinterpreted: Test that shell directives are not interpreted.
+
+Test [120/378] shelldir_quoted: Test that shell directives are quoted.
+
+Test [121/378] initial_workdir_empty_writable: Test empty writable dir with InitialWorkDirRequirement
+
+Test [122/378] initial_workdir_empty_writable_docker: Test empty writable dir with InitialWorkDirRequirement inside Docker
+
+Test [123/378] dynamic_resreq_inputs: Test dynamic resource reqs referencing inputs
+
+Test [124/378] fileliteral_input_docker: Test file literal as input without Docker
+
+Test [125/378] outputbinding_glob_sorted: Test that OutputBinding.glob is sorted as specified by POSIX
+
+Test [126/378] initialworkdir_nesteddir: Test InitialWorkDirRequirement with a nested directory structure from another step
+
+Test [127/378] booleanflags_cl_noinputbinding: Test that boolean flags do not appear on command line if inputBinding is empty and not null
+
+Test [128/378] expr_reference_self_noinput: Test that expression engine does not fail to evaluate reference to self with unprovided input
+
+Test [129/378] success_codes: Test successCodes
+
+Test [130/378] dynamic_resreq_wf: Test simple workflow with a dynamic resource requirement
+
+Test [131/378] cl_empty_array_input: Test that empty array input does not add anything to command line
+
+Test [132/378] resreq_step_overrides_wf: Test that ResourceRequirement on a step level redefines requirement on the workflow level
+
+Test [133/378] valuefrom_constant_overrides_inputs: Test valueFrom with constant value overriding provided array inputs
+
+Test [134/378] dynamic_resreq_filesizes: Test dynamic resource reqs referencing the size of Files inside a Directory
+
+Test [135/378] wf_step_connect_undeclared_param: Test that it is not an error to connect a parameter to a workflow step, even if the parameter doesn't appear in the `run` process inputs.
+
+Test [136/378] wf_step_access_undeclared_param: Test that parameters that don't appear in the `run` process inputs are not present in the input object used to run the tool.
+
+Test [137/378] env_home_tmpdir_docker_no_return_code: Test $HOME and $TMPDIR are set correctly in Docker without using return code
+
+Test [138/378] wf_scatter_oneparam_valuefrom_inputs: Test workflow scatter with single scatter parameter and two valueFrom using $inputs (first and current el)
+
+Test [139/378] packed_import_schema: SchemaDefRequirement with $import, and packed
+
+Test [140/378] job_input_secondary_subdirs: Test specifying secondaryFiles in subdirectories of the job input document.
+
+Test [141/378] job_input_subdir_primary_and_secondary_subdirs: Test specifying secondaryFiles in same subdirectory of the job input as the primary input file.
+
+Test [142/378] scatter_embedded_subworkflow: Test simple scatter over an embedded subworkflow
+
+Test [143/378] scatter_multi_input_embedded_subworkflow: Test simple multiple input scatter over an embedded subworkflow
+
+Test [144/378] workflow_embedded_subworkflow_embedded_subsubworkflow: Test twice nested subworkflow
+
+Test [145/378] workflow_embedded_subworkflow_with_tool_and_subsubworkflow: Test subworkflow of mixed depth with tool first
+
+Test [146/378] workflow_embedded_subworkflow_with_subsubworkflow_and_tool: Test subworkflow of mixed depth with tool after
+
+Test [147/378] workflow_records_inputs_and_outputs: Test record type inputs to and outputs from workflows.
+
+Test [148/378] workflow_integer_input: Test integer workflow input and outputs
+
+Test [149/378] workflow_integer_input_optional_specified: Test optional integer workflow inputs (specified)
+
+Test [150/378] workflow_integer_input_optional_unspecified: Test optional integer workflow inputs (unspecified)
+
+Test [151/378] workflow_integer_input_default_specified: Test default integer workflow inputs (specified)
+
+Test [152/378] workflow_integer_input_default_unspecified: Test default integer workflow inputs (unspecified)
+
+Test [153/378] workflow_integer_input_default_and_tool_integer_input_default: Test default integer tool and workflow inputs (unspecified)
+
+Test [154/378] workflow_file_input_default_unspecified: Test File input with default unspecified to workflow
+
+Test [155/378] workflow_file_input_default_specified: Test File input with default specified to workflow
+
+Test [156/378] clt_optional_union_input_file_or_files_with_array_of_one_file_provided: Test input union type or File or File array to a tool with one file in array specified.
+
+Test [157/378] clt_optional_union_input_file_or_files_with_many_files_provided: Test input union type or File or File array to a tool with a few files in array specified.
+
+Test [158/378] clt_optional_union_input_file_or_files_with_single_file_provided: Test input union type or File or File array to a tool with one file specified.
+
+Test [159/378] clt_optional_union_input_file_or_files_with_nothing_provided: Test input union type or File or File array to a tool with null specified.
+
+Test [160/378] clt_any_input_with_integer_provided: Test Any parameter with integer input to a tool
+
+Test [161/378] clt_any_input_with_string_provided: Test Any parameter with string input to a tool
+
+Test [162/378] clt_any_input_with_file_provided: Test Any parameter with file input to a tool
+
+Test [163/378] clt_any_input_with_mixed_array_provided: Test Any parameter with array input to a tool
+
+Test [164/378] clt_any_input_with_record_provided: Test Any parameter with record input to a tool
+
+Test [165/378] workflow_any_input_with_integer_provided: Test Any parameter with integer input to a workflow
+
+Test [166/378] workflow_any_input_with_string_provided: Test Any parameter with string input to a workflow
+
+Test [167/378] workflow_any_input_with_file_provided: Test Any parameter with file input to a workflow
+
+Test [168/378] workflow_any_input_with_mixed_array_provided: Test Any parameter with array input to a workflow
+
+Test [169/378] workflow_any_input_with_record_provided: Test Any parameter with record input to a tool
+
+Test [170/378] workflow_union_default_input_unspecified: Test union type input to workflow with default unspecified
+
+Test [171/378] workflow_union_default_input_with_file_provided: Test union type input to workflow with default specified as file
+
+Test [172/378] workflowstep_valuefrom_string: Test valueFrom on workflow step from literal (string).
+
+Test [173/378] workflowstep_valuefrom_file_basename: Test valueFrom on workflow step using basename.
+
+Test [174/378] expression_tool_int_array_output: Test output arrays in a tool (with ints).
+
+Test [175/378] workflowstep_int_array_input_output: Test output arrays in a workflow (with ints).
+
+Test [176/378] workflow_file_array_output: Test output arrays in a workflow (with Files).
+
+Test [177/378] docker_entrypoint: Test Docker ENTRYPOINT usage
+
+Test [178/378] clt_file_size_property_with_empty_file: Test use of size in expressions for an empty file
+
+Test [179/378] clt_file_size_property_with_multi_file: Test use of size in expressions for a few files
+
+Test [180/378] any_without_defaults_unspecified_fails: Test Any without defaults, unspecified, should fail.
+
+Test [181/378] any_without_defaults_specified_fails: Test Any without defaults, specified, should fail.
+
+Test [182/378] step_input_default_value_noexp: Test default value on step input parameter, no ExpressionTool
+
+Test [183/378] step_input_default_value_overriden_noexp: Test default value on step input parameter overridden by provided source, no ExpressionTool
+
+Test [184/378] nested_workflow_noexp: Test nested workflow, without ExpressionTool
+
+Test [185/378] wf_multiplesources_multipletypes_noexp: Test step input with multiple sources with multiple types, without ExpressionTool
+
+Test [186/378] dynamic_resreq_wf_optional_file_default: Within a workflow, test accessing the size attribute of an optional input File as part of a CommandLineTool's ResourceRequirement calculation. The CommandLineTool input has a default value (a local file) and the workflow nor the workflow step does not provide any value for this input.
+
+Test [187/378] dynamic_resreq_wf_optional_file_step_default: Within a workflow, test accessing the size attribute of an optional input File as part of a CommandLineTool's ResourceRequirement calculation. The workflow step provides a default value (a local file) for this input and the workflow itself does not provide any value for this input.
+
+Test [188/378] dynamic_resreq_wf_optional_file_wf_default: Within a workflow, test accessing the size attribute of an optional input File as part of a CommandLineTool's ResourceRequirement calculation. The workflow itelf provides a default value (a local file) for this input.
+
+Test [189/378] step_input_default_value_overriden_2nd_step: Test default value on step input parameter overridden by provided source. With passthrough first step
+
+Test [190/378] step_input_default_value_overriden_2nd_step_noexp: Test default value on step input parameter overridden by provided source. With passthrough first step and no ExpressionTool
+
+Test [191/378] step_input_default_value_overriden_2nd_step_null: Test default value on step input parameter overridden by provided source. With null producing first step
+
+Test [192/378] step_input_default_value_overriden_2nd_step_null_noexp: Test default value on step input parameter overridden by provided source. With null producing first step and no ExpressionTool
+
+Test [193/378] stdin_from_directory_literal_with_local_file: Pipe to stdin from user provided local File via a Directory literal
+
+Test [194/378] stdin_from_directory_literal_with_literal_file: Pipe to stdin from literal File via a Directory literal
+
+Test [195/378] directory_literal_with_literal_file_nostdin: Test non-stdin reference to literal File via a Directory literal
+
+Test [196/378] no_inputs_commandlinetool: Test CommandLineTool without inputs
+
+Test [197/378] no_outputs_commandlinetool: Test CommandLineTool without outputs
+
+Test [198/378] no_inputs_workflow: Test Workflow without inputs
+
+Test [199/378] no_outputs_workflow: Test Workflow without outputs
+
+Test [200/378] anonymous_enum_in_array: Test an anonymous enum inside an array inside a record
+
+Test [201/378] schema-def_anonymous_enum_in_array: Test an anonymous enum inside an array inside a record, SchemaDefRequirement
+
+Test [202/378] stdin_shorcut: Test command execution in with stdin and stdout redirection using stdin shortcut
+
+Test [203/378] secondary_files_in_unnamed_records: Test secondaryFiles on anonymous record fields
+
+Test [204/378] secondary_files_in_named_records: Test secondaryFiles on SchemaDefRequirement record fields
+
+Test [205/378] secondary_files_in_output_records: Test secondaryFiles on output record fields
+
+Test [206/378] secondary_files_workflow_propagation: Test secondaryFiles propagation through workflow
+
+Test [207/378] secondary_files_missing: Test checking when secondaryFiles are missing
+
+Test [208/378] input_records_file_entry_with_format: Test format on anonymous record fields
+
+Test [209/378] input_records_file_entry_with_format_and_bad_regular_input_file_format: Test file format checking on parameter
+
+Test [210/378] input_records_file_entry_with_format_and_bad_entry_file_format: Test file format checking on record field
+
+Test [211/378] input_records_file_entry_with_format_and_bad_entry_array_file_format: Test file format checking on array item
+
+Test [212/378] record_output_file_entry_format: Test format on output record fields
+
+Test [213/378] workflow_input_inputBinding_loadContents: Test WorkflowInputParameter.inputBinding.loadContents
+
+Test [214/378] workflow_input_loadContents_without_inputBinding: Test WorkflowInputParameter.loadContents
+
+Test [215/378] expression_tool_input_loadContents: Test loadContents on InputParameter.loadContents (expression)
+
+Test [216/378] workflow_step_in_loadContents: Test WorkflowStepInput.loadContents
+
+Test [217/378] timelimit_basic: Test that job fails when exceeding time limit
+
+Test [218/378] timelimit_invalid: Test invalid time limit value
+
+Test [219/378] timelimit_zero_unlimited: Test zero timelimit means no limit
+
+Test [220/378] timelimit_from_expression: Test expression in time limit
+
+Test [221/378] timelimit_expressiontool: Test timelimit in expressiontool is ignored
+
+Test [222/378] timelimit_basic_wf: Test that tool in workflow fails when exceeding time limit
+
+Test [223/378] timelimit_invalid_wf: Test that workflow level time limit is not applied to workflow execution time
+
+Test [224/378] timelimit_zero_unlimited_wf: Test zero timelimit means no limit in workflow
+
+Test [225/378] timelimit_from_expression_wf: Test expression in time limit in workflow
+
+Test [226/378] networkaccess: Test networkaccess enabled
+
+Test [227/378] networkaccess_disabled: Test networkaccess is disabled by default
+
+Test [228/378] initial_work_dir_for_null_and_arrays: Test null and array input in InitialWorkDirRequirement
+
+Test [229/378] initial_work_dir_for_array_dirs: Test array of directories InitialWorkDirRequirement
+
+Test [230/378] cwl_requirements_addition: Test requirements in input document via EnvVarRequirement
+
+Test [231/378] cwl_requirements_override_expression: Test conflicting requirements in input document via EnvVarRequirement and expression
+
+Test [232/378] cwl_requirements_override_static: Test conflicting requirements in input document via EnvVarRequirement
+
+Test [233/378] initial_workdir_output_glob: Test full path glob output of InitialWorkDir
+
+Test [234/378] glob_outside_outputs_fails: Test fail trying to glob outside output directory
+
+Test [235/378] illegal_symlink: symlink to file outside of working directory should NOT be retrieved
+
+Test [236/378] legal_symlink: symlink to file inside of working directory should be retrieved
+
+Test [237/378] modify_file_content: inplace update has side effect on file content
+
+Test 237 failed: ../flowycwl --outdir=/tmp/tmpwnph9stu --quiet tests/inp_update_wf.cwl tests/empty.json
+inplace update has side effect on file content
+Compare failure expected: {
+    "a": 4,
+    "b": 4
+}
+got: {
+    "a": 3,
+    "b": 4
+}
+caused by: failed comparison for key 'a': expected: 4
+got: 3
+Test [238/378] modify_directory_content: inplace update has side effect on directory content
+
+Test 238 failed: ../flowycwl --outdir=/tmp/tmpvwrr0k7e --quiet tests/inpdir_update_wf.cwl tests/empty.json
+inplace update has side effect on directory content
+Returned non-zero
+Test [239/378] outputbinding_glob_directory: Test that OutputBinding.glob accepts Directories
+
+Test [240/378] stage_file_array: Test that array of input files can be staged to directory with entryname
+
+Test [241/378] stage_file_array_basename: Test that array of input files can be staged to directory with basename
+
+Test [242/378] stage_file_array_entryname_overrides: Test that if array of input files are staged to directory with basename and entryname, entryname overrides
+
+Test [243/378] tmpdir_is_not_outdir: Test that runtime.tmpdir is not runtime.outdir
+
+Test [244/378] listing_default_none: Test that default behavior is 'no_listing' if not specified
+
+Test [245/378] listing_requirement_none: Test that 'listing' is not present when LoadListingRequirement is 'no_listing'
+
+Test [246/378] listing_loadListing_none: Test that 'listing' is not present when loadListing on input parameter is 'no_listing'
+
+Test [247/378] listing_requirement_shallow: Test that 'listing' is present in top directory object but not subdirectory object when LoadListingRequirement is 'shallow_listing'
+
+Test [248/378] listing_loadListing_shallow: Test that 'listing' is present in top directory object but not subdirectory object when loadListing on input parameter loadListing is 'shallow_listing'
+
+Test [249/378] listing_outputBinding_loadListing: Test that loadListing works when used on outputBinding.
+
+Test [250/378] listing_requirement_deep: Test that 'listing' is present in top directory object and in subdirectory objects when LoadListingRequirement is 'deep_listing'
+
+Test [251/378] listing_loadListing_deep: Test that 'listing' is present in top directory object and in subdirectory objects when input parameter loadListing is 'deep_listing'
+
+Test [252/378] inputBinding_position_expr: Test for expression in the InputBinding.position field; also test using emoji in CWL document and tool output
+
+Test [253/378] outputEval_exitCode: Can access exit code in outputEval
+
+Test [254/378] any_input_param_graph_no_default: Test use of $graph without specifying which process to run
+
+Test [255/378] any_input_param_graph_no_default_hashmain: Test use of $graph without specifying which process to run, hash-prefixed "main"
+
+Test [256/378] optional_numerical_output_returns_0_not_null: Test that optional number output is returned as 0, not null
+
+Test [257/378] cores_float: Test float value for coresMin(Max) is rounded up in runtime.cores
+
+Test [258/378] storage_float: Test float value for ram/tmpdir/outdir Min(Max) is rounded up
+
+Test [259/378] cat_synthetic_file: Test the generation of a synthetic file with inline contents.
+
+Test [260/378] continuation: Line continuations in bash scripts should behave correctly
+
+Test [261/378] continuation_expression: Line continuations in bash scripts should always behave correctly
+
+Test [262/378] quoting_multiple_backslashes: Test quoting multiple backslashes
+
+Test [263/378] escaping_expression_no_extra_quotes: Strings returned from JS expressions should not have extra quotes around them
+
+Test [264/378] direct_optional_null_result: Simplest conditional pattern (False)
+
+Test [265/378] direct_optional_nonnull_result: Simplest conditional pattern (True)
+
+Test [266/378] direct_required: Conditional using intermediate WorkflowStep.in input
+
+Test [267/378] pass_through_required_false_when: Pass through pattern with pickValue: first_non_null; 'when' is false
+
+Test [268/378] pass_through_required_true_when: pass through pattern with pickvalue: first_non_null; 'when' is true
+
+Test [269/378] first_non_null_first_non_null: pickValue: first_non_null first item is non null
+
+Test [270/378] first_non_null_all_null: pickValue: first_non_null needs at least one non null
+
+Test [271/378] first_non_null_second_non_null: pickValue: first_non_null second item is non null
+
+Test [272/378] pass_through_required_the_only_non_null: pickvalue: the_only_non_null will pass, only for false condition
+
+Test [273/378] pass_through_required_fail: pickValue: the_only_non_null will fail due to multiple non nulls
+
+Test [274/378] all_non_null_multi_with_non_array_output: pickValue: all_non_null will fail validation
+
+Test [275/378] the_only_non_null_single_true: pickValue: the_only_non_null will pass for only one active node
+
+Test [276/378] the_only_non_null_multi_true: pickValue: the_only_non_null will fail with two active nodes
+
+Test [277/378] all_non_null_all_null: pickValue: all_non_null will produce a list, even if empty
+
+Test [278/378] all_non_null_one_non_null: pickValue: all_non_null will produce a list; even if single item list
+
+Test [279/378] all_non_null_multi_non_null: pickValue: all_non_null will produce a list
+
+Test [280/378] condifional_scatter_on_nonscattered_false: Simple scatter: conditional on a non scattered variable (False)
+
+Test [281/378] condifional_scatter_on_nonscattered_true: Simple scatter: conditional on a non scattered variable (True)
+
+Test [282/378] scatter_on_scattered_conditional: Simple scatter: Add conditional variable to scatter
+
+Test [283/378] conditionals_nested_cross_scatter: nested cross product scatter with condition on one dimension
+
+Test [284/378] conditionals_non_boolean_fail: Non-boolean values from "when" should fail
+
+Test [285/378] conditionals_multi_scatter: Scatter two steps, flatten result + pickValue
+
+Test [286/378] direct_optional_null_result_nojs: simplest conditional pattern (true), no javascript
+
+Test [287/378] direct_optional_nonnull_result_nojs: simplest conditional pattern (false), no javascript
+
+Test [288/378] direct_required_nojs: Conditional using intermediate WorkflowStep.in input; no javascript
+
+Test [289/378] pass_through_required_false_when_nojs: Pass through pattern with pickValue: first_non_null; 'when' is false'; no javascript
+
+Test [290/378] pass_through_required_true_when_nojs: pass through pattern with pickvalue: first_non_null; 'when' is true'; no javascript
+
+Test [291/378] first_non_null_first_non_null_nojs: pickValue: first_non_null first item is non null; no javascript
+
+Test [292/378] first_non_null_all_null_nojs: pickValue: first_non_null needs at least one non null; no javascript
+
+Test [293/378] first_non_null_second_non_null_nojs: pickValue: first_non_null second item is non null; no javascript
+
+Test [294/378] pass_through_required_the_only_non_null_nojs: pickvalue: the_only_non_null will pass, only for false condition; no javascript
+
+Test [295/378] pass_through_required_fail_nojs: pickValue: the_only_non_null will fail due to multiple non nulls; no javascript
+
+Test [296/378] all_non_null_multi_with_non_array_output_nojs: pickValue: all_non_null will fail validation; no javascript
+
+Test [297/378] the_only_non_null_single_true_nojs: pickValue: the_only_non_null will pass for only one active node; no javascript
+
+Test [298/378] the_only_non_null_multi_true_nojs: pickValue: the_only_non_null will fail with two active nodes; no javascript
+
+Test [299/378] all_non_null_all_null_nojs: pickValue: all_non_null will produce a list, even if empty; no javascript
+
+Test [300/378] all_non_null_one_non_null_nojs: pickValue: all_non_null will produce a list; even if single item list; no javascript
+
+Test [301/378] all_non_null_multi_non_null_nojs: pickValue: all_non_null will produce a list; no javascript
+
+Test [302/378] condifional_scatter_on_nonscattered_false_nojs: Simple scatter: conditional on a non scattered variable (False); no javascript
+
+Test [303/378] condifional_scatter_on_nonscattered_true_nojs: Simple scatter: conditional on a non scattered variable (True); no javascript
+
+Test [304/378] scatter_on_scattered_conditional_nojs: Simple scatter: Add conditional variable to scatter; no javascript
+
+Test [305/378] conditionals_nested_cross_scatter_nojs: nested cross product scatter with condition on one dimension; no javascript
+
+Test [306/378] conditionals_non_boolean_fail_nojs: Non-boolean values from "when" should fail; no javascript
+
+Test [307/378] conditionals_multi_scatter_nojs: Scatter two steps, flatten result + pickValue; no javascript
+
+Test [308/378] cond-with-defaults-1: Default inputs, choose step to run based on what was provided, first case
+
+Test [309/378] cond-with-defaults-2: Default inputs, choose step to run based on what was provided, second case
+
+Test [310/378] command_input_file_expression: Confirm CommandInputParameter expression can receive a File object
+
+Test [311/378] command_output_file_expression: Confirm CommandOutputParameter expression can receive a File object
+
+Test [312/378] mixed_version_v10_wf: test v1.0 workflow document that runs other versions
+
+Test [313/378] mixed_version_v11_wf: test v1.1 workflow document that runs other versions
+
+Test 313 failed: ../flowycwl --outdir=/tmp/tmpck2l2uje --quiet tests/mixed-versions/wf-v11.cwl
+test v1.1 workflow document that runs other versions
+Returned non-zero
+Test [314/378] mixed_version_v12_wf: test v1.2 workflow document that runs other versions
+
+Test 314 failed: ../flowycwl --outdir=/tmp/tmp_gek29v1 --quiet tests/mixed-versions/wf-v12.cwl
+test v1.2 workflow document that runs other versions
+Returned non-zero
+Test [315/378] invalid_syntax_v10_uses_v12_tool: test tool with v1.2 syntax marked as v1.0 (should fail)
+
+Test [316/378] invalid_syntax_v11_uses_v12_tool: test tool with v1.2 syntax marked as v1.1 (should fail)
+
+Test [317/378] invalid_syntax_v10_uses_v12_workflow: test wf with v1.2 syntax marked as v1.0 (should fail)
+
+Test [318/378] invalid_syntax_v11_uses_v12_workflow: test wf with v1.2 syntax marked as v1.1 (should fail)
+
+Test [319/378] invalid_syntax_mixed_v12_workflow: test 1.2 wf that includes tools that are marked as v1.0 and v1.1 that contain v1.2 features (should fail)
+
+Test [320/378] cwloutput_nolimit: Test that loading from cwl.output.json isn't limited to 64k
+
+Test [321/378] loadcontents_limit: Test that loadContents on a file larger than 64k fails
+
+Test 321 failed: ../flowycwl --outdir=/tmp/tmpymmf86yq --quiet tests/loadContents/loadContents-limit.cwl tests/loadContents/input.yml
+Test that loadContents on a file larger than 64k fails
+Returned zero but it should be non-zero
+Test [322/378] iwd-nolimit: Test that InitialWorkDir contents can be bigger than 64k
+
+Test [323/378] iwd-jsondump1: Test dump object to JSON in InitialWorkDir file contents, no trailing newline
+
+Test [324/378] iwd-jsondump1-nl: Test dump object to JSON in InitialWorkDir file contents, with trailing newline
+
+Test [325/378] iwd-jsondump2: Test array to JSON in InitialWorkDir file contents, no trailing newline
+
+Test [326/378] iwd-jsondump2-nl: Test array to JSON in InitialWorkDir file contents, with trailing newline
+
+Test [327/378] iwd-jsondump3: Test number to JSON in InitialWorkDir file contents, no trailing newline
+
+Test [328/378] iwd-jsondump3-nl: Test number to JSON in InitialWorkDir file contents, with trailing newline
+
+Test [329/378] iwd-passthrough1: Test InitialWorkDir file passthrough
+
+Test [330/378] iwd-passthrough2: Test InitialWorkDir file object is serialized to json
+
+Test [331/378] iwd-passthrough3: Test InitialWorkDir file object is passed through
+
+Test [332/378] iwd-passthrough4: Test InitialWorkDir file object is passed through
+
+Test [333/378] iwd-fileobjs1: Test File and Directory object in listing
+
+Test [334/378] iwd-fileobjs2: Test File and Directory object in listing
+
+Test [335/378] iwd-container-entryname1: Test input mount locations when container required
+
+Test [336/378] iwd-container-entryname2: Test input mount locations when no container (should fail)
+
+Test [337/378] iwd-container-entryname3: Test input mount locations when container is a hint (should fail)
+
+Test [338/378] iwd-container-entryname4: Must fail if entryname starts with ../
+
+Test [339/378] iwdr_dir_literal_real_file: Test directory literal containing a real file
+
+Test 339 failed: ../flowycwl --outdir=/tmp/tmpyl_nd9t0 --quiet tests/iwd/iwdr_dir_literal_real_file.cwl tests/loadContents/input.yml
+Test directory literal containing a real file
+Compare failure expected: {
+    "same": {
+        "basename": "inp-filelist.txt",
+        "checksum": "sha1$57f77b36009332d236b52b4beca77301b503b27c",
+        "class": "File",
+        "location": "inp-filelist.txt",
+        "size": 268866
+    }
+}
+got: {
+    "same": {
+        "basename": "inp-filelist.txt",
+        "checksum": "sha1$da39a3ee5e6b4b0d3255bfef95601890afd80709",
+        "class": "File",
+        "location": "file:///home/uehara/flowy-cwl3/test_work/inp-filelist.txt",
+        "nameext": ".txt",
+        "nameroot": "inp-filelist",
+        "size": 0
+    }
+}
+caused by: failed comparison for key 'same': expected: {
+    "basename": "inp-filelist.txt",
+    "checksum": "sha1$57f77b36009332d236b52b4beca77301b503b27c",
+    "class": "File",
+    "location": "inp-filelist.txt",
+    "size": 268866
+}
+got: {
+    "basename": "inp-filelist.txt",
+    "checksum": "sha1$da39a3ee5e6b4b0d3255bfef95601890afd80709",
+    "class": "File",
+    "location": "file:///home/uehara/flowy-cwl3/test_work/inp-filelist.txt",
+    "nameext": ".txt",
+    "nameroot": "inp-filelist",
+    "size": 0
+}
+caused by: Output file checksums do not match: actual 'sha1$da39a3ee5e6b4b0d3255bfef95601890afd80709' is not equal to expected 'sha1$57f77b36009332d236b52b4beca77301b503b27c'
+Test [340/378] iwd-subdir: Test emitting a subdirectory from initial workdir
+
+Test [341/378] simple_simple_scatter: Two level nested scatter
+
+Test [342/378] dotproduct_simple_scatter: Two level nested scatter: external dotproduct and internal simple
+
+Test [343/378] simple_dotproduct_scatter: Two level nested scatter: external simple and internal dotproduct
+
+Test [344/378] dotproduct_dotproduct_scatter: Two level nested scatter: external dotproduct and internal dotproduct
+
+Test [345/378] flat_crossproduct_simple_scatter: Two level nested scatter: external flat_crossproduct and internal simple
+
+Test [346/378] simple_flat_crossproduct_scatter: Two level nested scatter: external simple and internal flat_crossproduct
+
+Test [347/378] flat_crossproduct_flat_crossproduct_scatter: Two level nested scatter: external flat_crossproduct and internal flat_crossproduct
+
+Test [348/378] nested_crossproduct_simple_scatter: Two level nested scatter: external nested_crossproduct and internal simple
+
+Test [349/378] simple_nested_crossproduct_scatter: Two level nested scatter: external simple and internal nested_crossproduct
+
+Test [350/378] nested_crossproduct_nested_crossproduct_scatter: Two level nested scatter: external nested_crossproduct and internal nested_crossproduct
+
+Test [351/378] params_broken_null: Test parameter reference that refers to null.something
+
+Test [352/378] length_for_non_array: Test parameter reference that refers to length of non-array input
+
+Test [353/378] user_defined_length_in_parameter_reference: Test 'length' in parameter reference where it does not refer to length of an array input
+
+Test [354/378] directory_literal_with_literal_file_in_subdir_nostdin: Test non-stdin reference to literal File via a nested Directory literal
+
+Test [355/378] colon_in_paths: Confirm that colons are tolerated in input paths, string values, stdout shortcut, and output file & directory names
+
+Test 355 failed: ../flowycwl --outdir=/tmp/tmpb135km9e --quiet tests/colon:test.cwl tests/colon:test:job.yaml
+Confirm that colons are tolerated in input paths, string values, stdout shortcut, and output file & directory names
+Returned non-zero
+Test [356/378] colon_in_output_path: Confirm that colons are tolerated in output directory names
+
+Test [357/378] record_with_default: Confirm that records with defaults are accepted
+
+Test 357 failed: ../flowycwl --outdir=/tmp/tmp3z7amhs6 --quiet tests/paramref_arguments_roundtrip.cwl
+Confirm that records with defaults are accepted
+Compare failure expected: {
+    "same_record": {
+        "fifth": 4200000000000000000000000000000000000000000,
+        "first": "y",
+        "fourth": 4242424242,
+        "second": 23,
+        "sixth": {
+            "basename": "whale.txt",
+            "checksum": "sha1$327fc7aedf4f6b69a42a7c8b808dc5a7aff61376",
+            "class": "File",
+            "size": 1111
+        },
+        "third": 2.3
+    }
+}
+got: {
+    "same_record": {
+        "fifth": 4.2e+42,
+        "first": "y",
+        "fourth": 4242424242,
+        "second": 23,
+        "sixth": {
+            "basename": "whale.txt",
+            "checksum": "sha1$327fc7aedf4f6b69a42a7c8b808dc5a7aff61376",
+            "class": "File",
+            "location": "file:///home/uehara/flowy-cwl3/test_work/whale.txt",
+            "nameext": ".txt",
+            "nameroot": "whale",
+            "size": 1111
+        },
+        "third": 2.3
+    }
+}
+caused by: failed comparison for key 'same_record': expected: {
+    "fifth": 4200000000000000000000000000000000000000000,
+    "first": "y",
+    "fourth": 4242424242,
+    "second": 23,
+    "sixth": {
+        "basename": "whale.txt",
+        "checksum": "sha1$327fc7aedf4f6b69a42a7c8b808dc5a7aff61376",
+        "class": "File",
+        "size": 1111
+    },
+    "third": 2.3
+}
+got: {
+    "fifth": 4.2e+42,
+    "first": "y",
+    "fourth": 4242424242,
+    "second": 23,
+    "sixth": {
+        "basename": "whale.txt",
+        "checksum": "sha1$327fc7aedf4f6b69a42a7c8b808dc5a7aff61376",
+        "class": "File",
+        "location": "file:///home/uehara/flowy-cwl3/test_work/whale.txt",
+        "nameext": ".txt",
+        "nameroot": "whale",
+        "size": 1111
+    },
+    "third": 2.3
+}
+caused by: failed comparison for key 'fifth': expected: 4200000000000000000000000000000000000000000
+got: 4.2e+42
+Test [358/378] record_outputeval: Use of outputEval on a record itself, not the fields of the record
+
+Test [359/378] record_outputeval_nojs: Use of outputEval on a record itself, not the fields of the record (without javascript)
+
+Test [360/378] staging-basename: Use of expression tool to change basename of file, then correctly staging the file using the new name.
+
+Test [361/378] runtime-outdir: Use of $(runtime.outdir) for outputBinding glob.
+
+Test [362/378] record_order_with_input_bindings: Test sorting arguments at each level (inputBinding for all levels)
+
+Test [363/378] output_reference_workflow_input: Direct use of Workflow level input fields in the outputs.
+
+Test [364/378] stdout_chained_commands: Test that chaining two echo calls causes the workflow tool to emit the output to stdout. This is to confirm that the workflow tool will **not** create an expression such as `echo a && echo b > out.txt`, but instead will produce the correct `echo a && echo b`, and capture the output correctly.
+
+Test [365/378] multiple-input-feature-requirement: MultipleInputFeatureRequirement on workflow outputs.
+
+Test [366/378] js-input-record: A test case for JS with an input record.
+
+Test [367/378] schemadef_types_with_import: Test SchemaDefRequirement with a workflow, with the `$import` under types. It is similar to schemadef-wf, but the `$import` is different.
+
+Test [368/378] filename_with_hash_mark: Test for correct handling of URL-quoting in filename to refer to filename containing a hash mark
+
+Test [369/378] capture_files: Test that a type error is raised if directories are returned by glob evaluation when type is File
+
+Test [370/378] capture_dirs: Test that a type error is raised if files are returned by glob evaluation when type is Directory
+
+Test [371/378] capture_files_and_dirs: Test that both files and directories are captured by glob evaluation when type is [Directory, File]
+
+Test [372/378] very_big_and_very_floats: Confirm that very big and very small numbers are represented using decimals, not scientific notation
+
+Test [373/378] very_big_and_very_floats_nojs: Confirm that very big and very small numbers are represented using decimals, not scientific notation
+
+Test [374/378] default_with_falsey_value: Confirms that "false"-like (but not 'null') values override any default
+
+Test [375/378] nested_types: demonstrate usage of nested types
+
+Test [376/378] paramref_arguments_runtime: confirm that $runtime is available to parameter references in arguments
+
+Test [377/378] paramref_arguments_self: confirm that $self is available and set to null in arguments
+
+Test [378/378] paramref_arguments_inputs: confirm that $inputs is available to parameter references in arguments
+
+Test 378 failed: ../flowycwl --outdir=/tmp/tmpizjpf4a2 --quiet tests/paramref_arguments_inputs.cwl tests/empty.json
+confirm that $inputs is available to parameter references in arguments
+Compare failure expected: {
+    "result": {
+        "a_double": 1000000000000000000000000000000000000000000,
+        "a_float": 4.2,
+        "a_long": 4147483647,
+        "a_string": "z",
+        "a_string_array": [
+            "a",
+            "b",
+            "c"
+        ],
+        "a_true": 1,
+        "an_array_of_doubles": [
+            1000000000000000000000000000000000000000000,
+            -1000000000000000000000000000000000000000000
+        ],
+        "an_array_of_falses": [
+            0,
+            0,
+            0
+        ],
+        "an_array_of_floats": [
+            2.3,
+            4.2
+        ],
+        "an_array_of_ints": [
+            42,
+            23
+        ],
+        "an_array_of_longs": [
+            4147483647,
+            -4147483647
+        ],
+        "an_array_of_mixed_booleans": [
+            0,
+            1,
+            0
+        ],
+        "an_array_of_trues": [
+            1,
+            1,
+            1
+        ],
+        "an_int": 42
+    }
+}
+got: {
+    "result": {
+        "a_double": 1e+42,
+        "a_float": 4.2,
+        "a_long": 4147483647,
+        "a_string": "z",
+        "a_string_array": [
+            "a",
+            "b",
+            "c"
+        ],
+        "a_true": true,
+        "an_array_of_doubles": [
+            1e+42,
+            -1e+42
+        ],
+        "an_array_of_falses": [
+            false,
+            false,
+            false
+        ],
+        "an_array_of_floats": [
+            2.3,
+            4.2
+        ],
+        "an_array_of_ints": [
+            42,
+            23
+        ],
+        "an_array_of_longs": [
+            4147483647,
+            -4147483647
+        ],
+        "an_array_of_mixed_booleans": [
+            false,
+            true,
+            false
+        ],
+        "an_array_of_trues": [
+            true,
+            true,
+            true
+        ],
+        "an_int": 42
+    }
+}
+caused by: failed comparison for key 'result': expected: {
+    "a_double": 1000000000000000000000000000000000000000000,
+    "a_float": 4.2,
+    "a_long": 4147483647,
+    "a_string": "z",
+    "a_string_array": [
+        "a",
+        "b",
+        "c"
+    ],
+    "a_true": 1,
+    "an_array_of_doubles": [
+        1000000000000000000000000000000000000000000,
+        -1000000000000000000000000000000000000000000
+    ],
+    "an_array_of_falses": [
+        0,
+        0,
+        0
+    ],
+    "an_array_of_floats": [
+        2.3,
+        4.2
+    ],
+    "an_array_of_ints": [
+        42,
+        23
+    ],
+    "an_array_of_longs": [
+        4147483647,
+        -4147483647
+    ],
+    "an_array_of_mixed_booleans": [
+        0,
+        1,
+        0
+    ],
+    "an_array_of_trues": [
+        1,
+        1,
+        1
+    ],
+    "an_int": 42
+}
+got: {
+    "a_double": 1e+42,
+    "a_float": 4.2,
+    "a_long": 4147483647,
+    "a_string": "z",
+    "a_string_array": [
+        "a",
+        "b",
+        "c"
+    ],
+    "a_true": true,
+    "an_array_of_doubles": [
+        1e+42,
+        -1e+42
+    ],
+    "an_array_of_falses": [
+        false,
+        false,
+        false
+    ],
+    "an_array_of_floats": [
+        2.3,
+        4.2
+    ],
+    "an_array_of_ints": [
+        42,
+        23
+    ],
+    "an_array_of_longs": [
+        4147483647,
+        -4147483647
+    ],
+    "an_array_of_mixed_booleans": [
+        false,
+        true,
+        false
+    ],
+    "an_array_of_trues": [
+        true,
+        true,
+        true
+    ],
+    "an_int": 42
+}
+caused by: failed comparison for key 'a_double': expected: 1000000000000000000000000000000000000000000
+got: 1e+42
+369 tests passed, 9 failures, 0 unsupported features

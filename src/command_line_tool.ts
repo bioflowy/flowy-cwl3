@@ -1,6 +1,8 @@
 import * as path from 'node:path';
 import * as cwl from 'cwl-ts-auto';
 import { cloneDeep } from 'lodash-es';
+import { v4 as uuidv4 } from 'uuid';
+
 import { Builder } from './builder.js';
 import { collect_output_ports } from './collect_outputs.js';
 import { LoadingContext, RuntimeContext, getDefault } from './context.js';
