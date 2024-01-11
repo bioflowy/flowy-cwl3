@@ -554,13 +554,13 @@ export class CommandLineJob extends JobBase {
         symlink: true,
         secret_store: runtimeContext.secret_store,
       });
-      // relink_initialworkdir_lazy(
-      //   this.staging,
-      //   this.generatemapper,
-      //   this.outdir,
-      //   this.builder.outdir,
-      //   this.inplace_update,
-      // );
+      relink_initialworkdir_lazy(
+        this.staging,
+        this.generatemapper,
+        this.outdir,
+        this.builder.outdir,
+        this.inplace_update,
+      );
     }
 
     const monitor_function = this.process_monitor.bind(this);

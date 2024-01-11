@@ -438,14 +438,10 @@ func uploadDirectory(uploader *s3manager.Uploader, config SharedFileSystemConfig
 			if !strings.HasSuffix(key, "/") {
 				key += "/"
 			}
-			metadata := map[string]*string{
-				"x-amz-meta-filetype": aws.String("directory"),
-			}
 			ui := s3manager.UploadInput{
-				Bucket:   aws.String(u.Host), // Set your bucket name
-				Key:      aws.String(key),
-				Body:     emptyBuffer,
-				Metadata: metadata,
+				Bucket: aws.String(u.Host), // Set your bucket name
+				Key:    aws.String(key),
+				Body:   emptyBuffer,
 			}
 			_, err = uploader.Upload(&ui)
 			if err != nil {
@@ -871,6 +867,7 @@ func prepareStagingDir(config *SharedFileSystemConfig, commands []StagingCommand
 					if err != nil {
 						return downloadPaths, err
 					}
+					downloadPaths[*command.Resolved] = src
 				}
 				err = os.Symlink(src, *command.Target)
 				if err != nil && !errors.Is(err, os.ErrExist) {
@@ -1232,6 +1229,13 @@ func DownloadDirectory(svc *s3.S3, bucket, prefix, localDir string) error {
 		for _, obj := range page.Contents {
 			// Create file path based on object key
 			filePath := filepath.Join(localDir, strings.TrimPrefix(*obj.Key, prefix))
+			if strings.HasSuffix(*obj.Key, "/") {
+				_, err := os.Stat(filePath)
+				if !os.IsExist(err) {
+					os.MkdirAll(filePath, 0775)
+				}
+				continue
+			}
 			if err := downloadFile(svc, bucket, *obj.Key, filePath); err != nil {
 				fmt.Printf("Failed to download file: %s, error: %v\n", *obj.Key, err)
 			} else {
@@ -1318,17 +1322,17 @@ func downloadS3FileToTemp(config *SharedFileSystemConfig, s3URL string, dstPath 
 	}
 
 	// S3オブジェクトのメタデータを取得
-	result, err := svc.HeadObject(input)
+	_, err = svc.HeadObject(input)
 	if err != nil {
 		key += "/"
 		input = &s3.HeadObjectInput{
 			Bucket: aws.String(bucket),
 			Key:    aws.String(key),
 		}
-		result, err = svc.HeadObject(input)
-		if err != nil {
+		_, err = svc.HeadObject(input)
+		if err == nil {
 			if dstPath == nil {
-				tmpPath, err := ioutil.TempDir("", "example")
+				tmpPath, err := os.MkdirTemp("", "flowy-")
 				if err != nil {
 					return "", err
 				}
@@ -1338,51 +1342,37 @@ func downloadS3FileToTemp(config *SharedFileSystemConfig, s3URL string, dstPath 
 			return *dstPath, nil
 		}
 	}
-	if result.Metadata["x-amz-meta-filetype"] == aws.String("directory") {
-		if dstPath != nil {
-			tmpPath, err := os.MkdirTemp("", "flowy-")
-			if err != nil {
-				return "", err
-			}
-			dstPath = &tmpPath
-		}
+	// S3オブジェクトを取得
+	resp, err := svc.GetObject(&s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
 
-		DownloadDirectory(svc, bucket, key, *dstPath)
-		return *dstPath, nil
-	} else {
-		// S3オブジェクトを取得
-		resp, err := svc.GetObject(&s3.GetObjectInput{
-			Bucket: aws.String(bucket),
-			Key:    aws.String(key),
-		})
+	var destFile *os.File
+	// 一時ファイルを作成
+	if dstPath == nil {
+		destFile, err = ioutil.TempFile("", "flowy-")
 		if err != nil {
 			return "", err
 		}
-		defer resp.Body.Close()
-
-		var destFile *os.File
-		// 一時ファイルを作成
-		if dstPath == nil {
-			destFile, err = ioutil.TempFile("", "flowy-")
-			if err != nil {
-				return "", err
-			}
-			defer destFile.Close()
-		} else {
-			destFile, err = os.Create(*dstPath)
-			if err != nil {
-				return "", err
-			}
-		}
-
-		// S3オブジェクトの内容を一時ファイルに書き込み
-		if _, err := io.Copy(destFile, resp.Body); err != nil {
+		defer destFile.Close()
+	} else {
+		destFile, err = os.Create(*dstPath)
+		if err != nil {
 			return "", err
 		}
-
-		return destFile.Name(), nil
-
 	}
+
+	// S3オブジェクトの内容を一時ファイルに書き込み
+	if _, err := io.Copy(destFile, resp.Body); err != nil {
+		return "", err
+	}
+
+	return destFile.Name(), nil
 }
 func getTarget(mounts []string) *string {
 	for _, mount := range mounts {
