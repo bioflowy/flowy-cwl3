@@ -138,7 +138,7 @@ export async function collect_output_ports(
       }
       const outjson = outjsons[0];
       if (outjson.size > CONTENT_LIMIT) {
-        const jsonString = await contentLimitRespectedReadBytes(outjson.location);
+        const jsonString = await contentLimitRespectedReadBytes(outjson.location, true);
         ret = JSON.parse(jsonString);
       } else {
         ret = JSON.parse(outjson.contents);

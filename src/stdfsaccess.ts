@@ -140,6 +140,15 @@ export class StdFsAccess {
       const s3Client = this._getS3();
       const data = await s3Client.send(new GetObjectCommand(getObjectInput));
       if (data.Body) {
+        const dirpath = path.dirname(downloadPath);
+        if (fs.existsSync(dirpath)) {
+          if (!fs.lstatSync(dirpath).isDirectory()) {
+            await fsExtra.remove(dirpath);
+            fs.mkdirSync(dirpath);
+          }
+        } else {
+          fs.mkdirSync(dirpath, { recursive: true });
+        }
         const stream = data.Body as Readable;
         const writeStream = createWriteStream(downloadPath);
         stream.pipe(writeStream);

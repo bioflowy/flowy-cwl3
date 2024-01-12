@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 import * as cwlTsAuto from 'cwl-ts-auto';
 
 import { InlineJavascriptRequirement } from 'cwl-ts-auto';
@@ -55,7 +55,7 @@ const streamToString = async (stream: Readable): Promise<string> => {
     stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
   });
 };
-export async function getFileContentFromS3(config: SharedFileSystem, s3Url: string): Promise<string> {
+export async function getFileContentFromS3(config: SharedFileSystem, s3Url: string, nolimit = false): Promise<string> {
   if (config.type !== 's3') {
     throw new Error('Unsupported file system type');
   }
@@ -75,6 +75,14 @@ export async function getFileContentFromS3(config: SharedFileSystem, s3Url: stri
   const urlParts = new URL(s3Url);
   const bucket = urlParts.hostname.split('.')[0];
   const key = urlParts.pathname.substring(1);
+const headCommand = new HeadObjectCommand({
+    Bucket: bucket,
+    Key: key,
+  });
+  const headRslt = await s3.send(headCommand);
+  if (nolimit == false && headRslt.ContentLength > CONTENT_LIMIT) {
+    throw new WorkflowException(`file is too large, loadContents limited to ${CONTENT_LIMIT} bytes`);
+  }
   const command = new GetObjectCommand({
     Bucket: bucket,
     Key: key,
@@ -86,10 +94,10 @@ export async function getFileContentFromS3(config: SharedFileSystem, s3Url: stri
   }
   throw new Error('Invalid object body type.');
 }
-export async function contentLimitRespectedReadBytes(filePath: string): Promise<string> {
+export async function contentLimitRespectedReadBytes(filePath: string, nolimit = false): Promise<string> {
   if (filePath.startsWith('s3://')) {
     const config = getServerConfig();
-    return getFileContentFromS3(config.sharedFileSystem, filePath);
+    return getFileContentFromS3(config.sharedFileSystem, filePath, nolimit);
   }
   return new Promise((resolve, reject) => {
     const buffer = Buffer.alloc(CONTENT_LIMIT + 1);

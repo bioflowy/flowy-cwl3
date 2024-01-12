@@ -432,9 +432,8 @@ func uploadDirectory(uploader *s3manager.Uploader, config SharedFileSystemConfig
 				return err
 			}
 		} else {
-			directoryPath = strings.TrimPrefix(directoryPath, "/")
-			emptyBuffer := bytes.NewBuffer([]byte{})
-			key := strings.TrimPrefix(filepath.Join(u.Path, directoryPath), "/")
+						emptyBuffer := bytes.NewBuffer([]byte{})
+			key := strings.TrimPrefix(filepath.Join(u.Path, path), "/")
 			if !strings.HasSuffix(key, "/") {
 				key += "/"
 			}
@@ -550,13 +549,51 @@ func isFile(config *SharedFileSystemConfig, dir string, filepath string) bool {
 	fileInfo, err := os.Stat(path)
 	return err == nil && !fileInfo.IsDir()
 }
+func isS3Dir(config *SharedFileSystemConfig, s3url string) (bool, error) {
+	u, err := url.Parse(s3url)
+	if err != nil {
+		return false, err
+	}
+	bucket := u.Host
+	key := u.Path
+	if strings.HasSuffix(key, "/") {
+		key = key + "/"
+	}
+	var region string = "ap-northeast-1"
+	// AWSセッションを作成
+	sess, err := session.NewSession(&aws.Config{
+		Region:           &region, // 適切なリージョンに変更してください
+		Credentials:      credentials.NewStaticCredentials(*config.AccessKey, *config.SecretKey, ""),
+		Endpoint:         aws.String(*config.Endpoint),
+		S3ForcePathStyle: aws.Bool(true),
+	})
+	if err != nil {
+		return false, err
+	}
+
+	// S3サービスクライアントを作成
+	svc := s3.New(sess)
+	input := &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucket),
+		Prefix: aws.String(key),
+	}
+
+	// Call S3 to list objects
+	resp, err := svc.ListObjectsV2(input)
+	if err != nil {
+		return false, fmt.Errorf("failed to list objects, %v", err)
+	}
+
+	// Check if any objects are returned
+	return len(resp.Contents) > 0, nil
+}
 func isDir(config *SharedFileSystemConfig, dir string, filepath string) bool {
 	if config != nil && strings.HasPrefix(filepath, "s3://") {
-		h, err := headS3Object(config, filepath)
+		h, err := isS3Dir(config, filepath)
 		if err != nil {
 			return false
 		} else {
-			return h == "directory"
+			return h
 		}
 	}
 	path, err := abspath(filepath, dir)
@@ -1325,12 +1362,11 @@ func downloadS3FileToTemp(config *SharedFileSystemConfig, s3URL string, dstPath 
 	_, err = svc.HeadObject(input)
 	if err != nil {
 		key += "/"
-		input = &s3.HeadObjectInput{
-			Bucket: aws.String(bucket),
-			Key:    aws.String(key),
+		isdir, err := isS3Dir(config, s3URL)
+		if err != nil {
+return "", err
 		}
-		_, err = svc.HeadObject(input)
-		if err == nil {
+		if isdir {
 			if dstPath == nil {
 				tmpPath, err := os.MkdirTemp("", "flowy-")
 				if err != nil {
@@ -1340,6 +1376,8 @@ func downloadS3FileToTemp(config *SharedFileSystemConfig, s3URL string, dstPath 
 			}
 			DownloadDirectory(svc, bucket, key, *dstPath)
 			return *dstPath, nil
+} else {
+			return "", errors.New("Unkown path " + s3URL)
 		}
 	}
 	// S3オブジェクトを取得

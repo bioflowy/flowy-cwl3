@@ -171,7 +171,7 @@ function pathToFileURL(inputPath: string): string {
 
 function fileURLToPath(inputUrl: string): string {
   const u = new url.URL(inputUrl);
-  if (u.protocol !== 'file:') {
+  if (u.protocol !== 'file:' && u.protocol !== 's3:') {
     throw new Error(`Not a file URL: ${inputUrl}`);
   }
   return decodeURIComponent(u.pathname);
