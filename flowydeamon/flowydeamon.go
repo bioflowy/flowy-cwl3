@@ -314,7 +314,7 @@ func GetAndExecuteJob(c *APIClient, config *SharedFileSystemConfig) {
 					}
 				}
 			}
-			uploadOutputs(config, results)
+			uploadOutputs(config, results, downloadPaths, job.InplaceUpdate)
 			r := c.DefaultAPI.ApiJobFinishedPost(ctx)
 			r.jobFinishedRequest = &JobFinishedRequest{
 				Id:       job.Id,
@@ -327,11 +327,22 @@ func GetAndExecuteJob(c *APIClient, config *SharedFileSystemConfig) {
 		}
 	}
 }
-func uploadOutputs(config *SharedFileSystemConfig, results map[string][]ApiDoEvalPostRequestContext) error {
+func uploadOutputs(config *SharedFileSystemConfig, results map[string][]ApiDoEvalPostRequestContext, downloadPaths map[string]string, inplaceUpdate bool) error {
 	for _, files := range results {
 		for idx, file := range files {
 			if file.File != nil {
-				path, err := uploadToS3(config, *file.File.Location)
+				var s3url *string = nil
+				if inplaceUpdate {
+					lpath, err := os.Readlink(*file.File.Location)
+					if err == nil {
+						for s3path, localPath := range downloadPaths {
+							if localPath == lpath {
+								s3url = &s3path
+							}
+						}
+					}
+				}
+				path, err := uploadToS3(config, *file.File.Location, s3url)
 				if err != nil {
 					return err
 				}
@@ -339,13 +350,13 @@ func uploadOutputs(config *SharedFileSystemConfig, results map[string][]ApiDoEva
 				files[idx] = file
 				for _, secondaryFile := range file.File.SecondaryFiles {
 					if secondaryFile.ChildFile != nil {
-						path, err := uploadToS3(config, *secondaryFile.ChildFile.Location)
+						path, err := uploadToS3(config, *secondaryFile.ChildFile.Location, nil)
 						if err != nil {
 							return err
 						}
 						secondaryFile.ChildFile.Location = &path
 					} else if secondaryFile.ChildDirectory != nil {
-						path, err := uploadToS3(config, *secondaryFile.ChildDirectory.Location)
+						path, err := uploadToS3(config, *secondaryFile.ChildDirectory.Location, nil)
 						if err != nil {
 							return err
 						}
@@ -353,7 +364,7 @@ func uploadOutputs(config *SharedFileSystemConfig, results map[string][]ApiDoEva
 					}
 				}
 			} else if file.Directory != nil {
-				path, err := uploadToS3(config, *file.Directory.Location)
+				path, err := uploadToS3(config, *file.Directory.Location, nil)
 				if err != nil {
 					return err
 				}
@@ -365,7 +376,7 @@ func uploadOutputs(config *SharedFileSystemConfig, results map[string][]ApiDoEva
 	}
 	return nil
 }
-func uploadToS3(config *SharedFileSystemConfig, filePath string) (string, error) {
+func uploadToS3(config *SharedFileSystemConfig, filePath string, s3url *string) (string, error) {
 	if config.Type != "s3" {
 		return "file:/" + filePath, nil
 	}
@@ -388,10 +399,10 @@ func uploadToS3(config *SharedFileSystemConfig, filePath string) (string, error)
 	if fileInfo.IsDir() {
 		return uploadDirectory(uploader, *config, filePath)
 	} else {
-		return uploadFile(uploader, *config, filePath)
+		return uploadFile(uploader, *config, filePath, s3url)
 	}
 }
-func uploadFile(uploader *s3manager.Uploader, config SharedFileSystemConfig, filePath string) (string, error) {
+func uploadFile(uploader *s3manager.Uploader, config SharedFileSystemConfig, filePath string, s3url *string) (string, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return "", err
@@ -403,7 +414,17 @@ func uploadFile(uploader *s3manager.Uploader, config SharedFileSystemConfig, fil
 		return "", err
 	}
 	filePath = strings.TrimPrefix(filePath, "/")
-	key := strings.TrimPrefix(filepath.Join(u.Path, filePath), "/")
+	var key = ""
+	if s3url != nil {
+		u, err := url.Parse(*s3url)
+		if err != nil {
+			return "", err
+		}
+
+		key = u.Path
+	} else {
+		key = strings.TrimPrefix(filepath.Join(u.Path, filePath), "/")
+	}
 
 	_, err = uploader.Upload(&s3manager.UploadInput{
 		Bucket: aws.String(u.Host), // Set your bucket name
@@ -413,8 +434,7 @@ func uploadFile(uploader *s3manager.Uploader, config SharedFileSystemConfig, fil
 	if err != nil {
 		return "", err
 	}
-	s3url := "s3://" + u.Host + "/" + key
-	return s3url, nil
+	return "s3://" + u.Host + "/" + key, nil
 }
 func uploadDirectory(uploader *s3manager.Uploader, config SharedFileSystemConfig, directoryPath string) (string, error) {
 	u, err := url.Parse(config.RootUrl)
@@ -427,12 +447,12 @@ func uploadDirectory(uploader *s3manager.Uploader, config SharedFileSystemConfig
 			return err
 		}
 		if !info.IsDir() {
-			_, err := uploadFile(uploader, config, path)
+			_, err := uploadFile(uploader, config, path, nil)
 			if err != nil {
 				return err
 			}
 		} else {
-						emptyBuffer := bytes.NewBuffer([]byte{})
+			emptyBuffer := bytes.NewBuffer([]byte{})
 			key := strings.TrimPrefix(filepath.Join(u.Path, path), "/")
 			if !strings.HasSuffix(key, "/") {
 				key += "/"
@@ -1364,7 +1384,7 @@ func downloadS3FileToTemp(config *SharedFileSystemConfig, s3URL string, dstPath 
 		key += "/"
 		isdir, err := isS3Dir(config, s3URL)
 		if err != nil {
-return "", err
+			return "", err
 		}
 		if isdir {
 			if dstPath == nil {
@@ -1376,7 +1396,7 @@ return "", err
 			}
 			DownloadDirectory(svc, bucket, key, *dstPath)
 			return *dstPath, nil
-} else {
+		} else {
 			return "", errors.New("Unkown path " + s3URL)
 		}
 	}
@@ -1430,6 +1450,14 @@ OuterLoop:
 			mounts := strings.Split(cmd, ",")
 			var isUpdated = false
 			for indx, mnt := range mounts {
+				if strings.HasPrefix(mnt, "target="+containerCwd) {
+					relpath := strings.Replace(mnt, "target="+containerCwd, "", 1)
+					dirpath := filepath.Dir(filepath.Join(hostOutdir, relpath))
+					_, err := os.Stat(dirpath)
+					if os.IsNotExist(err) {
+						os.MkdirAll(dirpath, 0775)
+					}
+				}
 				if strings.HasPrefix(mnt, "source=s3://") {
 					targetPath := getTarget(mounts)
 					if targetPath != nil && strings.HasPrefix(*targetPath, containerCwd) {
