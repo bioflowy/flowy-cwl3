@@ -265,6 +265,9 @@ func GetAndExecuteJob(c *APIClient, config *SharedFileSystemConfig) {
 	var downloadPaths = map[string]string{}
 	if httpres.StatusCode == 200 {
 		for _, job := range res {
+			log.Default().Printf("job command = %+v", job.Commands)
+			log.Default().Printf("job Staging = %+v", job.Staging)
+			os.MkdirAll(job.Cwd, 0770)
 			downloadPaths, err = prepareStagingDir(config, job.Staging)
 			if err != nil {
 				reportFailed(c, job.Id, err)
@@ -321,8 +324,14 @@ func GetAndExecuteJob(c *APIClient, config *SharedFileSystemConfig) {
 				ExitCode: int32(exitCode),
 				Results:  results,
 			}
+			log.Default().Printf("job Finished exitCone = %d", exitCode)
+			log.Default().Printf("job Finished results = %+v", results)
 
 			r.Execute()
+			os.RemoveAll(job.Cwd)
+			for _, localPath := range downloadPaths {
+				os.RemoveAll(localPath)
+			}
 			fmt.Print(exitCode)
 		}
 	}
@@ -350,11 +359,13 @@ func uploadOutputs(config *SharedFileSystemConfig, results map[string][]ApiDoEva
 				files[idx] = file
 				for _, secondaryFile := range file.File.SecondaryFiles {
 					if secondaryFile.ChildFile != nil {
-						path, err := uploadToS3(config, *secondaryFile.ChildFile.Location, nil)
-						if err != nil {
-							return err
+						if !strings.HasPrefix(*secondaryFile.ChildFile.Location, "s3://") {
+							path, err := uploadToS3(config, *secondaryFile.ChildFile.Location, nil)
+							if err != nil {
+								return err
+							}
+							secondaryFile.ChildFile.Location = &path
 						}
-						secondaryFile.ChildFile.Location = &path
 					} else if secondaryFile.ChildDirectory != nil {
 						path, err := uploadToS3(config, *secondaryFile.ChildDirectory.Location, nil)
 						if err != nil {
@@ -364,7 +375,18 @@ func uploadOutputs(config *SharedFileSystemConfig, results map[string][]ApiDoEva
 					}
 				}
 			} else if file.Directory != nil {
-				path, err := uploadToS3(config, *file.Directory.Location, nil)
+				var s3url *string = nil
+				if inplaceUpdate {
+					lpath, err := os.Readlink(*file.Directory.Location)
+					if err == nil {
+						for s3path, localPath := range downloadPaths {
+							if localPath == lpath {
+								s3url = &s3path
+							}
+						}
+					}
+				}
+				path, err := uploadToS3(config, *file.Directory.Location, s3url)
 				if err != nil {
 					return err
 				}
@@ -397,7 +419,7 @@ func uploadToS3(config *SharedFileSystemConfig, filePath string, s3url *string) 
 		return "", err
 	}
 	if fileInfo.IsDir() {
-		return uploadDirectory(uploader, *config, filePath)
+		return uploadDirectory(uploader, *config, filePath, s3url)
 	} else {
 		return uploadFile(uploader, *config, filePath, s3url)
 	}
@@ -436,24 +458,34 @@ func uploadFile(uploader *s3manager.Uploader, config SharedFileSystemConfig, fil
 	}
 	return "s3://" + u.Host + "/" + key, nil
 }
-func uploadDirectory(uploader *s3manager.Uploader, config SharedFileSystemConfig, directoryPath string) (string, error) {
+func uploadDirectory(uploader *s3manager.Uploader, config SharedFileSystemConfig, directoryPath string, s3url *string) (string, error) {
 	u, err := url.Parse(config.RootUrl)
 	if err != nil {
 		return "", err
 	}
 
-	err = filepath.Walk(directoryPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
+	err = WalkWithSymlink(directoryPath, func(path string, info os.FileInfo, err error) error {
 		if !info.IsDir() {
-			_, err := uploadFile(uploader, config, path, nil)
+			var s3urlp *string
+			if s3url != nil {
+				//もともとのs3
+				news3url := *s3url + strings.TrimPrefix(path, directoryPath)
+				s3urlp = &news3url
+			}
+			_, err := uploadFile(uploader, config, path, s3urlp)
 			if err != nil {
 				return err
 			}
 		} else {
 			emptyBuffer := bytes.NewBuffer([]byte{})
-			key := strings.TrimPrefix(filepath.Join(u.Path, path), "/")
+			key := filepath.Join(u.Path, path)
+			if s3url != nil {
+				org, err := url.Parse(*s3url)
+				if err != nil {
+					return err
+				}
+				key = filepath.Join(org.Path, strings.TrimPrefix(path, directoryPath))
+			}
 			if !strings.HasSuffix(key, "/") {
 				key += "/"
 			}
@@ -474,11 +506,15 @@ func uploadDirectory(uploader *s3manager.Uploader, config SharedFileSystemConfig
 	if err != nil {
 		return "", err
 	}
-	directoryPath = strings.TrimPrefix(directoryPath, "/")
-	key := strings.TrimPrefix(filepath.Join(u.Path, directoryPath), "/")
+	if s3url != nil {
+		return *s3url, nil
+	} else {
+		directoryPath = strings.TrimPrefix(directoryPath, "/")
+		key := strings.TrimPrefix(filepath.Join(u.Path, directoryPath), "/")
+		// すべてのURLを結合して返す
+		return "s3://" + u.Host + "/" + key, nil
+	}
 
-	// すべてのURLを結合して返す
-	return "s3://" + u.Host + "/" + key, nil
 }
 func reportWorkerStarted(c *APIClient) (*SharedFileSystemConfig, error) {
 	hostname, err := os.Hostname()
@@ -504,10 +540,10 @@ func main() {
 	cfg := NewConfiguration()
 	cfg.Scheme = "http"
 	cfg.Host = "localhost:3000"
-	cfg.HTTPClient = &http.Client{
-		Transport: &LoggingRoundTripper{Proxied: http.DefaultTransport},
-	}
-	cfg.Debug = true
+	// cfg.HTTPClient = &http.Client{
+	// 	Transport: &LoggingRoundTripper{Proxied: http.DefaultTransport},
+	// }
+	// cfg.Debug = true
 	c := NewAPIClient(cfg)
 	var err error = nil
 	var config *SharedFileSystemConfig = nil
@@ -518,6 +554,8 @@ func main() {
 		} else {
 			break
 		}
+		var endpoint = "http://localhost:9000"
+		config.Endpoint = &endpoint
 	}
 	for {
 		GetAndExecuteJob(c, config)
@@ -649,7 +687,6 @@ func convertToFile(data DataMap) *ChildFile {
 	file := ChildFile{
 		Class:    "File",
 		Location: data.GetStringPtr("location"),
-		Dirname:  data.GetStringPtr("dirname"),
 		Basename: data.GetStringPtr("basename"),
 		Nameroot: data.GetStringPtr("nameroot"),
 		Nameext:  data.GetStringPtr("nameext"),
@@ -665,7 +702,6 @@ func convertToDirectory(data DataMap) *ChildDirectory {
 	file := ChildDirectory{
 		Class:    "Directory",
 		Location: data.GetStringPtr("location"),
-		Dirname:  data.GetStringPtr("dirname"),
 		Basename: data.GetStringPtr("basename"),
 		Path:     data.GetStringPtr("path"),
 	}
@@ -848,6 +884,7 @@ func prepareStagingDir(config *SharedFileSystemConfig, commands []StagingCommand
 		case "writeFileContent":
 			if _, err := os.Stat(*command.Target); os.IsNotExist(err) {
 				err := os.WriteFile(*command.Target, []byte(*command.Content), fs.FileMode(*command.Mode))
+				log.Default().Printf("WriteFileContent to %s", *command.Target)
 				if err != nil {
 					return downloadPaths, err
 				}
@@ -871,6 +908,7 @@ func prepareStagingDir(config *SharedFileSystemConfig, commands []StagingCommand
 					downloadPaths[*command.Resolved] = downloadpath
 				}
 				if _, err := os.Stat(sourcepath); err == nil {
+					log.Default().Printf("symlink from %s to %s", *command.Resolved, *command.Target)
 					err = os.Symlink(sourcepath, *command.Target)
 					if err != nil {
 						return downloadPaths, err
@@ -889,8 +927,10 @@ func prepareStagingDir(config *SharedFileSystemConfig, commands []StagingCommand
 		case "copy":
 			if _, err := os.Stat(*command.Target); os.IsNotExist(err) {
 				if strings.HasPrefix(*command.Resolved, "s3://") {
+					log.Default().Printf("download from %s to %s", *command.Resolved, *command.Target)
 					_, err = downloadS3FileToTemp(config, *command.Resolved, command.Target)
 				} else {
+					log.Default().Printf("copy from %s to %s", *command.Resolved, *command.Target)
 					err = CopyFileOrDir(config, *command.Resolved, *command.Target) // copyFile needs to be implemented
 				}
 				if err != nil {
@@ -926,6 +966,7 @@ func prepareStagingDir(config *SharedFileSystemConfig, commands []StagingCommand
 					}
 					downloadPaths[*command.Resolved] = src
 				}
+				log.Default().Printf("relink %s to %s", *command.Resolved, *command.Target)
 				err = os.Symlink(src, *command.Target)
 				if err != nil && !errors.Is(err, os.ErrExist) {
 					return downloadPaths, err
@@ -1457,6 +1498,12 @@ OuterLoop:
 					if os.IsNotExist(err) {
 						os.MkdirAll(dirpath, 0775)
 					}
+				} else if strings.HasPrefix(mnt, "target=/tmp") {
+					for _, source := range mounts {
+						if strings.HasPrefix(source, "source=/") {
+							os.MkdirAll(strings.TrimPrefix(source, "source="), 0755)
+						}
+					}
 				}
 				if strings.HasPrefix(mnt, "source=s3://") {
 					targetPath := getTarget(mounts)
@@ -1482,6 +1529,10 @@ OuterLoop:
 			if isUpdated {
 				command = strings.Join(mounts, ",")
 			}
+		} else if strings.HasPrefix(cmd, "--cidfile=/") {
+			ciddir := filepath.Dir(strings.TrimPrefix(cmd, "--cidfile="))
+			os.MkdirAll(ciddir, 0755)
+
 		}
 		dockerCommands = append(dockerCommands, command)
 	}
@@ -1556,6 +1607,5 @@ func executeJob(config *SharedFileSystemConfig, commands []string, stdinPath, st
 		}
 		return -1, err
 	}
-
 	return cmd.ProcessState.ExitCode(), nil
 }

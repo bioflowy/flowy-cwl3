@@ -1,4 +1,6 @@
 import * as cwlTsAuto from 'cwl-ts-auto';
+import { Fetcher } from 'cwl-ts-auto/dist/util/Fetcher.js';
+import { LoadingOptions } from 'cwl-ts-auto/dist/util/LoadingOptions.js';
 import { FormatGraph } from './formatgraph.js';
 import { PathMapper } from './pathmapper.js';
 import { Process } from './process.js';
@@ -88,7 +90,7 @@ export class LoadingContext extends ContextBase {
   skip_resolve_all = false;
   skip_schemas = false;
   baseuri: string;
-
+  loadingOptions: LoadingOptions;
   copy(): LoadingContext {
     const t = new LoadingContext();
     for (const [k, v] of Object.entries(this)) {

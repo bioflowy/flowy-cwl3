@@ -27,6 +27,13 @@ export const appRouter = t.router({
       if (input.basedir) {
         runtimeContext.basedir = input.basedir;
       }
+      if (!input.tool_path.startsWith('/')) {
+        if (input.basedir.endsWith('/')) {
+          input.tool_path = `${input.basedir}${input.tool_path}`;
+        } else {
+          input.tool_path = `${input.basedir}/${input.tool_path}`;
+        }
+      }
       const [result, status] = await exec(runtimeContext, input.tool_path, input.job_path);
       return [result, status]; // input type is string
     } catch (error) {

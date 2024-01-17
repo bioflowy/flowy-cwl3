@@ -52,7 +52,7 @@
       "runtimeExecutable": "/home/uehara/.nodenv/shims/npm",
       "preLaunchTask": "npm build",
       "console": "integratedTerminal",
-      "runtimeArgs": ["run", "server"]
+      "runtimeArgs": ["run", "server", "--preserve-symlinks"]
     },
     {
       "name": "client",

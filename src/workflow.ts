@@ -82,7 +82,8 @@ function validate(
   const schemas = toolpath_object.loadingOptions.schemas;
   if (schemas && Array.isArray(schemas)) {
     for (const schema of schemas) {
-      const schema_path = pathJoin(loadingContext.baseuri, schema);
+      const baseuri = loadingContext.baseuri.endsWith('/') ? loadingContext.baseuri : `${loadingContext.baseuri}/`;
+      const schema_path = toolpath_object.loadingOptions.fetcher.urljoin(baseuri, schema);
       loadingContext.formatGraph.addOntology(schema_path);
     }
   }

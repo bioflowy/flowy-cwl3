@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as rdf from 'rdflib';
+import { getFileContentFromS3 } from './builder.js';
+import { getServerConfig } from './server/server.js';
 import { filePathToURI } from './utils.js';
 
 function guessContentType(path: string): string {
@@ -40,7 +42,13 @@ export class FormatGraph {
   }
   async load(ontologyPath: string): Promise<rdf.Store> {
     const store = rdf.graph();
-    const owlData = (await readFile(ontologyPath)).toString('utf-8');
+    let owlData = '';
+    if (ontologyPath.startsWith('s3:/')) {
+      const config = getServerConfig();
+      owlData = await getFileContentFromS3(config.sharedFileSystem, ontologyPath, true);
+    } else {
+      owlData = (await readFile(ontologyPath)).toString('utf-8');
+    }
     return new Promise((resolve, reject) => {
       rdf.parse(owlData, store, filePathToURI(ontologyPath), guessContentType(ontologyPath), (error, _graph) => {
         if (error) {

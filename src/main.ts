@@ -1,7 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { S3 } from '@aws-sdk/client-s3';
 import * as cwlTsAuto from 'cwl-ts-auto';
+import { LoadingOptions } from 'cwl-ts-auto/dist/util/LoadingOptions.js';
 import yaml from 'js-yaml';
 import { getFileContentFromS3 } from './builder.js';
 import { LoadingContext, RuntimeContext } from './context.js';
@@ -10,7 +12,7 @@ import { SingleJobExecutor } from './executors.js';
 import { loadDocument } from './loader.js';
 import { _logger } from './loghandler.js';
 import { shortname, type Process, add_sizes } from './process.js';
-import { dirnames3 } from './s3util.js';
+import { S3Fetcher, dirnames3 } from './s3util.js';
 import { getServerConfig } from './server/server.js';
 import {
   type CWLObjectType,
@@ -220,14 +222,15 @@ export async function exec(
 ): Promise<[CWLOutputType, string]> {
   const loadingContext = new LoadingContext({});
   loadingContext.construct_tool_object = default_make_tool;
-  if (!path.isAbsolute(tool_path)) {
-    tool_path = path.join(runtimeContext.clientWorkDir, tool_path);
-  }
   if (job_path && !path.isAbsolute(job_path)) {
     if (runtimeContext) job_path = pathJoin(runtimeContext.basedir, job_path);
   }
   _logger.info(`tool_path=${tool_path}`);
   _logger.info(`job_path=${job_path}`);
+  loadingContext.baseuri = path.dirname(tool_path);
+  const loadingOptions = new LoadingOptions({});
+  loadingOptions.fetcher = new S3Fetcher();
+  loadingContext.loadingOptions = loadingOptions;
   const [tool] = await loadDocument(tool_path, loadingContext);
   const jo = await load_job_order(job_path);
   const job_order_object = jo[0];

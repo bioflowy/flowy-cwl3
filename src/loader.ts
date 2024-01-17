@@ -3,10 +3,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import cwlTsAuto, { CommandOutputBinding, Directory } from 'cwl-ts-auto';
 import { Dictionary } from 'cwl-ts-auto/dist/util/Dict.js';
+import { LoadingOptions } from 'cwl-ts-auto/dist/util/LoadingOptions.js';
 import { CommandLineTool, ExpressionTool } from './command_line_tool.js';
 import type { LoadingContext } from './context.js';
 import { ValidationException } from './errors.js';
 import type { Process } from './process.js';
+import { S3Fetcher } from './s3util.js';
 import { filePathToURI } from './utils.js';
 import { Workflow, default_make_tool } from './workflow.js';
 
@@ -30,11 +32,10 @@ export async function loadDocument(
   if (tool_file_path.startsWith('file://')) {
     tool_file_path = fileURLToPath(tool_file_path);
   }
-  loadingContext.baseuri = path.dirname(tool_file_path);
-  const doc = await cwlTsAuto.loadDocument(tool_file_path);
+  const doc = await cwlTsAuto.loadDocument(tool_file_path, loadingContext.baseuri, loadingContext.loadingOptions);
   if (doc instanceof Array) {
     let tool_id = tool_path;
-    if (!tool_id.startsWith('file://')) {
+    if (!(tool_id.startsWith('file://') || tool_id.startsWith('s3:/'))) {
       if (!path.isAbsolute(tool_id)) {
         tool_id = path.join(process.cwd(), tool_id);
       }

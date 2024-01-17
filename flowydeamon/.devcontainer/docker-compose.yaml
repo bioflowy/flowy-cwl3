@@ -1,0 +1,8 @@
+version: '3'
+services:
+  flowydeamon:
+    image: flowydeamon  # Golangの最新バージョンを使用
+    volumes:
+      - ..:/workspace/flowydeamon  # プロジェクトルートをマウント
+    stdin_open: true
+    tty: true

@@ -643,17 +643,10 @@ export abstract class ContainerCommandLineJob extends JobBase {
       contents = secret_store.retrieve(volume.resolved) as string;
     }
     const dirname = path.dirname(host_outdir_tgt || new_file);
-    if (!fs.existsSync(dirname)) {
-      fs.mkdirSync(dirname, { recursive: true });
-    }
-    fs.writeFileSync(host_outdir_tgt || new_file, contents);
+    this.staging.mkdirSync(dirname, true);
+    this.staging.writeFileSync(host_outdir_tgt || new_file, contents, 0o755, { ensureWritable: writable });
     if (!host_outdir_tgt) {
       this.append_volume(runtime, new_file, volume.target, writable);
-    }
-    if (writable) {
-      ensureWritable(host_outdir_tgt || new_file);
-    } else {
-      ensure_non_writable(host_outdir_tgt || new_file);
     }
     return host_outdir_tgt || new_file;
   }
