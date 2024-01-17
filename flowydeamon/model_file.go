@@ -12,6 +12,7 @@ package main
 
 import (
 	"encoding/json"
+	"bytes"
 	"fmt"
 )
 
@@ -32,7 +33,7 @@ type File struct {
 	Format *string `json:"format,omitempty"`
 	Contents *string `json:"contents,omitempty"`
 	Writable *bool `json:"writable,omitempty"`
-	SecondaryFiles []FileAllOfSecondaryFilesInner `json:"secondaryFiles,omitempty"`
+	SecondaryFiles []FileAllOfSecondaryFiles `json:"secondaryFiles,omitempty"`
 }
 
 type _File File
@@ -432,9 +433,9 @@ func (o *File) SetWritable(v bool) {
 }
 
 // GetSecondaryFiles returns the SecondaryFiles field value if set, zero value otherwise.
-func (o *File) GetSecondaryFiles() []FileAllOfSecondaryFilesInner {
+func (o *File) GetSecondaryFiles() []FileAllOfSecondaryFiles {
 	if o == nil || IsNil(o.SecondaryFiles) {
-		var ret []FileAllOfSecondaryFilesInner
+		var ret []FileAllOfSecondaryFiles
 		return ret
 	}
 	return o.SecondaryFiles
@@ -442,7 +443,7 @@ func (o *File) GetSecondaryFiles() []FileAllOfSecondaryFilesInner {
 
 // GetSecondaryFilesOk returns a tuple with the SecondaryFiles field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *File) GetSecondaryFilesOk() ([]FileAllOfSecondaryFilesInner, bool) {
+func (o *File) GetSecondaryFilesOk() ([]FileAllOfSecondaryFiles, bool) {
 	if o == nil || IsNil(o.SecondaryFiles) {
 		return nil, false
 	}
@@ -458,8 +459,8 @@ func (o *File) HasSecondaryFiles() bool {
 	return false
 }
 
-// SetSecondaryFiles gets a reference to the given []FileAllOfSecondaryFilesInner and assigns it to the SecondaryFiles field.
-func (o *File) SetSecondaryFiles(v []FileAllOfSecondaryFilesInner) {
+// SetSecondaryFiles gets a reference to the given []FileAllOfSecondaryFiles and assigns it to the SecondaryFiles field.
+func (o *File) SetSecondaryFiles(v []FileAllOfSecondaryFiles) {
 	o.SecondaryFiles = v
 }
 
@@ -513,8 +514,8 @@ func (o File) ToMap() (map[string]interface{}, error) {
 	return toSerialize, nil
 }
 
-func (o *File) UnmarshalJSON(bytes []byte) (err error) {
-    // This validates that all required properties are included in the JSON object
+func (o *File) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
@@ -523,7 +524,7 @@ func (o *File) UnmarshalJSON(bytes []byte) (err error) {
 
 	allProperties := make(map[string]interface{})
 
-	err = json.Unmarshal(bytes, &allProperties)
+	err = json.Unmarshal(data, &allProperties)
 
 	if err != nil {
 		return err;
@@ -537,7 +538,9 @@ func (o *File) UnmarshalJSON(bytes []byte) (err error) {
 
 	varFile := _File{}
 
-	err = json.Unmarshal(bytes, &varFile)
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varFile)
 
 	if err != nil {
 		return err

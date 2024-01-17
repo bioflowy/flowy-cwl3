@@ -6,6 +6,7 @@ import { DockerRequirement, ShellCommandRequirement } from 'cwl-ts-auto';
 import { v4 as uuidv4 } from 'uuid';
 import { OutputBinding, OutputSecondaryFile } from './JobExecutor.js';
 import { Builder } from './builder.js';
+import { OutputPortsType } from './collect_outputs.js';
 import { RuntimeContext } from './context.js';
 import {
   CommandOutputParameter,
@@ -74,7 +75,7 @@ export async function _job_popen(
   make_job_dir: () => string,
   inplace_update: boolean,
   timelimit: number | undefined = undefined,
-): Promise<[number, { [key: string]: (File | Directory)[] }]> {
+): Promise<[number, boolean, { [key: string]: (File | Directory)[] }]> {
   const id = uuidv4();
   const server = getServer();
   server.addBuilder(id, builder);
@@ -97,7 +98,8 @@ export async function _job_popen(
 type CollectOutputsType = (
   str: string,
   int: number,
-  fileMap: { [key: string]: (File | Directory)[] },
+  isCwlOutput: boolean,
+  results: OutputPortsType,
 ) => Promise<CWLObjectType>; // Assuming functools.partial as any
 export abstract class JobBase {
   builder: Builder;
@@ -296,7 +298,7 @@ export abstract class JobBase {
         }
       }
       const outputBindings = await createOutputBinding(this.tool.outputs, this.builder);
-      const [rcode, fileMap] = await _job_popen(
+      const [rcode, isCwlOutput, fileMap] = await _job_popen(
         this.staging,
         commands,
         stdin_path,
@@ -332,7 +334,7 @@ export abstract class JobBase {
       }
 
       runtimeContext.log_dir_handler(this.outdir, this.base_path_logs, stdout_path, stderr_path);
-      outputs = await this.collect_outputs(this.outdir, rcode, fileMap);
+      outputs = await this.collect_outputs(this.outdir, rcode, isCwlOutput, fileMap);
       // outputs = bytes2str_in_dicts(outputs);
       // } catch (e) {
       //     if (e.errno == 2) {

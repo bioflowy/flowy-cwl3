@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -121,7 +122,7 @@ func collect_secondary_files(
 		for _, sf := range schema.SecondaryFiles {
 			var sf_required = false
 			if sf.RequiredString != nil {
-				sf_required_eval := do_eval(c, id, *sf.RequiredString, ApiDoEvalPostRequestContext{File: primary})
+				sf_required_eval := do_eval(c, id, *sf.RequiredString, primary)
 				required_bool, ok := sf_required_eval.(bool)
 				if !ok {
 					return errors.New(
@@ -136,7 +137,7 @@ func collect_secondary_files(
 			}
 			var sfpath interface{}
 			if strings.Contains(sf.Pattern, "$(") || strings.Contains(sf.Pattern, "${") {
-				sfpath = do_eval(c, id, sf.Pattern, ApiDoEvalPostRequestContext{File: primary})
+				sfpath = do_eval(c, id, sf.Pattern, primary)
 			} else {
 				sfpath = substitute(primary.GetBasename(), sf.Pattern)
 			}
@@ -156,9 +157,9 @@ func collect_secondary_files(
 					RevmapFile(builderOutDir, outdir, secondaryFile)
 				}
 				if isFile(config, outdir, secondaryFile.GetLocation()) {
-					primary.SecondaryFiles = append(primary.SecondaryFiles, FileAllOfSecondaryFilesInner{ChildFile: convertToFile(secondaryFile)})
+					primary.SecondaryFiles = append(primary.SecondaryFiles, FileAllOfSecondaryFiles{ChildFile: convertToFile(secondaryFile)})
 				} else if isDir(config, outdir, secondaryFile.GetLocation()) {
-					primary.SecondaryFiles = append(primary.SecondaryFiles, FileAllOfSecondaryFilesInner{ChildDirectory: convertToDirectory(secondaryFile)})
+					primary.SecondaryFiles = append(primary.SecondaryFiles, FileAllOfSecondaryFiles{ChildDirectory: convertToDirectory(secondaryFile)})
 				}
 			}
 			if sf_required {
@@ -255,6 +256,21 @@ func relinkInitialWorkDir(config *SharedFileSystemConfig, vols []MapperEnt, host
 	}
 	return nil
 }
+func loadCwlOutputJson(jsonPath string) (map[string]interface{}, error) {
+	file, err := os.Open(jsonPath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	// デコード先のmapを準備
+	var data map[string]interface{} // もしくは、適切なデータ構造を使用
+
+	// JSONファイルをデコード
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&data)
+	return data, err
+}
 func GetAndExecuteJob(c *APIClient, config *SharedFileSystemConfig) {
 	ctx := context.Background()
 	res, httpres, err := c.DefaultAPI.ApiGetExectableJobPost(ctx).Execute()
@@ -279,121 +295,140 @@ func GetAndExecuteJob(c *APIClient, config *SharedFileSystemConfig) {
 				return
 			}
 			relinkInitialWorkDir(config, job.Vols, job.Cwd, job.BuilderOutdir, job.InplaceUpdate, downloadPaths)
-			var glob1 = []string{"cwl.output.json"}
-			files, err := globOutput(
-				job.BuilderOutdir,
-				OutputBinding{
-					Name:           "cwl.output.json",
-					Glob:           glob1,
-					SecondaryFiles: []OutputBindingSecondaryFilesInner{},
-					LoadContents:   PtrBool(true),
-				},
-				job.Cwd,
-				true,
-			)
-			if err != nil {
-				reportFailed(c, job.Id, err)
-				return
-			}
-			results := map[string][]ApiDoEvalPostRequestContext{}
-			if len(files) > 0 {
-				results["cwl.output.json"] = files
-			}
-			for _, output := range job.OutputBindings {
-				files2, err := globOutput(
-					job.BuilderOutdir,
-					output,
-					job.Cwd,
-					true,
-				)
+			cwlOutputPath := filepath.Join(job.Cwd, "cwl.output.json")
+			_, err = os.Stat(cwlOutputPath)
+			if !os.IsNotExist(err) {
+				results, err := loadCwlOutputJson(cwlOutputPath)
 				if err != nil {
 					reportFailed(c, job.Id, err)
 					return
 				}
-				if len(files2) > 0 {
-					results[output.Name] = files2
-					for _, file := range files2 {
-						collect_secondary_files(c, config, job.Id, output, []ApiDoEvalPostRequestContext{file}, job.Cwd, job.BuilderOutdir)
+				r := c.DefaultAPI.ApiJobFinishedPost(ctx)
+				r.jobFinishedRequest = &JobFinishedRequest{
+					Id:          job.Id,
+					IsCwlOutput: true,
+					ExitCode:    int32(exitCode),
+					Results:     results,
+				}
+				log.Default().Printf("job Finished exitCone = %d", exitCode)
+				log.Default().Printf("job Finished results = %+v", results)
+
+				r.Execute()
+				os.RemoveAll(job.Cwd)
+				for _, localPath := range downloadPaths {
+					os.RemoveAll(localPath)
+				}
+				fmt.Print(exitCode)
+
+			} else {
+				results := map[string]interface{}{}
+				for _, output := range job.OutputBindings {
+					files2, err := globOutput(
+						job.BuilderOutdir,
+						output,
+						job.Cwd,
+						true,
+					)
+					if err != nil {
+						reportFailed(c, job.Id, err)
+						return
+					}
+					if len(files2) > 0 {
+						results[output.Name] = files2
+						for _, file := range files2 {
+							collect_secondary_files(c, config, job.Id, output, []ApiDoEvalPostRequestContext{file}, job.Cwd, job.BuilderOutdir)
+						}
+					}
+					outputEval, ok := output.GetOutputEvalOk()
+					if ok {
+						results[output.Name] = do_eval(c, job.Id, *outputEval, files2)
 					}
 				}
-			}
-			uploadOutputs(config, results, downloadPaths, job.InplaceUpdate)
-			r := c.DefaultAPI.ApiJobFinishedPost(ctx)
-			r.jobFinishedRequest = &JobFinishedRequest{
-				Id:       job.Id,
-				ExitCode: int32(exitCode),
-				Results:  results,
-			}
-			log.Default().Printf("job Finished exitCone = %d", exitCode)
-			log.Default().Printf("job Finished results = %+v", results)
+				uploadOutputs(config, results, downloadPaths, job.InplaceUpdate)
+				r := c.DefaultAPI.ApiJobFinishedPost(ctx)
+				r.jobFinishedRequest = &JobFinishedRequest{
+					Id:          job.Id,
+					IsCwlOutput: false,
+					ExitCode:    int32(exitCode),
+					Results:     results,
+				}
+				log.Default().Printf("job Finished exitCone = %d", exitCode)
+				log.Default().Printf("job Finished results = %+v", results)
 
-			r.Execute()
-			os.RemoveAll(job.Cwd)
-			for _, localPath := range downloadPaths {
-				os.RemoveAll(localPath)
+				r.Execute()
+				os.RemoveAll(job.Cwd)
+				for _, localPath := range downloadPaths {
+					os.RemoveAll(localPath)
+				}
+				fmt.Print(exitCode)
+
 			}
-			fmt.Print(exitCode)
 		}
 	}
 }
-func uploadOutputs(config *SharedFileSystemConfig, results map[string][]ApiDoEvalPostRequestContext, downloadPaths map[string]string, inplaceUpdate bool) error {
+func uploadOutputs(config *SharedFileSystemConfig, results map[string]interface{}, downloadPaths map[string]string, inplaceUpdate bool) error {
 	for _, files := range results {
-		for idx, file := range files {
-			if file.File != nil {
-				var s3url *string = nil
-				if inplaceUpdate {
-					lpath, err := os.Readlink(*file.File.Location)
-					if err == nil {
-						for s3path, localPath := range downloadPaths {
-							if localPath == lpath {
-								s3url = &s3path
+		if files, ok := files.([]ApiDoEvalPostRequestContext); ok {
+			for idx, file := range files {
+				if file.File != nil {
+					var s3url *string = nil
+					if inplaceUpdate {
+						lpath, err := os.Readlink(*file.File.Location)
+						if err == nil {
+							for s3path, localPath := range downloadPaths {
+								if localPath == lpath {
+									s3url = &s3path
+								}
 							}
 						}
 					}
-				}
-				path, err := uploadToS3(config, *file.File.Location, s3url)
-				if err != nil {
-					return err
-				}
-				file.File.Location = &path
-				files[idx] = file
-				for _, secondaryFile := range file.File.SecondaryFiles {
-					if secondaryFile.ChildFile != nil {
-						if !strings.HasPrefix(*secondaryFile.ChildFile.Location, "s3://") {
-							path, err := uploadToS3(config, *secondaryFile.ChildFile.Location, nil)
+					path, err := uploadToS3(config, *file.File.Location, s3url)
+					if err != nil {
+						return err
+					}
+					file.File.Location = &path
+					file.File.Path = nil
+					files[idx] = file
+					for _, secondaryFile := range file.File.SecondaryFiles {
+						if secondaryFile.ChildFile != nil {
+							if !strings.HasPrefix(*secondaryFile.ChildFile.Location, "s3://") {
+								path, err := uploadToS3(config, *secondaryFile.ChildFile.Location, nil)
+								if err != nil {
+									return err
+								}
+								secondaryFile.ChildFile.Location = &path
+								secondaryFile.ChildFile.Path = nil
+							}
+						} else if secondaryFile.ChildDirectory != nil {
+							path, err := uploadToS3(config, *secondaryFile.ChildDirectory.Location, nil)
 							if err != nil {
 								return err
 							}
-							secondaryFile.ChildFile.Location = &path
+							secondaryFile.ChildDirectory.Location = &path
+							secondaryFile.ChildDirectory.Path = nil
 						}
-					} else if secondaryFile.ChildDirectory != nil {
-						path, err := uploadToS3(config, *secondaryFile.ChildDirectory.Location, nil)
-						if err != nil {
-							return err
-						}
-						secondaryFile.ChildDirectory.Location = &path
 					}
-				}
-			} else if file.Directory != nil {
-				var s3url *string = nil
-				if inplaceUpdate {
-					lpath, err := os.Readlink(*file.Directory.Location)
-					if err == nil {
-						for s3path, localPath := range downloadPaths {
-							if localPath == lpath {
-								s3url = &s3path
+				} else if file.Directory != nil {
+					var s3url *string = nil
+					if inplaceUpdate {
+						lpath, err := os.Readlink(*file.Directory.Location)
+						if err == nil {
+							for s3path, localPath := range downloadPaths {
+								if localPath == lpath {
+									s3url = &s3path
+								}
 							}
 						}
 					}
+					path, err := uploadToS3(config, *file.Directory.Location, s3url)
+					if err != nil {
+						return err
+					}
+					file.Directory.Location = &path
+					file.Directory.Path = nil
+					files[idx] = file
 				}
-				path, err := uploadToS3(config, *file.Directory.Location, s3url)
-				if err != nil {
-					return err
-				}
-				file.Directory.Location = &path
-				files[idx] = file
 			}
-
 		}
 	}
 	return nil
@@ -539,7 +574,7 @@ func reportWorkerStarted(c *APIClient) (*SharedFileSystemConfig, error) {
 func main() {
 	cfg := NewConfiguration()
 	cfg.Scheme = "http"
-	cfg.Host = "localhost:3000"
+	cfg.Host = "127.0.0.1:3000"
 	// cfg.HTTPClient = &http.Client{
 	// 	Transport: &LoggingRoundTripper{Proxied: http.DefaultTransport},
 	// }
@@ -554,7 +589,7 @@ func main() {
 		} else {
 			break
 		}
-		var endpoint = "http://localhost:9000"
+		var endpoint = "http://127.0.0.1:9000"
 		config.Endpoint = &endpoint
 	}
 	for {
@@ -562,7 +597,7 @@ func main() {
 		time.Sleep(1 * time.Second)
 	}
 }
-func do_eval(c *APIClient, id string, expression string, primary ApiDoEvalPostRequestContext) interface{} {
+func do_eval(c *APIClient, id string, expression string, primary interface{}) interface{} {
 	req := c.DefaultAPI.ApiDoEvalPost(context.Background())
 	req.apiDoEvalPostRequest = &ApiDoEvalPostRequest{
 		Id:      id,
@@ -1183,7 +1218,7 @@ func basename(path string) string {
 	return filepath.Base(path)
 }
 func get_listing(outdir string, dir *Directory, recursive bool) error {
-	var listing = []FileAllOfSecondaryFilesInner{}
+	var listing = []DirectoryAllOfListing{}
 	ls, err := listdir(outdir, *dir.Location)
 	if err != nil {
 		return err
@@ -1200,7 +1235,7 @@ func get_listing(outdir string, dir *Directory, recursive bool) error {
 			// if (recursive) {
 			// get_listing(fs_access, ent, recursive);
 			// }
-			listing = append(listing, FileAllOfSecondaryFilesInner{
+			listing = append(listing, DirectoryAllOfListing{
 				ChildDirectory: &ent,
 			})
 		} else {
@@ -1210,7 +1245,7 @@ func get_listing(outdir string, dir *Directory, recursive bool) error {
 				Location: &ld,
 				Basename: &bn,
 			}
-			listing = append(listing, FileAllOfSecondaryFilesInner{
+			listing = append(listing, DirectoryAllOfListing{
 				ChildFile: &ent,
 			})
 		}
@@ -1245,7 +1280,6 @@ func globOutput(builderOutdir string, binding OutputBinding, outdir string, comp
 				if computeChecksum {
 					ComputeChecksums(f)
 				}
-
 				results = append(results, ApiDoEvalPostRequestContext{File: f})
 			} else if d != nil {
 				if binding.LoadListing != nil && *binding.LoadListing != NO_LISTING {

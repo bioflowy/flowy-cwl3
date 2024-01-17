@@ -109,95 +109,22 @@ components:
         - target
         - type
         - staged
-    ChildFile:
-      type: object
-      properties:
-        class:
-          type: string
-          enum:
-            - File
-        location:
-          type: string
-        path:
-          type: string
-        basename:
-          type: string
-        dirname:
-          type: string
-        nameroot:
-          type: string
-        nameext:
-          type: string
-        checksum:
-          type: string
-        size:
-          type: number
-        format:
-          type: string
-        contents:
-          type: string
-        writable:
-          type: boolean
-      required:
-        - class
-    ChildDirectory:
-      type: object
-      properties:
-        class:
-          type: string
-          enum:
-            - Directory
-        location:
-          type: string
-        path:
-          type: string
-        basename:
-          type: string
-        dirname:
-          type: string
-        writable:
-          type: boolean
-      required:
-        - class
-    File:
-      allOf:
-        - $ref: '#/components/schemas/ChildFile'
-        - type: object
-          properties:
-            secondaryFiles:
-              type: array
-              items:
-                anyOf:
-                  - $ref: '#/components/schemas/ChildFile'
-                  - $ref: '#/components/schemas/ChildDirectory'
-    Directory:
-      allOf:
-        - $ref: '#/components/schemas/ChildDirectory'
-        - type: object
-          properties:
-            listing:
-              type: array
-              items:
-                anyOf:
-                  - $ref: '#/components/schemas/ChildFile'
-                  - $ref: '#/components/schemas/ChildDirectory'
     JobFinishedRequest:
       type: object
       properties:
         id:
           type: string
+        isCwlOutput:
+          type: boolean
         exitCode:
           type: integer
         results:
           type: object
           additionalProperties:
-            type: array
-            items:
-              anyOf:
-                - $ref: '#/components/schemas/File'
-                - $ref: '#/components/schemas/Directory'
+            nullable: true
       required:
         - id
+        - isCwlOutput
         - exitCode
         - results
   parameters: {}
@@ -314,9 +241,7 @@ paths:
                 ex:
                   type: string
                 context:
-                  anyOf:
-                    - $ref: '#/components/schemas/File'
-                    - $ref: '#/components/schemas/Directory'
+                  nullable: true
               required:
                 - id
                 - ex

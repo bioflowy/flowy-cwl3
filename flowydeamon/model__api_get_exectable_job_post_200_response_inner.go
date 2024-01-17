@@ -12,6 +12,7 @@ package main
 
 import (
 	"encoding/json"
+	"bytes"
 	"fmt"
 )
 
@@ -441,8 +442,8 @@ func (o ApiGetExectableJobPost200ResponseInner) ToMap() (map[string]interface{},
 	return toSerialize, nil
 }
 
-func (o *ApiGetExectableJobPost200ResponseInner) UnmarshalJSON(bytes []byte) (err error) {
-    // This validates that all required properties are included in the JSON object
+func (o *ApiGetExectableJobPost200ResponseInner) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
@@ -459,7 +460,7 @@ func (o *ApiGetExectableJobPost200ResponseInner) UnmarshalJSON(bytes []byte) (er
 
 	allProperties := make(map[string]interface{})
 
-	err = json.Unmarshal(bytes, &allProperties)
+	err = json.Unmarshal(data, &allProperties)
 
 	if err != nil {
 		return err;
@@ -473,7 +474,9 @@ func (o *ApiGetExectableJobPost200ResponseInner) UnmarshalJSON(bytes []byte) (er
 
 	varApiGetExectableJobPost200ResponseInner := _ApiGetExectableJobPost200ResponseInner{}
 
-	err = json.Unmarshal(bytes, &varApiGetExectableJobPost200ResponseInner)
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varApiGetExectableJobPost200ResponseInner)
 
 	if err != nil {
 		return err

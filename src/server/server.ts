@@ -23,7 +23,7 @@ export class Server {
   private executableJobs: JobExec[] = [];
   private jobPromises: Map<
     string,
-    { resolve: (value: [number, ResultFiles]) => void; reject: (error: Error) => void }
+    { resolve: (value: [number, boolean, ResultFiles]) => void; reject: (error: Error) => void }
   > = new Map();
   constructor() {
     this.server = fastify();
@@ -55,9 +55,9 @@ export class Server {
   addBuilder(id: string, builder: Builder) {
     this.builders.set(id, builder);
   }
-  async execute(id: string, job: JobExec): Promise<[number, ResultFiles]> {
+  async execute(id: string, job: JobExec): Promise<[number, boolean, ResultFiles]> {
     this.executableJobs.push(job);
-    const promise = new Promise<[number, ResultFiles]>((resolve, reject) => {
+    const promise = new Promise<[number, boolean, ResultFiles]>((resolve, reject) => {
       this.jobPromises.set(id, { resolve, reject });
     });
     return promise;
@@ -74,10 +74,15 @@ export class Server {
       // return this.executableJobs[0];
     }
   }
-  jobfinished(id: string, ret_code: number, outputResults: { [key: string]: (File | Directory)[] }) {
+  jobfinished(
+    id: string,
+    ret_code: number,
+    isCwlOutput: boolean,
+    outputResults: { [key: string]: (File | Directory)[] },
+  ) {
     const promise = this.jobPromises.get(id);
     if (promise) {
-      promise.resolve([ret_code, outputResults]);
+      promise.resolve([ret_code, isCwlOutput, outputResults]);
       this.jobPromises.delete(id);
     }
   }

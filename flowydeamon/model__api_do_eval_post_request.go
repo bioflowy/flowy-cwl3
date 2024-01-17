@@ -12,6 +12,7 @@ package main
 
 import (
 	"encoding/json"
+	"bytes"
 	"fmt"
 )
 
@@ -22,7 +23,7 @@ var _ MappedNullable = &ApiDoEvalPostRequest{}
 type ApiDoEvalPostRequest struct {
 	Id string `json:"id"`
 	Ex string `json:"ex"`
-	Context *ApiDoEvalPostRequestContext `json:"context,omitempty"`
+	Context interface{} `json:"context,omitempty"`
 }
 
 type _ApiDoEvalPostRequest ApiDoEvalPostRequest
@@ -94,36 +95,37 @@ func (o *ApiDoEvalPostRequest) SetEx(v string) {
 	o.Ex = v
 }
 
-// GetContext returns the Context field value if set, zero value otherwise.
-func (o *ApiDoEvalPostRequest) GetContext() ApiDoEvalPostRequestContext {
-	if o == nil || IsNil(o.Context) {
-		var ret ApiDoEvalPostRequestContext
+// GetContext returns the Context field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *ApiDoEvalPostRequest) GetContext() interface{} {
+	if o == nil {
+		var ret interface{}
 		return ret
 	}
-	return *o.Context
+	return o.Context
 }
 
 // GetContextOk returns a tuple with the Context field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ApiDoEvalPostRequest) GetContextOk() (*ApiDoEvalPostRequestContext, bool) {
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *ApiDoEvalPostRequest) GetContextOk() (*interface{}, bool) {
 	if o == nil || IsNil(o.Context) {
 		return nil, false
 	}
-	return o.Context, true
+	return &o.Context, true
 }
 
 // HasContext returns a boolean if a field has been set.
 func (o *ApiDoEvalPostRequest) HasContext() bool {
-	if o != nil && !IsNil(o.Context) {
+	if o != nil && IsNil(o.Context) {
 		return true
 	}
 
 	return false
 }
 
-// SetContext gets a reference to the given ApiDoEvalPostRequestContext and assigns it to the Context field.
-func (o *ApiDoEvalPostRequest) SetContext(v ApiDoEvalPostRequestContext) {
-	o.Context = &v
+// SetContext gets a reference to the given interface{} and assigns it to the Context field.
+func (o *ApiDoEvalPostRequest) SetContext(v interface{}) {
+	o.Context = v
 }
 
 func (o ApiDoEvalPostRequest) MarshalJSON() ([]byte, error) {
@@ -138,14 +140,14 @@ func (o ApiDoEvalPostRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["id"] = o.Id
 	toSerialize["ex"] = o.Ex
-	if !IsNil(o.Context) {
+	if o.Context != nil {
 		toSerialize["context"] = o.Context
 	}
 	return toSerialize, nil
 }
 
-func (o *ApiDoEvalPostRequest) UnmarshalJSON(bytes []byte) (err error) {
-    // This validates that all required properties are included in the JSON object
+func (o *ApiDoEvalPostRequest) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
@@ -155,7 +157,7 @@ func (o *ApiDoEvalPostRequest) UnmarshalJSON(bytes []byte) (err error) {
 
 	allProperties := make(map[string]interface{})
 
-	err = json.Unmarshal(bytes, &allProperties)
+	err = json.Unmarshal(data, &allProperties)
 
 	if err != nil {
 		return err;
@@ -169,7 +171,9 @@ func (o *ApiDoEvalPostRequest) UnmarshalJSON(bytes []byte) (err error) {
 
 	varApiDoEvalPostRequest := _ApiDoEvalPostRequest{}
 
-	err = json.Unmarshal(bytes, &varApiDoEvalPostRequest)
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varApiDoEvalPostRequest)
 
 	if err != nil {
 		return err

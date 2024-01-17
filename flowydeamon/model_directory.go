@@ -12,6 +12,7 @@ package main
 
 import (
 	"encoding/json"
+	"bytes"
 	"fmt"
 )
 
@@ -26,7 +27,7 @@ type Directory struct {
 	Basename *string `json:"basename,omitempty"`
 	Dirname *string `json:"dirname,omitempty"`
 	Writable *bool `json:"writable,omitempty"`
-	Listing []FileAllOfSecondaryFilesInner `json:"listing,omitempty"`
+	Listing []DirectoryAllOfListing `json:"listing,omitempty"`
 }
 
 type _Directory Directory
@@ -234,9 +235,9 @@ func (o *Directory) SetWritable(v bool) {
 }
 
 // GetListing returns the Listing field value if set, zero value otherwise.
-func (o *Directory) GetListing() []FileAllOfSecondaryFilesInner {
+func (o *Directory) GetListing() []DirectoryAllOfListing {
 	if o == nil || IsNil(o.Listing) {
-		var ret []FileAllOfSecondaryFilesInner
+		var ret []DirectoryAllOfListing
 		return ret
 	}
 	return o.Listing
@@ -244,7 +245,7 @@ func (o *Directory) GetListing() []FileAllOfSecondaryFilesInner {
 
 // GetListingOk returns a tuple with the Listing field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *Directory) GetListingOk() ([]FileAllOfSecondaryFilesInner, bool) {
+func (o *Directory) GetListingOk() ([]DirectoryAllOfListing, bool) {
 	if o == nil || IsNil(o.Listing) {
 		return nil, false
 	}
@@ -260,8 +261,8 @@ func (o *Directory) HasListing() bool {
 	return false
 }
 
-// SetListing gets a reference to the given []FileAllOfSecondaryFilesInner and assigns it to the Listing field.
-func (o *Directory) SetListing(v []FileAllOfSecondaryFilesInner) {
+// SetListing gets a reference to the given []DirectoryAllOfListing and assigns it to the Listing field.
+func (o *Directory) SetListing(v []DirectoryAllOfListing) {
 	o.Listing = v
 }
 
@@ -297,8 +298,8 @@ func (o Directory) ToMap() (map[string]interface{}, error) {
 	return toSerialize, nil
 }
 
-func (o *Directory) UnmarshalJSON(bytes []byte) (err error) {
-    // This validates that all required properties are included in the JSON object
+func (o *Directory) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
@@ -307,7 +308,7 @@ func (o *Directory) UnmarshalJSON(bytes []byte) (err error) {
 
 	allProperties := make(map[string]interface{})
 
-	err = json.Unmarshal(bytes, &allProperties)
+	err = json.Unmarshal(data, &allProperties)
 
 	if err != nil {
 		return err;
@@ -321,7 +322,9 @@ func (o *Directory) UnmarshalJSON(bytes []byte) (err error) {
 
 	varDirectory := _Directory{}
 
-	err = json.Unmarshal(bytes, &varDirectory)
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varDirectory)
 
 	if err != nil {
 		return err
