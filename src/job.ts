@@ -28,8 +28,6 @@ import {
   type CWLObjectType,
   type OutputCallbackType,
   createTmpDir,
-  ensureWritable,
-  ensure_non_writable,
   getRequirement,
   str,
   quote,
@@ -71,11 +69,12 @@ export async function _job_popen(
   cwd: string,
   builder: Builder,
   outputBindings: OutputBinding[],
-  vols: MapperEnt[],
+  fileitems: MapperEnt[],
+  generatedlist: MapperEnt[],
   make_job_dir: () => string,
   inplace_update: boolean,
   timelimit: number | undefined = undefined,
-): Promise<[number, boolean, { [key: string]: (File | Directory)[] }]> {
+): Promise<[number, boolean, OutputPortsType]> {
   const id = uuidv4();
   const server = getServer();
   server.addBuilder(id, builder);
@@ -90,7 +89,8 @@ export async function _job_popen(
     cwd,
     builderOutdir: builder.outdir,
     outputBindings,
-    vols,
+    fileitems,
+    generatedlist,
     timelimit,
     inplace_update,
   });
@@ -289,10 +289,16 @@ export abstract class JobBase {
         commands = runtimeContext.secret_store.retrieve(commands as any) as string[];
         env = runtimeContext.secret_store.retrieve(env as any) as { [id: string]: string };
       }
-      const vols: MapperEnt[] = [];
+      const fileitems: MapperEnt[] = [];
+      if (this.builder.pathmapper) {
+        for (const [_, item] of this.builder.pathmapper.items()) {
+          fileitems.push(item);
+        }
+      }
+      const generatedlist: MapperEnt[] = [];
       if (this.generatefiles.listing) {
         if (this.generatemapper) {
-          vols.push(...this.generatemapper.items_exclude_children().map(([_key, value]) => value));
+          generatedlist.push(...this.generatemapper.items_exclude_children().map(([_key, value]) => value));
         } else {
           throw new ValueError(`'listing' in self.generatefiles but no generatemapper was setup.`);
         }
@@ -308,7 +314,8 @@ export abstract class JobBase {
         this.outdir,
         this.builder,
         outputBindings,
-        vols,
+        fileitems,
+        generatedlist,
         () => runtimeContext.createOutdir(),
         this.inplace_update,
         this.timelimit,

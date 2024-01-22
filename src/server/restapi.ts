@@ -12,11 +12,10 @@ extendZodWithOpenApi(z);
 const DoEvalRequestSchema = z.object({
   id: z.string(),
   ex: z.string(),
+  exitCode: z.number().int().optional(),
   context: z.any(),
 });
 export type DoEvalRequest = z.infer<typeof DoEvalRequestSchema>;
-const ResultFilesSchema = z.record(z.array(z.union([FileSchema, DirectorySchema])));
-export type ResultFiles = z.infer<typeof ResultFilesSchema>;
 
 export const JobFinishedRequestSchema = z
   .object({
@@ -54,7 +53,7 @@ export function appendApi(s: Server, server: fastify.FastifyInstance) {
   });
   server.post('/v1/api/do_eval', async (request, reply) => {
     const jsonData = request.body as DoEvalRequest;
-    const ret = await s.evaluate(jsonData.id, jsonData.ex, jsonData.context);
+    const ret = await s.evaluate(jsonData.id, jsonData.ex, jsonData.context, jsonData.exitCode);
     await reply.send({ result: ret });
   });
   server.post('/v1/api/getExectableJob', async (request, reply) => {

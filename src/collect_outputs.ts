@@ -152,23 +152,26 @@ export async function collect_output_ports(
     if (isCwlOutput) {
     } else {
       if (Array.isArray(ports)) {
+        const ret2 = {};
         for (let i = 0; i < ports.length; i++) {
           const port = ports[i];
           const fragment = shortname(port.id);
-          ret[fragment] = await collect_output(port, builder, outdir, ret, fs_access);
+          ret2[fragment] = await collect_output(port, builder, outdir, ret, fs_access);
         }
+        ret = ret2;
       }
     }
-    // if (ret) {
-    //   const revmap = (val) => revmap_file(builder, outdir, val);
-    //   // adjustDirObjs(ret, trim_listing);
-    //   visitFileDirectory(ret, revmap);
-    //   visitFileDirectory(ret, remove_path);
-    //   normalizeFilesDirs(ret);
-    //   const promises = [];
-    //   visitFileDirectory(ret, (val) => promises.push(checkValidLocations(fs_access, val)));
-    //   await Promise.all(promises);
-    // const expected_schema = ((this.names.get_name("outputs_record_schema", null)) as Schema);
+    if (ret) {
+      //   const revmap = (val) => revmap_file(builder, outdir, val);
+      //   // adjustDirObjs(ret, trim_listing);
+      //   visitFileDirectory(ret, revmap);
+      visitFileDirectory(ret, remove_path);
+      normalizeFilesDirs(ret);
+      const promises = [];
+      visitFileDirectory(ret, (val) => promises.push(checkValidLocations(fs_access, val)));
+      await Promise.all(promises);
+      // const expected_schema = ((this.names.get_name("outputs_record_schema", null)) as Schema);
+    }
     validate({ type: RecordType, fields }, ret, true);
     return ret || {};
   } catch (e) {

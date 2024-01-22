@@ -210,7 +210,11 @@ paths:
                       type: array
                       items:
                         $ref: '#/components/schemas/OutputBinding'
-                    vols:
+                    fileitems:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/MapperEnt'
+                    generatedlist:
                       type: array
                       items:
                         $ref: '#/components/schemas/MapperEnt'
@@ -224,7 +228,8 @@ paths:
                     - cwd
                     - builderOutdir
                     - outputBindings
-                    - vols
+                    - fileitems
+                    - generatedlist
                     - inplace_update
   /api/do_eval:
     post:
@@ -240,6 +245,8 @@ paths:
                   type: string
                 ex:
                   type: string
+                exitCode:
+                  type: integer
                 context:
                   nullable: true
               required:

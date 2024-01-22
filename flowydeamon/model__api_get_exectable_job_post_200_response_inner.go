@@ -32,7 +32,8 @@ type ApiGetExectableJobPost200ResponseInner struct {
 	BuilderOutdir string `json:"builderOutdir"`
 	Timelimit *int32 `json:"timelimit,omitempty"`
 	OutputBindings []OutputBinding `json:"outputBindings"`
-	Vols []MapperEnt `json:"vols"`
+	Fileitems []MapperEnt `json:"fileitems"`
+	Generatedlist []MapperEnt `json:"generatedlist"`
 	InplaceUpdate bool `json:"inplace_update"`
 }
 
@@ -42,7 +43,7 @@ type _ApiGetExectableJobPost200ResponseInner ApiGetExectableJobPost200ResponseIn
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewApiGetExectableJobPost200ResponseInner(id string, staging []StagingCommand, commands []string, env map[string]string, cwd string, builderOutdir string, outputBindings []OutputBinding, vols []MapperEnt, inplaceUpdate bool) *ApiGetExectableJobPost200ResponseInner {
+func NewApiGetExectableJobPost200ResponseInner(id string, staging []StagingCommand, commands []string, env map[string]string, cwd string, builderOutdir string, outputBindings []OutputBinding, fileitems []MapperEnt, generatedlist []MapperEnt, inplaceUpdate bool) *ApiGetExectableJobPost200ResponseInner {
 	this := ApiGetExectableJobPost200ResponseInner{}
 	this.Id = id
 	this.Staging = staging
@@ -51,7 +52,8 @@ func NewApiGetExectableJobPost200ResponseInner(id string, staging []StagingComma
 	this.Cwd = cwd
 	this.BuilderOutdir = builderOutdir
 	this.OutputBindings = outputBindings
-	this.Vols = vols
+	this.Fileitems = fileitems
+	this.Generatedlist = generatedlist
 	this.InplaceUpdate = inplaceUpdate
 	return &this
 }
@@ -360,28 +362,52 @@ func (o *ApiGetExectableJobPost200ResponseInner) SetOutputBindings(v []OutputBin
 	o.OutputBindings = v
 }
 
-// GetVols returns the Vols field value
-func (o *ApiGetExectableJobPost200ResponseInner) GetVols() []MapperEnt {
+// GetFileitems returns the Fileitems field value
+func (o *ApiGetExectableJobPost200ResponseInner) GetFileitems() []MapperEnt {
 	if o == nil {
 		var ret []MapperEnt
 		return ret
 	}
 
-	return o.Vols
+	return o.Fileitems
 }
 
-// GetVolsOk returns a tuple with the Vols field value
+// GetFileitemsOk returns a tuple with the Fileitems field value
 // and a boolean to check if the value has been set.
-func (o *ApiGetExectableJobPost200ResponseInner) GetVolsOk() ([]MapperEnt, bool) {
+func (o *ApiGetExectableJobPost200ResponseInner) GetFileitemsOk() ([]MapperEnt, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return o.Vols, true
+	return o.Fileitems, true
 }
 
-// SetVols sets field value
-func (o *ApiGetExectableJobPost200ResponseInner) SetVols(v []MapperEnt) {
-	o.Vols = v
+// SetFileitems sets field value
+func (o *ApiGetExectableJobPost200ResponseInner) SetFileitems(v []MapperEnt) {
+	o.Fileitems = v
+}
+
+// GetGeneratedlist returns the Generatedlist field value
+func (o *ApiGetExectableJobPost200ResponseInner) GetGeneratedlist() []MapperEnt {
+	if o == nil {
+		var ret []MapperEnt
+		return ret
+	}
+
+	return o.Generatedlist
+}
+
+// GetGeneratedlistOk returns a tuple with the Generatedlist field value
+// and a boolean to check if the value has been set.
+func (o *ApiGetExectableJobPost200ResponseInner) GetGeneratedlistOk() ([]MapperEnt, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return o.Generatedlist, true
+}
+
+// SetGeneratedlist sets field value
+func (o *ApiGetExectableJobPost200ResponseInner) SetGeneratedlist(v []MapperEnt) {
+	o.Generatedlist = v
 }
 
 // GetInplaceUpdate returns the InplaceUpdate field value
@@ -437,7 +463,8 @@ func (o ApiGetExectableJobPost200ResponseInner) ToMap() (map[string]interface{},
 		toSerialize["timelimit"] = o.Timelimit
 	}
 	toSerialize["outputBindings"] = o.OutputBindings
-	toSerialize["vols"] = o.Vols
+	toSerialize["fileitems"] = o.Fileitems
+	toSerialize["generatedlist"] = o.Generatedlist
 	toSerialize["inplace_update"] = o.InplaceUpdate
 	return toSerialize, nil
 }
@@ -454,7 +481,8 @@ func (o *ApiGetExectableJobPost200ResponseInner) UnmarshalJSON(data []byte) (err
 		"cwd",
 		"builderOutdir",
 		"outputBindings",
-		"vols",
+		"fileitems",
+		"generatedlist",
 		"inplace_update",
 	}
 

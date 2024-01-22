@@ -23,6 +23,7 @@ var _ MappedNullable = &ApiDoEvalPostRequest{}
 type ApiDoEvalPostRequest struct {
 	Id string `json:"id"`
 	Ex string `json:"ex"`
+	ExitCode *int32 `json:"exitCode,omitempty"`
 	Context interface{} `json:"context,omitempty"`
 }
 
@@ -95,6 +96,38 @@ func (o *ApiDoEvalPostRequest) SetEx(v string) {
 	o.Ex = v
 }
 
+// GetExitCode returns the ExitCode field value if set, zero value otherwise.
+func (o *ApiDoEvalPostRequest) GetExitCode() int32 {
+	if o == nil || IsNil(o.ExitCode) {
+		var ret int32
+		return ret
+	}
+	return *o.ExitCode
+}
+
+// GetExitCodeOk returns a tuple with the ExitCode field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ApiDoEvalPostRequest) GetExitCodeOk() (*int32, bool) {
+	if o == nil || IsNil(o.ExitCode) {
+		return nil, false
+	}
+	return o.ExitCode, true
+}
+
+// HasExitCode returns a boolean if a field has been set.
+func (o *ApiDoEvalPostRequest) HasExitCode() bool {
+	if o != nil && !IsNil(o.ExitCode) {
+		return true
+	}
+
+	return false
+}
+
+// SetExitCode gets a reference to the given int32 and assigns it to the ExitCode field.
+func (o *ApiDoEvalPostRequest) SetExitCode(v int32) {
+	o.ExitCode = &v
+}
+
 // GetContext returns the Context field value if set, zero value otherwise (both if not set or set to explicit null).
 func (o *ApiDoEvalPostRequest) GetContext() interface{} {
 	if o == nil {
@@ -140,6 +173,9 @@ func (o ApiDoEvalPostRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["id"] = o.Id
 	toSerialize["ex"] = o.Ex
+	if !IsNil(o.ExitCode) {
+		toSerialize["exitCode"] = o.ExitCode
+	}
 	if o.Context != nil {
 		toSerialize["context"] = o.Context
 	}

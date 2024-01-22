@@ -4,11 +4,12 @@ import fastify from 'fastify';
 import jsYaml from 'js-yaml';
 import { JobExec } from '../JobExecutor.js';
 import { Builder } from '../builder.js';
+import { OutputPortsType } from '../collect_outputs.js';
 import { Directory, File } from '../cwltypes.js';
 import { WorkflowException } from '../errors.js';
 import { CWLOutputType } from '../utils.js';
 import { ServerConfig, ServerConfigSchema } from './config.js';
-import { ResultFiles, appendApi, createDocument } from './restapi.js';
+import { appendApi, createDocument } from './restapi.js';
 import { appRouter } from './router.js';
 
 let config: ServerConfig;
@@ -23,7 +24,7 @@ export class Server {
   private executableJobs: JobExec[] = [];
   private jobPromises: Map<
     string,
-    { resolve: (value: [number, boolean, ResultFiles]) => void; reject: (error: Error) => void }
+    { resolve: (value: [number, boolean, OutputPortsType]) => void; reject: (error: Error) => void }
   > = new Map();
   constructor() {
     this.server = fastify();
@@ -55,15 +56,18 @@ export class Server {
   addBuilder(id: string, builder: Builder) {
     this.builders.set(id, builder);
   }
-  async execute(id: string, job: JobExec): Promise<[number, boolean, ResultFiles]> {
+  async execute(id: string, job: JobExec): Promise<[number, boolean, OutputPortsType]> {
     this.executableJobs.push(job);
-    const promise = new Promise<[number, boolean, ResultFiles]>((resolve, reject) => {
+    const promise = new Promise<[number, boolean, OutputPortsType]>((resolve, reject) => {
       this.jobPromises.set(id, { resolve, reject });
     });
     return promise;
   }
-  async evaluate(id: string, ex: string, context: File | Directory): Promise<CWLOutputType> {
+  async evaluate(id: string, ex: string, context: File | Directory, exitCode?: number): Promise<CWLOutputType> {
     const builder = this.builders.get(id);
+    if (exitCode != undefined) {
+      builder.resources['exitCode'] = exitCode;
+    }
     return builder.do_eval(ex, context, false);
   }
   getExecutableJob(): JobExec | undefined {
