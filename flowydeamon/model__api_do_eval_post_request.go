@@ -12,6 +12,7 @@ package main
 
 import (
 	"encoding/json"
+	"bytes"
 	"fmt"
 )
 
@@ -22,7 +23,8 @@ var _ MappedNullable = &ApiDoEvalPostRequest{}
 type ApiDoEvalPostRequest struct {
 	Id string `json:"id"`
 	Ex string `json:"ex"`
-	Context *ApiDoEvalPostRequestContext `json:"context,omitempty"`
+	ExitCode *int32 `json:"exitCode,omitempty"`
+	Context interface{} `json:"context,omitempty"`
 }
 
 type _ApiDoEvalPostRequest ApiDoEvalPostRequest
@@ -94,36 +96,69 @@ func (o *ApiDoEvalPostRequest) SetEx(v string) {
 	o.Ex = v
 }
 
-// GetContext returns the Context field value if set, zero value otherwise.
-func (o *ApiDoEvalPostRequest) GetContext() ApiDoEvalPostRequestContext {
-	if o == nil || IsNil(o.Context) {
-		var ret ApiDoEvalPostRequestContext
+// GetExitCode returns the ExitCode field value if set, zero value otherwise.
+func (o *ApiDoEvalPostRequest) GetExitCode() int32 {
+	if o == nil || IsNil(o.ExitCode) {
+		var ret int32
 		return ret
 	}
-	return *o.Context
+	return *o.ExitCode
 }
 
-// GetContextOk returns a tuple with the Context field value if set, nil otherwise
+// GetExitCodeOk returns a tuple with the ExitCode field value if set, nil otherwise
 // and a boolean to check if the value has been set.
-func (o *ApiDoEvalPostRequest) GetContextOk() (*ApiDoEvalPostRequestContext, bool) {
-	if o == nil || IsNil(o.Context) {
+func (o *ApiDoEvalPostRequest) GetExitCodeOk() (*int32, bool) {
+	if o == nil || IsNil(o.ExitCode) {
 		return nil, false
 	}
-	return o.Context, true
+	return o.ExitCode, true
 }
 
-// HasContext returns a boolean if a field has been set.
-func (o *ApiDoEvalPostRequest) HasContext() bool {
-	if o != nil && !IsNil(o.Context) {
+// HasExitCode returns a boolean if a field has been set.
+func (o *ApiDoEvalPostRequest) HasExitCode() bool {
+	if o != nil && !IsNil(o.ExitCode) {
 		return true
 	}
 
 	return false
 }
 
-// SetContext gets a reference to the given ApiDoEvalPostRequestContext and assigns it to the Context field.
-func (o *ApiDoEvalPostRequest) SetContext(v ApiDoEvalPostRequestContext) {
-	o.Context = &v
+// SetExitCode gets a reference to the given int32 and assigns it to the ExitCode field.
+func (o *ApiDoEvalPostRequest) SetExitCode(v int32) {
+	o.ExitCode = &v
+}
+
+// GetContext returns the Context field value if set, zero value otherwise (both if not set or set to explicit null).
+func (o *ApiDoEvalPostRequest) GetContext() interface{} {
+	if o == nil {
+		var ret interface{}
+		return ret
+	}
+	return o.Context
+}
+
+// GetContextOk returns a tuple with the Context field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+// NOTE: If the value is an explicit nil, `nil, true` will be returned
+func (o *ApiDoEvalPostRequest) GetContextOk() (*interface{}, bool) {
+	if o == nil || IsNil(o.Context) {
+		return nil, false
+	}
+	return &o.Context, true
+}
+
+// HasContext returns a boolean if a field has been set.
+func (o *ApiDoEvalPostRequest) HasContext() bool {
+	if o != nil && IsNil(o.Context) {
+		return true
+	}
+
+	return false
+}
+
+// SetContext gets a reference to the given interface{} and assigns it to the Context field.
+func (o *ApiDoEvalPostRequest) SetContext(v interface{}) {
+	o.Context = v
 }
 
 func (o ApiDoEvalPostRequest) MarshalJSON() ([]byte, error) {
@@ -138,14 +173,17 @@ func (o ApiDoEvalPostRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["id"] = o.Id
 	toSerialize["ex"] = o.Ex
-	if !IsNil(o.Context) {
+	if !IsNil(o.ExitCode) {
+		toSerialize["exitCode"] = o.ExitCode
+	}
+	if o.Context != nil {
 		toSerialize["context"] = o.Context
 	}
 	return toSerialize, nil
 }
 
-func (o *ApiDoEvalPostRequest) UnmarshalJSON(bytes []byte) (err error) {
-    // This validates that all required properties are included in the JSON object
+func (o *ApiDoEvalPostRequest) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
@@ -155,7 +193,7 @@ func (o *ApiDoEvalPostRequest) UnmarshalJSON(bytes []byte) (err error) {
 
 	allProperties := make(map[string]interface{})
 
-	err = json.Unmarshal(bytes, &allProperties)
+	err = json.Unmarshal(data, &allProperties)
 
 	if err != nil {
 		return err;
@@ -169,7 +207,9 @@ func (o *ApiDoEvalPostRequest) UnmarshalJSON(bytes []byte) (err error) {
 
 	varApiDoEvalPostRequest := _ApiDoEvalPostRequest{}
 
-	err = json.Unmarshal(bytes, &varApiDoEvalPostRequest)
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varApiDoEvalPostRequest)
 
 	if err != nil {
 		return err

@@ -12,6 +12,7 @@ package main
 
 import (
 	"encoding/json"
+	"bytes"
 	"fmt"
 )
 
@@ -21,8 +22,9 @@ var _ MappedNullable = &JobFinishedRequest{}
 // JobFinishedRequest struct for JobFinishedRequest
 type JobFinishedRequest struct {
 	Id string `json:"id"`
+	IsCwlOutput bool `json:"isCwlOutput"`
 	ExitCode int32 `json:"exitCode"`
-	Results map[string][]ApiDoEvalPostRequestContext `json:"results"`
+	Results map[string]interface{} `json:"results"`
 }
 
 type _JobFinishedRequest JobFinishedRequest
@@ -31,9 +33,10 @@ type _JobFinishedRequest JobFinishedRequest
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewJobFinishedRequest(id string, exitCode int32, results map[string][]ApiDoEvalPostRequestContext) *JobFinishedRequest {
+func NewJobFinishedRequest(id string, isCwlOutput bool, exitCode int32, results map[string]interface{}) *JobFinishedRequest {
 	this := JobFinishedRequest{}
 	this.Id = id
+	this.IsCwlOutput = isCwlOutput
 	this.ExitCode = exitCode
 	this.Results = results
 	return &this
@@ -71,6 +74,30 @@ func (o *JobFinishedRequest) SetId(v string) {
 	o.Id = v
 }
 
+// GetIsCwlOutput returns the IsCwlOutput field value
+func (o *JobFinishedRequest) GetIsCwlOutput() bool {
+	if o == nil {
+		var ret bool
+		return ret
+	}
+
+	return o.IsCwlOutput
+}
+
+// GetIsCwlOutputOk returns a tuple with the IsCwlOutput field value
+// and a boolean to check if the value has been set.
+func (o *JobFinishedRequest) GetIsCwlOutputOk() (*bool, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.IsCwlOutput, true
+}
+
+// SetIsCwlOutput sets field value
+func (o *JobFinishedRequest) SetIsCwlOutput(v bool) {
+	o.IsCwlOutput = v
+}
+
 // GetExitCode returns the ExitCode field value
 func (o *JobFinishedRequest) GetExitCode() int32 {
 	if o == nil {
@@ -96,9 +123,9 @@ func (o *JobFinishedRequest) SetExitCode(v int32) {
 }
 
 // GetResults returns the Results field value
-func (o *JobFinishedRequest) GetResults() map[string][]ApiDoEvalPostRequestContext {
+func (o *JobFinishedRequest) GetResults() map[string]interface{} {
 	if o == nil {
-		var ret map[string][]ApiDoEvalPostRequestContext
+		var ret map[string]interface{}
 		return ret
 	}
 
@@ -107,15 +134,15 @@ func (o *JobFinishedRequest) GetResults() map[string][]ApiDoEvalPostRequestConte
 
 // GetResultsOk returns a tuple with the Results field value
 // and a boolean to check if the value has been set.
-func (o *JobFinishedRequest) GetResultsOk() (*map[string][]ApiDoEvalPostRequestContext, bool) {
+func (o *JobFinishedRequest) GetResultsOk() (map[string]interface{}, bool) {
 	if o == nil {
-		return nil, false
+		return map[string]interface{}{}, false
 	}
-	return &o.Results, true
+	return o.Results, true
 }
 
 // SetResults sets field value
-func (o *JobFinishedRequest) SetResults(v map[string][]ApiDoEvalPostRequestContext) {
+func (o *JobFinishedRequest) SetResults(v map[string]interface{}) {
 	o.Results = v
 }
 
@@ -130,24 +157,26 @@ func (o JobFinishedRequest) MarshalJSON() ([]byte, error) {
 func (o JobFinishedRequest) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["id"] = o.Id
+	toSerialize["isCwlOutput"] = o.IsCwlOutput
 	toSerialize["exitCode"] = o.ExitCode
 	toSerialize["results"] = o.Results
 	return toSerialize, nil
 }
 
-func (o *JobFinishedRequest) UnmarshalJSON(bytes []byte) (err error) {
-    // This validates that all required properties are included in the JSON object
+func (o *JobFinishedRequest) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
 		"id",
+		"isCwlOutput",
 		"exitCode",
 		"results",
 	}
 
 	allProperties := make(map[string]interface{})
 
-	err = json.Unmarshal(bytes, &allProperties)
+	err = json.Unmarshal(data, &allProperties)
 
 	if err != nil {
 		return err;
@@ -161,7 +190,9 @@ func (o *JobFinishedRequest) UnmarshalJSON(bytes []byte) (err error) {
 
 	varJobFinishedRequest := _JobFinishedRequest{}
 
-	err = json.Unmarshal(bytes, &varJobFinishedRequest)
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varJobFinishedRequest)
 
 	if err != nil {
 		return err

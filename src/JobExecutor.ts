@@ -63,7 +63,8 @@ export const JobExecSchema = z.object({
   builderOutdir: z.string(),
   timelimit: z.number().int().optional(),
   outputBindings: z.array(OutputBindingSchema),
-  vols: z.array(MapperEntSchema),
+  fileitems: z.array(MapperEntSchema),
+  generatedlist: z.array(MapperEntSchema),
   inplace_update: z.boolean(),
 });
 export type JobExec = z.infer<typeof JobExecSchema>;

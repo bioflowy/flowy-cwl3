@@ -32,7 +32,7 @@ import {
   visitFileDirectory,
 } from './utils.js';
 import { validate } from './validate.js';
-interface OutputPortsType {
+export interface OutputPortsType {
   [key: string]: CWLOutputType | undefined;
 }
 function remove_path(f: File | Directory): void {
@@ -121,52 +121,59 @@ export async function collect_output_ports(
   builder: Builder,
   outdir: string,
   rcode: number,
-  outfiles: { [key: string]: (File | Directory)[] },
+  isCwlOutput: boolean,
+  ret: OutputPortsType,
   _jobname: string,
 ): Promise<OutputPortsType> {
-  let ret: OutputPortsType = {};
-  const debug = _logger.isDebugEnabled();
+  // const ret: OutputPortsType = {};
+  // const debug = _logger.isDebugEnabled();
   builder.resources['exitCode'] = rcode;
 
   try {
     // eslint-disable-next-line new-cap
     const fs_access = new builder.make_fs_access(outdir);
-    if (outfiles['cwl.output.json']) {
-      const outjsons = outfiles['cwl.output.json'];
-      if (!(outjsons.length == 1 && isFile(outjsons[0]))) {
-        throw new WorkflowException('Expected cwl.output.json to be a single file');
-      }
-      const outjson = outjsons[0];
-      if (outjson.size > CONTENT_LIMIT) {
-        const jsonString = await contentLimitRespectedReadBytes(outjson.location, true);
-        ret = JSON.parse(jsonString);
-      } else {
-        ret = JSON.parse(outjson.contents);
-      }
-      if (debug) {
-        _logger.debug(`Raw output from ${outjson.location}: ${JSON.stringify(ret, null, 4)}`);
-      }
-      convertDictToFileDirectory(ret);
-    } else if (Array.isArray(ports)) {
-      for (let i = 0; i < ports.length; i++) {
-        const port = ports[i];
-        const fragment = shortname(port.id);
-        ret[fragment] = await collect_output(port, builder, outdir, outfiles, fs_access);
+    // if (outfiles['cwl.output.json']) {
+    //   const outjsons = outfiles['cwl.output.json'];
+    //   if (!(outjsons.length == 1 && isFile(outjsons[0]))) {
+    //     throw new WorkflowException('Expected cwl.output.json to be a single file');
+    //   }
+    //   const outjson = outjsons[0];
+    //   if (outjson.size > CONTENT_LIMIT) {
+    //     const jsonString = await contentLimitRespectedReadBytes(outjson.location, true);
+    //     ret = JSON.parse(jsonString);
+    //   } else {
+    //     ret = JSON.parse(outjson.contents);
+    //   }
+    //   if (debug) {
+    //     _logger.debug(`Raw output from ${outjson.location}: ${JSON.stringify(ret, null, 4)}`);
+    //   }
+    //   convertDictToFileDirectory(ret);
+    // } else
+    if (isCwlOutput) {
+    } else {
+      if (Array.isArray(ports)) {
+        const ret2 = {};
+        for (let i = 0; i < ports.length; i++) {
+          const port = ports[i];
+          const fragment = shortname(port.id);
+          ret2[fragment] = await collect_output(port, builder, outdir, ret, fs_access);
+        }
+        ret = ret2;
       }
     }
     if (ret) {
-      const revmap = (val) => revmap_file(builder, outdir, val);
-      // adjustDirObjs(ret, trim_listing);
-      visitFileDirectory(ret, revmap);
+      //   const revmap = (val) => revmap_file(builder, outdir, val);
+      //   // adjustDirObjs(ret, trim_listing);
+      //   visitFileDirectory(ret, revmap);
       visitFileDirectory(ret, remove_path);
       normalizeFilesDirs(ret);
       const promises = [];
       visitFileDirectory(ret, (val) => promises.push(checkValidLocations(fs_access, val)));
       await Promise.all(promises);
       // const expected_schema = ((this.names.get_name("outputs_record_schema", null)) as Schema);
-      validate({ type: RecordType, fields }, ret, true);
-      return ret || {};
     }
+    validate({ type: RecordType, fields }, ret, true);
+    return ret || {};
   } catch (e) {
     if (e instanceof Error) {
       _logger.warn(`Error collecting output: ${e.stack}`);
@@ -176,7 +183,6 @@ export async function collect_output_ports(
     }
     throw e;
   }
-  return ret;
 }
 async function handle_output_format(
   schema: CommandOutputParameter,
@@ -210,7 +216,7 @@ async function collect_output(
   schema: CommandOutputParameter,
   builder: Builder,
   outdir: string,
-  outfiles: { [key: string]: (File | Directory)[] },
+  outfiles: OutputPortsType,
   fs_access: StdFsAccess,
   compute_checksum = true,
 ): Promise<CWLOutputType | undefined> {
@@ -219,7 +225,6 @@ async function collect_output(
   let result: CWLOutputType | undefined = undefined;
   if (schema.outputBinding) {
     const binding = schema.outputBinding;
-    const revmap = revmap_file.bind(null, builder, outdir);
     const r = outfiles[schema.name];
     let optional = false;
     let single = false;
@@ -233,11 +238,11 @@ async function collect_output(
     } else if (schema.type === 'File' || schema.type === 'Directory') {
       single = true;
     }
-    if (binding.outputEval) {
-      result = await builder.do_eval(binding.outputEval, r);
-    } else {
-      result = r as CWLOutputType;
-    }
+    // if (binding.outputEval) {
+    //   result = await builder.do_eval(binding.outputEval, r);
+    // } else {
+    result = r as CWLOutputType;
+    // }
     if (single) {
       try {
         if (!result && !optional) {

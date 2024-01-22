@@ -827,13 +827,14 @@ export class CommandLineTool extends Process {
     await this.setup_command_line(builder, j);
 
     j.pathmapper = builder.pathmapper;
-    j.collect_outputs = async (outdir, rcode, fileMap) =>
+    j.collect_outputs = async (outdir, rcode, isCwlOutput, fileMap) =>
       collect_output_ports(
         this.tool.outputs,
         this.outputs_record_schema.type.fields,
         builder,
         outdir,
         rcode,
+        isCwlOutput,
         fileMap,
         jobname,
       );

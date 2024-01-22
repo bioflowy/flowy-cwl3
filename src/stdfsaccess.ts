@@ -24,6 +24,12 @@ export function abspath(src: string, basedir: string): string {
   } else {
     if (basedir.startsWith('file://')) {
       basedir = url.fileURLToPath(basedir);
+    } else if (basedir.startsWith('s3://')) {
+      if (basedir.endsWith('/')) {
+        return `${basedir}${src}`;
+      } else {
+        return `${basedir}/${src}`;
+      }
     }
     abpath = path.isAbsolute(src) ? src : path.join(basedir, src);
   }
